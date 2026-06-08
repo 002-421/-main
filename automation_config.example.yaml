@@ -1,0 +1,53 @@
+# Скопируйте файл в automation_config.yaml и замените URL/селекторы под ваш сайт.
+site_name: "Выгрузка отчета в Excel"
+headless: true
+slow_mo_ms: 100
+timeout_ms: 30000
+# Можно заменить на абсолютный путь, например "D:/Reports/Excel".
+download_dir: "downloads"
+default_excel_name: "report_{timestamp}.xlsx"
+
+steps:
+  # 1. Открыть страницу входа или страницу отчета.
+  - action: goto
+    url: "${EXPORT_SITE_URL:-https://example.com/login}"
+
+  # 2. Заполнить логин и пароль. Значения можно брать из переменных окружения.
+  - action: fill
+    selector: "input[name='username']"
+    value: "${EXPORT_SITE_USER:-demo_user}"
+
+  - action: fill
+    selector: "input[name='password']"
+    value: "${EXPORT_SITE_PASSWORD:-demo_password}"
+
+  # 3. Нажать кнопку входа и дождаться страницы с отчетом.
+  - action: click
+    selector: "button[type='submit']"
+
+  - action: wait_for_selector
+    selector: "#report-filter"
+
+  # 4. Выставить поля/фильтры отчета в нужной очередности.
+  - action: fill
+    selector: "input[name='date_from']"
+    value: "2026-06-01"
+
+  - action: fill
+    selector: "input[name='date_to']"
+    value: "2026-06-08"
+
+  - action: select
+    selector: "select[name='status']"
+    value: "all"
+
+  - action: click
+    selector: "button[data-testid='apply-filters']"
+
+  - action: wait_for_selector
+    selector: "table.report-table"
+
+  # 5. Нажать кнопку экспорта и сохранить Excel-файл.
+  - action: download_click
+    selector: "button[data-testid='export-excel']"
+    save_as: "report_{timestamp}.xlsx"

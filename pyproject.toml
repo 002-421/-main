@@ -1,0 +1,22 @@
+[project]
+name = "excel-export-automation"
+version = "0.1.0"
+description = "Configurable browser automation for exporting Excel files from websites."
+requires-python = ">=3.10"
+dependencies = [
+  "playwright>=1.44",
+  "PyYAML>=6.0",
+]
+
+[project.scripts]
+excel-export-automation = "excel_export_automation.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
