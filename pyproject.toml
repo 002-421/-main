@@ -10,6 +10,7 @@ dependencies = [
 
 [project.scripts]
 excel-export-automation = "excel_export_automation.__main__:main"
+adx-monitor = "adx_monitor.__main__:main"
 
 [build-system]
 requires = ["setuptools>=68"]
