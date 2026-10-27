@@ -5,7 +5,7 @@ try {
     if ([string]::IsNullOrWhiteSpace($package)) { $package = $PSScriptRoot }
     $desktop = [Environment]::GetFolderPath('Desktop')
     if ([string]::IsNullOrWhiteSpace($desktop)) { throw 'Desktop folder is unavailable.' }
-    $parent = Join-Path $desktop 'MRI Report Studio'
+    $parent = Join-Path $desktop 'MRI Alliance'
     $stem = 'App_' + (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss')
     $destination = Join-Path $parent $stem
     $i = 1
@@ -13,7 +13,7 @@ try {
         $destination = Join-Path $parent ($stem + '_' + $i)
         $i++
     }
-    $temporary = Join-Path ([IO.Path]::GetTempPath()) ('MRIStudio_' + [guid]::NewGuid().ToString('N'))
+    $temporary = Join-Path ([IO.Path]::GetTempPath()) ('MRIAlliance_' + [guid]::NewGuid().ToString('N'))
     [void][IO.Directory]::CreateDirectory($temporary)
     try {
         $archive = Join-Path $temporary 'electron.zip'
@@ -27,7 +27,7 @@ try {
         Expand-Archive -LiteralPath $archive -DestinationPath $stage
         $appTarget = Join-Path $stage 'resources/app'
         Copy-Item -LiteralPath (Join-Path $package 'app') -Destination $appTarget -Recurse
-        Rename-Item -LiteralPath (Join-Path $stage 'electron.exe') -NewName 'MRI Report Studio.exe'
+        Rename-Item -LiteralPath (Join-Path $stage 'electron.exe') -NewName 'MRI Alliance.exe'
         Copy-Item -LiteralPath (Join-Path $package 'README_RU.txt') -Destination (Join-Path $stage 'README_RU.txt')
         if (Test-Path -LiteralPath (Join-Path $package 'THIRD_PARTY_LICENSES.txt')) {
             Copy-Item -LiteralPath (Join-Path $package 'THIRD_PARTY_LICENSES.txt') -Destination (Join-Path $stage 'THIRD_PARTY_LICENSES.txt')
@@ -38,7 +38,7 @@ try {
         if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force }
     }
     Write-Host ('Installed: ' + $destination) -ForegroundColor Green
-    Start-Process -FilePath (Join-Path $destination 'MRI Report Studio.exe')
+    Start-Process -FilePath (Join-Path $destination 'MRI Alliance.exe')
     Start-Process explorer.exe -ArgumentList ('"' + $destination + '"')
 } catch {
     Write-Host ('Installation failed: ' + $_.Exception.Message) -ForegroundColor Red

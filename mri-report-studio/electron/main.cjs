@@ -2,7 +2,9 @@ const { app, BrowserWindow, ipcMain, dialog, clipboard, ClipboardItem, session }
 const path = require('node:path');
 const fs = require('node:fs/promises');
 
-app.setName('MRI Report Studio');
+// Keep the existing profile path so the rename preserves drafts and settings.
+if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
+app.setName('МРТ Альянс');
 let mainWindow;
 
 function requireMain(event) {
@@ -22,7 +24,7 @@ app.whenReady().then(() => {
 
   mainWindow = new BrowserWindow({
     width: 1500, height: 1000, minWidth: 900, minHeight: 650,
-    title: 'МРТ · Студия описаний', backgroundColor: '#eef1f5',
+    title: 'МРТ Альянс', backgroundColor: '#eef1f5',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

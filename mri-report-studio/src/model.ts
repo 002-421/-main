@@ -36,15 +36,16 @@ export function section(id: string, title: string, content: RichNode[], moduleId
   return { type: 'reportSection', attrs: { id, title, moduleId }, content };
 }
 
-export function compiler(prefix: string) {
+export function compiler(prefix: string, reservedIds: readonly number[] = []) {
   let count = 0;
   const compile = (text: string, attrs?: Record<string, any>): RichNode => {
     const content: RichNode[] = [];
     for (const part of text.split(/(\[\[.*?\]\])/g)) {
       if (!part) continue;
       if (part.startsWith('[[') && part.endsWith(']]')) {
+        do { count++; } while (reservedIds.includes(count));
         content.push({ type: 'reportField', attrs: {
-          id: `${prefix}.${++count}`, hint: part.slice(2, -2), value: '',
+          id: `${prefix}.${count}`, hint: part.slice(2, -2), value: '',
         } });
       } else content.push({ type: 'text', text: part });
     }
@@ -81,9 +82,11 @@ export function moduleNode(module: Module, instance = module.id): { body: RichNo
   return { body: section(instance, module.title, body, module.id), conclusion };
 }
 
-export function makeDocument(profileId = 'brain', library = builtinModules): RichNode {
+export function makeDocument(profileId = 'brain', library = builtinModules, templateOverride?: RichNode): RichNode {
+  if (templateOverride) return validateTemplate(templateOverride);
   const profile = profiles.find(p => p.id === profileId) ?? profiles[0];
-  const compile = compiler('base');
+  // Keep existing patient and study field identities when retiring age and clinical goal.
+  const compile = compiler('base', [3, 6]);
   const content: RichNode[] = [];
   const metaRows = templates.core[0].sections[0].table!.map(row => [...row]);
   metaRows[3][1] = profile.reportTitle;
@@ -171,6 +174,198 @@ export function validateLibrary(input: unknown): Module[] {
   });
 }
 
+/** Upgrade the two retired header entries without rebuilding an existing report. */
+export function migrateLegacyHeader(doc: RichNode): RichNode {
+  const next = structuredClone(doc);
+  const header = next.content?.find(n => n.type === 'reportSection' && n.attrs?.id === 'header');
+  if (!header) return next;
+  const nodeText = (n: RichNode): string => n.text ?? n.content?.map(nodeText).join('') ?? '';
+  const label = (n: RichNode) => nodeText(n).trim().toLowerCase().replace(/\s*\/\s*/g, ' / ').replace(/\s+/g, ' ');
+  function removeAge(node: RichNode) {
+    if (!node.content) return;
+    const kept: RichNode[] = [];
+    for (const child of node.content) {
+      if (child.type === 'reportField' && (child.attrs?.id === 'base.3' || child.attrs?.hint?.trim().toLowerCase() === 'полных лет')) {
+        const separator = kept.at(-1);
+        if (separator?.type === 'text' && /\/\s*$/.test(separator.text ?? '')) {
+          separator.text = separator.text!.replace(/\s*\/\s*$/, '');
+          if (!separator.text) kept.pop();
+        }
+        continue;
+      }
+      removeAge(child);
+      kept.push(child);
+    }
+    node.content = kept;
+  }
+  function walk(node: RichNode) {
+    if (node.type === 'table') {
+      node.content = node.content?.filter(row => {
+        const name = row.content?.[0] && label(row.content[0]);
+        if (name === 'клинические сведения / цель') return false;
+        if (name === 'дата рождения / возраст') {
+          const cell = row.content![0];
+          // The original label is one text run. Keep its formatting when changing it.
+          let replaced = false;
+          function rename(n: RichNode) {
+            if (n.type === 'text') {
+              n.text = replaced ? '' : 'Дата рождения';
+              replaced = true;
+            }
+            n.content?.forEach(rename);
+            if (n.content) n.content = n.content.filter(c => c.type !== 'text' || c.text);
+          }
+          rename(cell);
+          row.content!.slice(1).forEach(removeAge);
+        }
+        return true;
+      });
+    }
+    node.content?.forEach(walk);
+  }
+  walk(header);
+  return next;
+}
+
+const blockTypes = new Set(['paragraph', 'heading', 'reportSection', 'blockquote', 'bulletList', 'orderedList', 'codeBlock', 'horizontalRule', 'table']);
+const inlineTypes = new Set(['text', 'reportField', 'hardBreak']);
+const simpleMarks = new Set(['bold', 'italic', 'underline', 'strike', 'code']);
+
+/** Validate a reusable rich template and return a safe copy with every patient value cleared. */
+export function validateTemplate(input: unknown): RichNode {
+  let count = 0;
+  let textSize = 0;
+  const fieldIds = new Set<string>();
+  const sectionIds = new Set<string>();
+  const fail = (): never => { throw new Error('Некорректный шаблон: проверьте разделы, поля и форматирование.'); };
+  function string(value: unknown, max: number): string {
+    if (typeof value !== 'string' || value.length > max || (textSize += value.length) > 2_000_000) return fail();
+    return value;
+  }
+  function id(value: unknown, ids?: Set<string>): string {
+    const result = string(value, 120);
+    if (!/^[A-Za-z0-9_.:-]+$/.test(result) || ids?.has(result)) return fail();
+    ids?.add(result);
+    return result;
+  }
+  function color(value: unknown): string | undefined {
+    if (value == null) return undefined;
+    const result = string(value, 100);
+    return /^(#[\da-f]{3,8}|[a-z]+|(?:rgb|hsl)a?\([\d.,%\s+-]+\))$/i.test(result) ? result : undefined;
+  }
+  function marks(raw: unknown): RichNode['marks'] {
+    if (raw === undefined) return undefined;
+    if (!Array.isArray(raw) || raw.length > 20) return fail();
+    const seen = new Set<string>();
+    return raw.flatMap((mark: any): NonNullable<RichNode['marks']> => {
+      if (!mark || typeof mark.type !== 'string' || seen.has(mark.type)) return fail();
+      seen.add(mark.type);
+      if (simpleMarks.has(mark.type)) return [{ type: mark.type }];
+      const a = mark.attrs ?? {};
+      if (!a || typeof a !== 'object' || Array.isArray(a)) return fail();
+      if (mark.type === 'highlight') {
+        const value = color(a.color);
+        return [{ type: mark.type, ...(value ? { attrs: { color: value } } : {}) }];
+      }
+      if (mark.type === 'textStyle') {
+        const attrs: Record<string, string> = {};
+        for (const key of ['color', 'backgroundColor']) {
+          const value = color(a[key]);
+          if (value) attrs[key] = value;
+        }
+        if (a.fontFamily != null) {
+          const value = string(a.fontFamily, 200);
+          if (/^[\p{L}\d\s,'"_-]+$/u.test(value)) attrs.fontFamily = value;
+        }
+        for (const key of ['fontSize', 'lineHeight']) {
+          if (a[key] == null) continue;
+          const value = string(a[key], 30);
+          if (/^\d{1,3}(?:\.\d{1,5})?(?:px|pt|em|rem|%)?$/.test(value)) attrs[key] = value;
+        }
+        return Object.keys(attrs).length ? [{ type: mark.type, attrs }] : [];
+      }
+      if (mark.type === 'link') {
+        const href = string(a.href, 2000);
+        if (!/^(https?:|mailto:|tel:|#|\/(?!\/)|\.{1,2}\/)/i.test(href) || /[\u0000-\u0020]/.test(href)) return [];
+        return [{ type: mark.type, attrs: { href, target: '_blank', rel: 'noopener noreferrer nofollow' } }];
+      }
+      return fail();
+    });
+  }
+  function node(raw: any, depth = 0): RichNode {
+    if (++count > 20000 || depth > 30 || !raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.type !== 'string') return fail();
+    const type = raw.type;
+    if (!(type === 'doc' || blockTypes.has(type) || inlineTypes.has(type) || ['listItem', 'tableRow', 'tableHeader', 'tableCell'].includes(type))) return fail();
+    const attrs: Record<string, any> = {};
+    const a = raw.attrs ?? {};
+    if (!a || typeof a !== 'object' || Array.isArray(a)) return fail();
+    if (type === 'reportSection') {
+      attrs.id = id(a.id, sectionIds);
+      attrs.title = string(a.title, 300);
+      attrs.moduleId = a.moduleId ? id(a.moduleId) : '';
+    } else if (type === 'reportField') {
+      attrs.id = id(a.id, fieldIds);
+      attrs.hint = string(a.hint, 2000);
+      string(a.value ?? '', 100000);
+      attrs.value = '';
+    } else if (type === 'heading') {
+      if (![1, 2, 3].includes(a.level)) return fail();
+      attrs.level = a.level;
+    } else if (type === 'orderedList' && a.start !== undefined) {
+      if (!Number.isInteger(a.start) || a.start < 1 || a.start > 100000) return fail();
+      attrs.start = a.start;
+    } else if (type === 'codeBlock' && a.language != null) {
+      const language = string(a.language, 60);
+      if (!/^[\w+-]*$/.test(language)) return fail();
+      attrs.language = language;
+    } else if (type === 'tableCell' || type === 'tableHeader') {
+      for (const key of ['colspan', 'rowspan']) {
+        if (a[key] === undefined) continue;
+        if (!Number.isInteger(a[key]) || a[key] < 1 || a[key] > 100) return fail();
+        attrs[key] = a[key];
+      }
+      if (a.colwidth != null) {
+        if (!Array.isArray(a.colwidth) || a.colwidth.length > 100 || a.colwidth.some((v: any) => !Number.isFinite(v) || v < 0 || v > 10000)) return fail();
+        attrs.colwidth = [...a.colwidth];
+      }
+      if (['left', 'center', 'right', 'justify'].includes(a.align)) attrs.align = a.align;
+    }
+    if (['paragraph', 'heading'].includes(type) && ['left', 'center', 'right', 'justify'].includes(a.textAlign)) attrs.textAlign = a.textAlign;
+    if (type === 'paragraph' && a.moduleRef != null) attrs.moduleRef = id(a.moduleRef);
+    const result: RichNode = { type, ...(Object.keys(attrs).length ? { attrs } : {}) };
+    if (type === 'text') {
+      result.text = string(raw.text, 100000);
+      if (!result.text) return fail();
+    } else if (raw.text !== undefined) return fail();
+    const nodeMarks = marks(raw.marks);
+    if (nodeMarks?.length) {
+      if (!inlineTypes.has(type)) return fail();
+      result.marks = nodeMarks;
+    }
+    if (raw.content !== undefined && !Array.isArray(raw.content)) return fail();
+    const children: RichNode[] = (raw.content ?? []).map((child: unknown) => node(child, depth + 1));
+    const validChildren = (allowed: Set<string>) => children.every(child => allowed.has(child.type));
+    if (inlineTypes.has(type) || type === 'horizontalRule') {
+      if (children.length) return fail();
+    } else {
+      let valid = false;
+      if (['doc', 'reportSection', 'blockquote', 'tableCell', 'tableHeader'].includes(type)) valid = children.length > 0 && validChildren(blockTypes);
+      if (['paragraph', 'heading'].includes(type)) valid = validChildren(inlineTypes);
+      if (type === 'codeBlock') valid = children.every(child => child.type === 'text');
+      if (['bulletList', 'orderedList'].includes(type)) valid = children.length > 0 && children.every(child => child.type === 'listItem');
+      if (type === 'listItem') valid = children[0]?.type === 'paragraph' && validChildren(blockTypes);
+      if (type === 'table') valid = children.length > 0 && children.every(child => child.type === 'tableRow');
+      if (type === 'tableRow') valid = children.length > 0 && children.every(child => ['tableCell', 'tableHeader'].includes(child.type));
+      if (!valid) return fail();
+      result.content = children;
+    }
+    return result;
+  }
+  const result = node(input);
+  if (result.type !== 'doc') return fail();
+  return result;
+}
+
 export const draftVersion = 1;
 export function validateDraft(input: any): { doc: RichNode; profile: string; customModules: Module[]; cache: Record<string, any> } {
   if (!input || input.format !== 'mri-report-studio' || input.version !== draftVersion || input.doc?.type !== 'doc' || !Array.isArray(input.doc.content)) throw new Error('Это не поддерживаемый файл описания МРТ.');
@@ -186,5 +381,5 @@ export function validateDraft(input: any): { doc: RichNode; profile: string; cus
     n.content?.forEach((c: any) => check(c, depth + 1));
   }
   check(input.doc);
-  return { doc: input.doc, profile: profiles.some(p => p.id === input.profile) ? input.profile : 'brain', customModules: validateLibrary(input.customModules ?? []), cache: {} };
+  return { doc: migrateLegacyHeader(input.doc), profile: profiles.some(p => p.id === input.profile) ? input.profile : 'brain', customModules: validateLibrary(input.customModules ?? []), cache: {} };
 }
