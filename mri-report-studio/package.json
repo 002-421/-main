@@ -1,0 +1,40 @@
+{
+  "name": "mri-report-studio",
+  "version": "0.3.0",
+  "private": true,
+  "description": "МРТ Альянс: локальный редактор протоколов МРТ с шаблонами, проверкой русского текста, DOCX и PDF",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "start": "electron .",
+    "desktop:install": "node node_modules/electron/install.js",
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "node tests/browser.mjs",
+    "package:windows": "python3 scripts/package_windows.py",
+    "package:setup": "python3 scripts/package_setup.py"
+  },
+  "dependencies": {
+    "@tiptap/core": "3.32.0",
+    "@tiptap/extension-highlight": "3.32.0",
+    "@tiptap/extension-table": "3.32.0",
+    "@tiptap/extension-text-align": "3.32.0",
+    "@tiptap/extension-text-style": "3.32.0",
+    "@tiptap/starter-kit": "3.32.0",
+    "dictionary-ru": "^3.0.0",
+    "docx": "^9.14.0",
+    "dompurify": "^3.3.1",
+    "fflate": "^0.8.3",
+    "lucide": "^0.575.0",
+    "nspell": "^2.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "electron": "45.0.0",
+    "playwright-core": "1.64.1",
+    "typescript": "^5.9.3",
+    "vite": "8.3.5",
+    "vite-plugin-singlefile": "^2.3.0"
+  },
+  "type": "module"
+}
