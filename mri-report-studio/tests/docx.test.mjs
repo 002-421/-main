@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { posix } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { exportDocx, importOwnDocx, DOCX_MIME } from '../src/docx.ts';
 import { makeDocument, collectFields, builtinModules, moduleNode, insertModule } from '../src/model.ts';
@@ -165,4 +166,91 @@ test('foreign DOCX returns null and corrupt or malformed Studio state is rejecte
   await assert.rejects(importOwnDocx(zipSync(malformed)), /Повреждены/);
   await assert.rejects(importOwnDocx(rewriteMetadata({ ...zip }, metadata => { metadata.draft.doc = { type: 'no-document' }; })), /не поддерживаемый файл/);
   await assert.rejects(importOwnDocx(rewriteMetadata({ ...zip }, metadata => { metadata.draft.cache = { M02: { body: { type: 'paragraph' } } }; })), /Некорректный сохранённый модуль/);
+});
+
+test('source template profile retains exact page geometry, title styles, spacing, table grid and page break', async () => {
+  const attrs = {
+    sourceFormat: 'alliance-template', pageWidthMm: 210, pageHeightMm: 297,
+    marginTopMm: 16, marginBottomMm: 16, marginLeftMm: 18, marginRightMm: 18,
+    fontFamily: 'DejaVu Sans', fontSizePt: 10, lineHeight: 1.05, spaceAfterPt: 5,
+  };
+  const cell = (text, width) => ({ type: 'tableCell', attrs: { colwidth: [width / 15] }, content: [p(text, { sourceStyle: 'Normal', spaceBeforePt: 3, spaceAfterPt: 3 })] });
+  const doc = { type: 'doc', attrs, content: [
+    p('МРТ ГОЛОВЫ', { sourceStyle: 'Title', fontSizePt: 21, lineHeight: 1, spaceBeforePt: 9, spaceAfterPt: 5, keepNext: true }),
+    p('Протокол исследования', { sourceStyle: 'Subtitle', fontSizePt: 11, keepNext: true }),
+    { type: 'heading', attrs: { level: 2, sourceStyle: 'Heading2', fontSizePt: 10, spaceBeforePt: 9, spaceAfterPt: 5 }, content: [{ type: 'text', text: 'ДАННЫЕ ИССЛЕДОВАНИЯ' }] },
+    { type: 'table', content: [{ type: 'tableRow', content: [cell('Пациент', 3061), cell('Имя пациента', 6803)] }] },
+    p('Описание', { sourceStyle: 'Normal' }),
+    p('МРТ ГОЛОВЫ', { sourceStyle: 'Title', fontSizePt: 21, pageBreakBefore: true }),
+  ] };
+  const { xml, zip, blob } = await exported(doc);
+  assert.match(xml, /<w:pgMar(?=[^>]*w:top="907")(?=[^>]*w:right="1020")(?=[^>]*w:bottom="907")(?=[^>]*w:left="1020")/);
+  assert.match(xml, /<w:pStyle w:val="Title"\/>/);
+  assert.match(xml, /<w:pStyle w:val="Subtitle"\/>/);
+  assert.match(xml, /<w:pStyle w:val="Heading2"\/>/);
+  assert.match(xml, /<w:pageBreakBefore\/>/);
+  assert.match(xml, /w:line="252" w:lineRule="auto"/);
+  assert.match(xml, /<w:tblGrid><w:gridCol w:w="3061"\/><w:gridCol w:w="6803"\/><\/w:tblGrid>/);
+  assert.match(xml, /<w:tblW w:type="dxa" w:w="9864"\/>/);
+  assert.match(xml, /<w:tblInd w:type="dxa" w:w="-113"\/>/);
+  assert.match(xml, /<w:spacing(?=[^>]*w:before="60")(?=[^>]*w:after="60")/);
+  const styles = strFromU8(zip['word/styles.xml']);
+  assert.match(styles, /w:ascii="DejaVu Sans"/);
+  assert.match(runWith(xml, 'МРТ ГОЛОВЫ'), /w:ascii="Calibri"/);
+  assert.match(styles, /<w:bottom w:val="single" w:color="4F81BD" w:sz="8" w:space="4"\/>/);
+  assert.match(styles, /<w:sz w:val="42"\/>/);
+  const footer = Object.entries(zip).find(([name]) => /^word\/footer\d+\.xml$/.test(name));
+  assert.ok(footer);
+  assert.match(strFromU8(footer[1]), /МРТ головы • v1.0/);
+  assert.match(strFromU8(footer[1]), /PAGE/);
+  assert.match(strFromU8(footer[1]), /<w:spacing(?=[^>]*w:after="0")(?=[^>]*w:line="240")/);
+  assert.deepEqual((await importOwnDocx(blob)).doc, doc);
+});
+
+test('editable inline fields export user values as ordinary Word text and retain only untouched hint highlights', async () => {
+  const field = (id, hint, filled) => ({ type: 'templateField', attrs: { id, hint, original: hint, filled } });
+  const doc = { type: 'doc', content: [{ type: 'paragraph', attrs: { templateOriginal: 'Врач: Ф.И.О.' }, content: [
+    { type: 'text', text: 'Врач: ' },
+    { type: 'text', text: 'Смирнова Анна', marks: [field('doctor', 'Ф.И.О.', true), { type: 'bold' }, { type: 'highlight', attrs: { color: '#ff0000' } }] },
+    { type: 'text', text: 'Дата исследования', marks: [field('date', 'Дата исследования', false)] },
+  ] }] };
+  const { xml, blob } = await exported(doc, { templateId: 'brain-contrast' });
+  assert.doesNotMatch(xml, /Ф.И.О./);
+  assert.match(runWith(xml, 'Смирнова Анна'), /<w:b\/>/);
+  assert.doesNotMatch(runWith(xml, 'Смирнова Анна'), /<w:(?:highlight|shd)\b/);
+  assert.match(runWith(xml, 'Дата исследования'), /<w:highlight w:val="yellow"\/>/);
+  assert.doesNotMatch(xml, /templateOriginal|templateField/);
+  const restored = await importOwnDocx(blob);
+  assert.deepEqual(restored.doc, doc);
+  assert.equal(restored.templateId, 'brain-contrast');
+});
+
+test('source font faces are embedded with Word font relationships and cannot be modified behind embedded draft metadata', async () => {
+  const dir = new URL('../src/assets/fonts/', import.meta.url);
+  const font = {
+    name: 'DejaVu Sans',
+    data: new Uint8Array(await readFile(new URL('DejaVuSans.ttf', dir))),
+    bold: new Uint8Array(await readFile(new URL('DejaVuSans-Bold.ttf', dir))),
+    italic: new Uint8Array(await readFile(new URL('DejaVuSans-Oblique.ttf', dir))),
+    boldItalic: new Uint8Array(await readFile(new URL('DejaVuSans-BoldOblique.ttf', dir))),
+  };
+  const doc = { type: 'doc', attrs: { sourceFormat: 'alliance-template' }, content: [p('Описание с исходным шрифтом')] };
+  const { zip, blob } = await exported(doc, { fonts: [font] });
+  const parts = Object.keys(zip).filter(name => name.endsWith('.odttf'));
+  assert.equal(parts.length, 4);
+  const table = strFromU8(zip['word/fontTable.xml']);
+  for (const face of ['Regular', 'Bold', 'Italic', 'BoldItalic']) assert.match(table, new RegExp(`<w:embed${face}\\b`));
+  assert.match(strFromU8(zip['word/settings.xml']), /<w:embedTrueTypeFonts\/>/);
+  assert.deepEqual((await importOwnDocx(blob)).doc, doc);
+  zip[parts[0]][100] ^= 1;
+  await assert.rejects(importOwnDocx(zipSync(zip)), /Форматирование или структура/);
+});
+
+test('line spacing selected in the editor overrides a source paragraph baseline in Word', async () => {
+  const doc = { type: 'doc', attrs: { sourceFormat: 'alliance-template' }, content: [{
+    type: 'paragraph', attrs: { lineHeight: 1.05, sourceStyle: 'Normal' },
+    content: [{ type: 'text', text: 'Изменённый интервал', marks: [{ type: 'textStyle', attrs: { lineHeight: '1.5' } }] }],
+  }] };
+  const { xml } = await exported(doc);
+  assert.match(xml, /w:line="360" w:lineRule="auto"/);
 });

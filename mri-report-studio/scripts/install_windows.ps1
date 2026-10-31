@@ -38,6 +38,12 @@ try {
         if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force }
     }
     Write-Host ('Installed: ' + $destination) -ForegroundColor Green
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut((Join-Path $desktop 'MRI Alliance.lnk'))
+    $shortcut.TargetPath = Join-Path $destination 'MRI Alliance.exe'
+    $shortcut.WorkingDirectory = $destination
+    $shortcut.IconLocation = Join-Path $destination 'resources\app\dist\mri-alliance.ico'
+    $shortcut.Save()
     Start-Process -FilePath (Join-Path $destination 'MRI Alliance.exe')
     Start-Process explorer.exe -ArgumentList ('"' + $destination + '"')
 } catch {

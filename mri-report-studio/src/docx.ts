@@ -1,7 +1,7 @@
 import {
-  AlignmentType, BorderStyle, Document, ExternalHyperlink, HeadingLevel,
+  AlignmentType, BorderStyle, Document, ExternalHyperlink, Footer, HeadingLevel,
   LevelFormat, LineRuleType, Packer, Paragraph, ShadingType, Table, TableCell,
-  TableLayoutType, TableRow, Tab, TextRun, UnderlineType, WidthType,
+  TableLayoutType, TableRow, Tab, TextRun, UnderlineType, WidthType, PageNumber,
   type IParagraphOptions, type IRunOptions, type NumberingDefinition, type ParagraphChild,
 } from 'docx';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
@@ -17,14 +17,18 @@ const PAGE_HEIGHT = 16838;
 const PAGE_MARGIN = 850;
 const BODY_WIDTH = PAGE_WIDTH - 2 * PAGE_MARGIN;
 
+export type EmbeddedDocxFont = { name: string; data: Uint8Array; bold?: Uint8Array; italic?: Uint8Array; boldItalic?: Uint8Array };
 export type DocxOptions = {
   profile?: string;
   customModules?: Module[];
   cache?: Record<string, { body: RichNode; conclusion?: RichNode }>;
   title?: string;
   kind?: 'report' | 'template';
+  templateId?: string;
+  /** Full source font faces keep Word layout stable on machines without that font installed. */
+  fonts?: EmbeddedDocxFont[];
 };
-export type ImportedDocx = ReturnType<typeof validateDraft> & { kind: 'report' | 'template' };
+export type ImportedDocx = ReturnType<typeof validateDraft> & { kind: 'report' | 'template'; templateId?: string };
 
 function color(value: unknown): string | undefined {
   if (typeof value !== 'string') return;
@@ -73,6 +77,14 @@ function runOptions(node: RichNode, inherited: IRunOptions = {}, omitHighlight =
       options.shading = { type: ShadingType.CLEAR, fill: color(mark.attrs?.color) ?? 'FFFF00', color: 'auto' };
     }
   }
+  const field = node.marks?.find(mark => mark.type === 'templateField');
+  if (field) {
+    // Editor field marks carry workflow state, not a permanent report highlight.
+    // Resolve after other marks so a legacy placeholder highlight cannot survive
+    // the user's first edit just because of the mark ordering.
+    delete options.highlight; delete options.shading;
+    if (field.attrs?.filled !== true) options.highlight = 'yellow';
+  }
   if (omitHighlight) { delete options.highlight; delete options.shading; }
   return options;
 }
@@ -106,7 +118,7 @@ function inline(nodes: RichNode[] = [], inherited: IRunOptions = {}): ParagraphC
   });
 }
 
-type Context = { numbering: NumberingDefinition[]; depth: number; inherited?: IRunOptions; width?: number; indent?: number };
+type Context = { numbering: NumberingDefinition[]; depth: number; inherited?: IRunOptions; width?: number; indent?: number; source?: boolean; lineHeight?: number; spaceAfterPt?: number };
 const ALIGNMENTS: Record<string, (typeof AlignmentType)[keyof typeof AlignmentType]> = {
   left: AlignmentType.LEFT, center: AlignmentType.CENTER, right: AlignmentType.RIGHT, justify: AlignmentType.JUSTIFIED,
 };
@@ -127,15 +139,31 @@ function paragraph(node: RichNode, context: Context, extra: IParagraphOptions = 
     child.content?.forEach(lineHeights);
   }
   node.content?.forEach(lineHeights);
-  const lineHeight = attrs.lineHeight != null ? Number.parseFloat(String(attrs.lineHeight)) : Math.max(...markedLineHeights);
-  const line = Number.isFinite(lineHeight) && lineHeight >= 0.5 && lineHeight <= 5 ? Math.round(lineHeight * 240) : 348;
+  const style = context.source && ['Title', 'Subtitle', 'Normal', 'Heading1', 'Heading2', 'Heading3'].includes(attrs.sourceStyle) ? attrs.sourceStyle : undefined;
+  const sourceStyle = style ?? (heading ? `Heading${level}` : 'Normal');
+  // Explicit ribbon formatting overrides the source paragraph's baseline.
+  const lineHeight = markedLineHeights.length ? Math.max(...markedLineHeights) : attrs.lineHeight != null ? Number.parseFloat(String(attrs.lineHeight)) : NaN;
+  const line = Number.isFinite(lineHeight) && lineHeight >= 0.5 && lineHeight <= 5 ? Math.round(lineHeight * 240) : context.source && sourceStyle === 'Title' ? 240 : Math.round((context.lineHeight ?? 1.45) * 240);
+  const pt = (value: unknown, fallback: number) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1000 ? Math.round(value * 20) : fallback;
+  const inherited: any = { ...context.inherited };
+  if (context.source && sourceStyle !== 'Normal') {
+    // The delivered template's theme sets majorHAnsi to Calibri. Word gives
+    // that theme font precedence over the older literal rFonts family name.
+    inherited.font = 'Calibri';
+    inherited.color = '183A52';
+    inherited.size = ({ Title: 42, Subtitle: 22, Heading1: 22, Heading2: 20, Heading3: 20 } as Record<string, number>)[sourceStyle];
+  }
+  if (typeof attrs.fontFamily === 'string') inherited.font = attrs.fontFamily;
+  if (typeof attrs.fontSizePt === 'number' && attrs.fontSizePt > 0 && attrs.fontSizePt <= 200) inherited.size = Math.round(attrs.fontSizePt * 2);
   return new Paragraph({
-    children: inline(node.content, context.inherited),
-    heading,
+    children: inline(node.content, inherited),
+    ...(style ? { style } : { heading }),
     alignment: ALIGNMENTS[attrs.textAlign],
-    spacing: { line, lineRule: LineRuleType.AUTO, before: heading ? (level === 1 ? 0 : 180) : 0, after: heading ? 100 : 85 },
+    spacing: { line, lineRule: LineRuleType.AUTO, before: pt(attrs.spaceBeforePt, context.source && sourceStyle !== 'Normal' ? 180 : heading ? (level === 1 ? 0 : 180) : 0), after: pt(attrs.spaceAfterPt, heading ? 100 : Math.round((context.spaceAfterPt ?? 4.25) * 20)) },
     widowControl: true,
     ...(heading ? { keepNext: true, keepLines: true } : {}),
+    ...(typeof attrs.keepNext === 'boolean' ? { keepNext: attrs.keepNext } : {}),
+    ...(attrs.pageBreakBefore === true ? { pageBreakBefore: true } : {}),
     ...(context.indent ? { indent: { left: context.indent } } : {}),
     ...extra,
   });
@@ -205,29 +233,34 @@ function table(node: RichNode, context: Context): Table {
   const average = fixed ? fixed / (columns - missing) : width / columns;
   const preferred = requested.map(value => value || (fixed < width && missing ? (width - fixed) / missing : average));
   const total = preferred.reduce((sum, value) => sum + value, 0);
-  const columnWidths = preferred.map(value => Math.max(1, Math.round(value / total * width)));
-  const border = { style: BorderStyle.SINGLE, size: 4, color: 'CDD6E2' };
+  const preserveSourceWidths = context.source && missing === 0 && fixed <= width + 30;
+  const columnWidths = preferred.map(value => Math.max(1, Math.round(preserveSourceWidths ? value : value / total * width)));
+  const tableWidth = preserveSourceWidths ? columnWidths.reduce((sum, value) => sum + value, 0) : width;
+  const border = { style: BorderStyle.SINGLE, size: 4, color: context.source ? 'auto' : 'CDD6E2' };
   const docxRows = placements.map((row, index) => new TableRow({
     cantSplit: true,
     tableHeader: index === 0 && row.length > 0 && row.every(cell => cell.node.type === 'tableHeader'),
     children: row.map(cell => {
       const cellWidth = columnWidths.slice(cell.column, cell.column + cell.columns).reduce((sum, value) => sum + value, 0);
       const header = cell.node.type === 'tableHeader';
-      const children = blocks(cell.node.content ?? [], { ...context, depth: 0, width: cellWidth - 160, inherited: { ...context.inherited, ...(header ? { bold: true } : {}) } });
+      const children = blocks(cell.node.content ?? [], { ...context, depth: 0, width: cellWidth - (context.source ? 216 : 160), inherited: { ...context.inherited, ...(header ? { bold: true } : {}) } });
       // Every Word cell must end with a paragraph, including cells containing a nested table.
       if (!(children.at(-1) instanceof Paragraph)) children.push(new Paragraph({}));
       return new TableCell({
         children, columnSpan: cell.columns, rowSpan: cell.rows,
         width: { size: cellWidth, type: WidthType.DXA },
-        margins: { top: 70, bottom: 70, left: 90, right: 90 },
-        shading: header ? { type: ShadingType.CLEAR, fill: 'F1F4F8', color: 'auto' } : undefined,
+        margins: context.source ? { top: 0, bottom: 0, left: 108, right: 108 } : { top: 70, bottom: 70, left: 90, right: 90 },
+        shading: color(cell.node.attrs?.backgroundColor) ? { type: ShadingType.CLEAR, fill: color(cell.node.attrs?.backgroundColor)!, color: 'auto' } : header ? { type: ShadingType.CLEAR, fill: 'F1F4F8', color: 'auto' } : undefined,
       });
     }),
   }));
   if (!docxRows.length) docxRows.push(new TableRow({ children: [new TableCell({ children: [new Paragraph({})] })] }));
   return new Table({
-    rows: docxRows, columnWidths, width: { size: width, type: WidthType.DXA },
+    rows: docxRows, columnWidths, width: { size: tableWidth, type: WidthType.DXA },
     layout: TableLayoutType.FIXED,
+    // Word's source TableGrid puts the first cell's text on the body margin;
+    // its border sits one cell inset plus half the border width to the left.
+    ...(context.source ? { indent: { size: -113, type: WidthType.DXA } } : {}),
     borders: { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border },
   });
 }
@@ -258,8 +291,12 @@ async function fingerprint(bytes: Uint8Array): Promise<string> {
 }
 
 async function contentHashes(zip: Record<string, Uint8Array>): Promise<Record<string, string>> {
-  const entries = await Promise.all(Object.entries(zip).filter(([name]) => name.startsWith('word/') && (name.endsWith('.xml') || name.endsWith('.rels'))).map(async ([name, data]) => [name, await fingerprint(data)]));
+  const entries = await Promise.all(Object.entries(zip).filter(([name]) => isWordContent(name)).map(async ([name, data]) => [name, await fingerprint(data)]));
   return Object.fromEntries(entries);
+}
+
+function isWordContent(name: string): boolean {
+  return name.startsWith('word/') && (name.endsWith('.xml') || name.endsWith('.rels') || /^word\/fonts\/[^/]+\.(?:odttf|ttf|otf)$/i.test(name));
 }
 
 function validatedCache(input: unknown): Record<string, { body: RichNode; conclusion?: RichNode }> {
@@ -277,25 +314,61 @@ function validatedCache(input: unknown): Record<string, { body: RichNode; conclu
   return result;
 }
 
+function validatedTemplateId(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !/^[A-Za-z\d_.-]{1,120}$/.test(value)) throw new Error('Некорректный идентификатор шаблона в файле Word.');
+  return value;
+}
+
 /** Generate a real, editable Word document entirely on this device. */
 export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Promise<Blob> {
-  const draft = { format: 'mri-report-studio', version: draftVersion, profile: options.profile ?? 'brain', doc, customModules: options.customModules ?? [], cache: options.cache ?? {}, kind: options.kind ?? 'report' };
+  const draft = { format: 'mri-report-studio', version: draftVersion, profile: options.profile ?? 'brain', doc, customModules: options.customModules ?? [], cache: options.cache ?? {}, kind: options.kind ?? 'report', templateId: validatedTemplateId(options.templateId) };
   validateDraft(draft);
   validatedCache(draft.cache);
-  const context: Context = { numbering: [], depth: 0 };
+  const source = doc.attrs?.sourceFormat === 'alliance-template';
+  const a = doc.attrs ?? {};
+  const millimetres = (value: unknown, fallback: number, min = 0, max = 1000) => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max ? Math.round(value / 25.4 * 1440) : fallback;
+  const pageWidth = source ? millimetres(a.pageWidthMm, PAGE_WIDTH, 100) : PAGE_WIDTH;
+  const pageHeight = source ? millimetres(a.pageHeightMm, PAGE_HEIGHT, 100) : PAGE_HEIGHT;
+  const marginLeft = source ? millimetres(a.marginLeftMm, 1020, 0, 80) : PAGE_MARGIN;
+  const marginRight = source ? millimetres(a.marginRightMm, 1020, 0, 80) : PAGE_MARGIN;
+  const font = source && typeof a.fontFamily === 'string' ? a.fontFamily : source ? 'DejaVu Sans' : 'Arial';
+  const fontSize = source && typeof a.fontSizePt === 'number' && a.fontSizePt > 0 && a.fontSizePt <= 200 ? a.fontSizePt * 2 : source ? 20 : 21;
+  const context: Context = {
+    numbering: [], depth: 0, source, width: pageWidth - marginLeft - marginRight,
+    ...(source ? { inherited: { font, size: fontSize, color: '000000' }, lineHeight: Number(a.lineHeight) || 1.05, spaceAfterPt: Number(a.spaceAfterPt) || 5 } : {}),
+  };
   const children = blocks(doc.content ?? [], context);
   if (!children.length) children.push(new Paragraph({}));
   const file = new Document({
     creator: 'МРТ Альянс', title: cleanText(options.title ?? 'Протокол МРТ-исследования'),
     description: 'Редактируемое описание МРТ',
-    styles: { default: {
+    // docx's implementation consumes Uint8Array-compatible font buffers in both
+    // browser and Node; its public declarations narrow these buffers to Buffer.
+    ...(options.fonts?.length ? { fonts: options.fonts as any } : {}),
+    styles: source ? { default: {
+      document: { run: { font, size: fontSize, color: '000000', language: { value: 'ru-RU' } }, paragraph: { spacing: { line: Math.round((Number(a.lineHeight) || 1.05) * 240), lineRule: LineRuleType.AUTO, after: Math.round((Number(a.spaceAfterPt) || 5) * 20) } } },
+      title: { run: { font: 'Calibri', size: 42, bold: false, color: '183A52', characterSpacing: 5, kern: 28 }, paragraph: { keepNext: true, border: { bottom: { style: BorderStyle.SINGLE, size: 8, space: 4, color: '4F81BD' } }, spacing: { before: 180, after: 100, line: 240, lineRule: LineRuleType.AUTO } } },
+      heading1: { run: { font: 'Calibri', size: 22, bold: true, color: '183A52' }, paragraph: { keepNext: true, keepLines: true, spacing: { before: 180, after: 100 } } },
+      heading2: { run: { font: 'Calibri', size: 20, bold: true, color: '183A52' }, paragraph: { keepNext: true, keepLines: true, spacing: { before: 180, after: 100 } } },
+      heading3: { run: { font: 'Calibri', size: 20, bold: true, color: '183A52' }, paragraph: { keepNext: true, keepLines: true, spacing: { before: 180, after: 100 } } },
+    }, paragraphStyles: [{ id: 'Subtitle', name: 'Subtitle', basedOn: 'Normal', next: 'Normal', run: { font: 'Calibri', size: 22, italics: true, color: '183A52', characterSpacing: 15 }, paragraph: { keepNext: true, spacing: { before: 180, after: 100 } } }] } : { default: {
       document: { run: { font: 'Arial', size: 21, color: '172333', language: { value: 'ru-RU' } }, paragraph: { spacing: { line: 348, lineRule: LineRuleType.AUTO, after: 85 } } },
       heading1: { run: { font: 'Arial', size: 32, bold: true, color: '172333' }, paragraph: { keepNext: true, spacing: { before: 0, after: 180 } } },
       heading2: { run: { font: 'Arial', size: 23, bold: true, color: '172333' }, paragraph: { keepNext: true } },
       heading3: { run: { font: 'Arial', size: 21, bold: true, color: '172333' }, paragraph: { keepNext: true } },
     } },
     numbering: { config: context.numbering },
-    sections: [{ properties: { page: { size: { width: PAGE_WIDTH, height: PAGE_HEIGHT }, margin: { top: 800, bottom: 900, left: PAGE_MARGIN, right: PAGE_MARGIN } } }, children }],
+    sections: [{
+      properties: { page: { size: { width: pageWidth, height: pageHeight }, margin: {
+        top: source ? millimetres(a.marginTopMm, 907, 0, 80) : 800,
+        bottom: source ? millimetres(a.marginBottomMm, 907, 0, 80) : 900,
+        left: marginLeft, right: marginRight,
+        ...(source ? { header: 369, footer: 369 } : {}),
+      } } },
+      ...(source ? { footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 0, after: 0, line: 240, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: 16, color: '64748B', text: typeof a.footerText === 'string' ? cleanText(a.footerText) : 'МРТ головы • v1.0   |   ' }), new TextRun({ font, size: fontSize, color: '000000', children: [PageNumber.CURRENT] })] })] }) } } : {}),
+      children,
+    }],
   });
   const zip = unzipSync(new Uint8Array(await Packer.toArrayBuffer(file)));
   zip['customXml/itemPropsMRI.xml'] = strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><ds:datastoreItem ds:itemID="{A4B86616-2D71-4B08-9A17-D625BFE59739}" xmlns:ds="http://schemas.openxmlformats.org/officeDocument/2006/customXml"><ds:schemaRefs><ds:schemaRef ds:uri="${STATE_NS}"/></ds:schemaRefs></ds:datastoreItem>`);
@@ -322,7 +395,7 @@ export async function importOwnDocx(input: ArrayBuffer | Uint8Array | Blob): Pro
   let zip: ReturnType<typeof unzipSync>;
   try {
     zip = unzipSync(bytes, { filter: entry => {
-      if (entry.name !== STATE_PART && !(entry.name.startsWith('word/') && (entry.name.endsWith('.xml') || entry.name.endsWith('.rels')))) return false;
+      if (entry.name !== STATE_PART && !isWordContent(entry.name)) return false;
       uncompressedBytes += entry.originalSize;
       if (entry.originalSize > MAX_STATE_BYTES * 2 || uncompressedBytes > MAX_FILE_BYTES) { oversized = true; return false; }
       return true;
@@ -348,5 +421,5 @@ export async function importOwnDocx(input: ArrayBuffer | Uint8Array | Blob): Pro
     throw new Error('Форматирование или структура этого файла изменены в Word или другом редакторе. Откройте его в Word и скопируйте изменения в новое описание.');
   }
   const result = validateDraft(metadata.draft);
-  return { ...result, cache: validatedCache(metadata.draft.cache), kind: metadata.draft.kind === 'template' ? 'template' : 'report' };
+  return { ...result, cache: validatedCache(metadata.draft.cache), kind: metadata.draft.kind === 'template' ? 'template' : 'report', templateId: validatedTemplateId(metadata.draft.templateId) };
 }

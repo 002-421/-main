@@ -263,6 +263,9 @@ export function validateTemplate(input: unknown): RichNode {
       if (simpleMarks.has(mark.type)) return [{ type: mark.type }];
       const a = mark.attrs ?? {};
       if (!a || typeof a !== 'object' || Array.isArray(a)) return fail();
+      if (mark.type === 'templateField') {
+        return [{ type: mark.type, attrs: { id: id(a.id), hint: string(a.hint, 2000), original: string(a.original ?? a.hint, 100000), filled: a.filled === true } }];
+      }
       if (mark.type === 'highlight') {
         const value = color(a.color);
         return [{ type: mark.type, ...(value ? { attrs: { color: value } } : {}) }];
@@ -332,6 +335,18 @@ export function validateTemplate(input: unknown): RichNode {
     }
     if (['paragraph', 'heading'].includes(type) && ['left', 'center', 'right', 'justify'].includes(a.textAlign)) attrs.textAlign = a.textAlign;
     if (type === 'paragraph' && a.moduleRef != null) attrs.moduleRef = id(a.moduleRef);
+    if (['doc', 'paragraph', 'heading'].includes(type)) {
+      if (a.fontFamily != null && /^[\p{L}\d\s,'"_-]+$/u.test(string(a.fontFamily, 200))) attrs.fontFamily = a.fontFamily;
+      for (const key of ['fontSizePt', 'spaceBeforePt', 'spaceAfterPt', 'lineHeight', 'pageWidthMm', 'pageHeightMm', 'marginTopMm', 'marginBottomMm', 'marginLeftMm', 'marginRightMm']) {
+        if (a[key] == null) continue;
+        if (typeof a[key] !== 'number' || !Number.isFinite(a[key]) || a[key] < 0 || a[key] > 1000) return fail();
+        attrs[key] = a[key];
+      }
+      for (const key of ['keepNext', 'pageBreakBefore']) if (typeof a[key] === 'boolean') attrs[key] = a[key];
+      if (a.templateOriginal != null) attrs.templateOriginal = string(a.templateOriginal, 100000);
+      if (a.sourceFormat === 'alliance-template') attrs.sourceFormat = a.sourceFormat;
+      if (['Title', 'Subtitle', 'Normal', 'Heading1', 'Heading2', 'Heading3'].includes(a.sourceStyle)) attrs.sourceStyle = a.sourceStyle;
+    }
     const result: RichNode = { type, ...(Object.keys(attrs).length ? { attrs } : {}) };
     if (type === 'text') {
       result.text = string(raw.text, 100000);

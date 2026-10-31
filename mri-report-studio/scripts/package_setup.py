@@ -31,6 +31,11 @@ def collect_licenses():
                            f"{notice.read_text(encoding='utf-8', errors='replace')}\n")
     if not notices:
         raise RuntimeError('Dependency license notices are missing. Run npm ci first.')
+    font_notice = ROOT / 'src/assets/fonts/LICENSE.txt'
+    if not font_notice.is_file():
+        raise RuntimeError('Bundled font license notices are missing.')
+    notices.append(f"\n{'=' * 60}\nBundled DejaVu Sans and Carlito fonts\n"
+                   f"{font_notice.read_text(encoding='utf-8')}\n")
     return ''.join(notices)
 
 
@@ -69,6 +74,7 @@ def main():
     (setup / 'app/dist').mkdir(parents=True)
     (setup / 'app/electron').mkdir()
     shutil.copy2(BUILD, setup / 'app/dist/index.html')
+    shutil.copy2(ROOT / 'public/mri-alliance.ico', setup / 'app/dist/mri-alliance.ico')
     for filename in ('main.cjs', 'preload.cjs'):
         shutil.copy2(ROOT / 'electron' / filename, setup / 'app/electron' / filename)
     (setup / 'app/package.json').write_text(json.dumps({
@@ -113,6 +119,9 @@ def main():
         encoding='utf-8-sig')
     notices = collect_licenses()
     (setup / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
+    example = DOWNLOADS / 'MRI_Alliance_Head_Template.docx'
+    if example.is_file():
+        shutil.copy2(example, setup / example.name)
     write_zip(setup, DOWNLOADS / 'MRI_Alliance_Windows_Setup.zip')
 
     browser = stage / 'MRI Alliance Browser'
@@ -127,6 +136,8 @@ def main():
         'Локальный черновик и настройки связаны с этим браузером и адресом файла. '
         'Храните нужные описания отдельными файлами DOCX.\n', encoding='utf-8-sig')
     (browser / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
+    if example.is_file():
+        shutil.copy2(example, browser / example.name)
     write_zip(browser, DOWNLOADS / 'MRI_Alliance_Browser.zip')
     shutil.copy2(BUILD, DOWNLOADS / 'MRI_Alliance.html')
     (DOWNLOADS / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')

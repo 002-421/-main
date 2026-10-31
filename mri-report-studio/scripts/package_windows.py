@@ -5,6 +5,7 @@ from zipfile import ZipFile, ZIP_DEFLATED
 import hashlib
 import json
 import shutil
+from package_setup import collect_licenses
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / '.runtime-cache'
@@ -49,21 +50,17 @@ app = destination / 'resources/app'
 for filename in ['main.cjs', 'preload.cjs']:
     shutil.copy2(ROOT / 'electron' / filename, app / 'electron' / filename)
 shutil.copy2(ROOT / 'dist/index.html', app / 'dist/index.html')
+shutil.copy2(ROOT / 'public/mri-alliance.ico', app / 'dist/mri-alliance.ico')
 (app / 'package.json').write_text(json.dumps({
     'name': 'mri-report-studio', 'productName': 'MRI Alliance',
     'version': json.loads((ROOT / 'package.json').read_text())['version'], 'main': 'electron/main.cjs', 'private': True,
 }, indent=2))
 shutil.copy2(ROOT / 'README_RU.txt', destination / 'ПРОЧИТАЙТЕ.txt')
 
-licenses = []
-for manifest in sorted((ROOT / 'node_modules').glob('**/package.json')):
-    if 'node_modules' in manifest.relative_to(ROOT / 'node_modules').parts[:-1][1:]: continue
-    try: metadata = json.loads(manifest.read_text())
-    except (ValueError, OSError): continue
-    license_files = [p for p in manifest.parent.iterdir() if p.is_file() and p.name.lower() in ['license', 'license.md', 'license.txt', 'licence', 'copying']]
-    for text in license_files:
-        licenses.append(f"\n{'=' * 60}\n{metadata.get('name')} {metadata.get('version')}\n{text.read_text(errors='replace')}\n")
-(destination / 'THIRD_PARTY_LICENSES.txt').write_text(''.join(licenses), encoding='utf-8')
+(destination / 'THIRD_PARTY_LICENSES.txt').write_text(collect_licenses(), encoding='utf-8')
+example = ROOT / 'downloads/MRI_Alliance_Head_Template.docx'
+if example.is_file():
+    shutil.copy2(example, destination / example.name)
 
 output = RELEASE / 'MRI_Alliance_Windows_x64.zip'
 with ZipFile(output, 'w', ZIP_DEFLATED, compresslevel=6) as package:

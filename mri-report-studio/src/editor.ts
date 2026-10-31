@@ -5,6 +5,8 @@ import TextAlign from '@tiptap/extension-text-align';
 import Highlight from '@tiptap/extension-highlight';
 import { TableKit } from '@tiptap/extension-table';
 import type { RichNode } from './model';
+import { TemplateField, InlineFieldEditing, TemplateReview, SourceFormat, prepareInlineDocument } from './inline-fields';
+import { LiveProofreading, type ProofStatus } from './live-proofreading';
 
 export const ReportSection = Node.create({
   name: 'reportSection',
@@ -55,7 +57,10 @@ const ModuleReference = Extension.create({
   },
 });
 
-export function makeEditor(element: HTMLElement, content: RichNode, selectField: (id: string) => void) {
+export type ReportEditorOptions = { getPersonalWords?: () => string[]; onProofStatus?: (status: ProofStatus) => void; onFieldSelect?: (id: string) => void };
+
+export function makeEditor(element: HTMLElement, content: RichNode, options: ReportEditorOptions | ((id: string) => void) = {}) {
+  const settings = typeof options === 'function' ? { onFieldSelect: options } : options;
   return new Editor({
     element,
     extensions: [
@@ -67,14 +72,15 @@ export function makeEditor(element: HTMLElement, content: RichNode, selectField:
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Highlight.configure({ multicolor: true }),
       TableKit.configure({ table: { resizable: true, allowTableNodeSelection: true } }),
-      ReportSection, ReportField, ModuleReference,
+      ReportSection, ReportField, ModuleReference, SourceFormat, TemplateField, InlineFieldEditing, TemplateReview,
+      LiveProofreading.configure({ getPersonalWords: settings.getPersonalWords ?? (() => []), onStatus: settings.onProofStatus }),
     ],
-    content,
+    content: prepareInlineDocument(content),
     editorProps: {
-      attributes: { class: 'report-content', spellcheck: 'false', 'aria-label': 'Редактор описания МРТ' },
+      attributes: { class: 'report-content', spellcheck: 'false', lang: 'ru', 'aria-label': 'Редактор описания МРТ' },
       handleClickOn(view, _pos, node, nodePos, _event, direct) {
         if (direct && node.type.name === 'reportField') {
-          selectField(node.attrs.id);
+          settings.onFieldSelect?.(node.attrs.id);
           return true;
         }
         return false;

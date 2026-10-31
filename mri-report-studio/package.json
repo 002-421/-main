@@ -1,6 +1,6 @@
 {
   "name": "mri-report-studio",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "МРТ Альянс: локальный редактор протоколов МРТ с шаблонами, проверкой русского текста, DOCX и PDF",
   "main": "electron/main.cjs",
