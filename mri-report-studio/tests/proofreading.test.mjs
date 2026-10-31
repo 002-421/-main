@@ -6,7 +6,9 @@ import { createRussianChecker, MAX_PROOF_ISSUES } from '../src/proofreading-core
 // Exercise the actual bundled Russian dictionary, not a mock word list.
 const aff = await readFile(new URL('../node_modules/dictionary-ru/index.aff', import.meta.url), 'utf8');
 const dic = await readFile(new URL('../node_modules/dictionary-ru/index.dic', import.meta.url), 'utf8');
-const check = createRussianChecker(aff, dic);
+const englishAff = await readFile(new URL('../node_modules/dictionary-en/index.aff', import.meta.url), 'utf8');
+const englishDic = await readFile(new URL('../node_modules/dictionary-en/index.dic', import.meta.url), 'utf8');
+const check = createRussianChecker(aff, dic, englishAff, englishDic);
 
 test('Russian misspellings have native word suggestions and exact UTF-16 offsets', async () => {
   const text = '🧠 Иследование головного мозга: измененния не выявлены.';
@@ -23,6 +25,16 @@ test('Russian misspellings have native word suggestions and exact UTF-16 offsets
 test('dictionary recognises normal Russian inflections and radiology terminology', async () => {
   const text = 'На МРТ головного мозга выявлены гиперинтенсивные перивентрикулярные очаги глиоза. Субарахноидальные пространства не расширены. Ликвородинамика без нарушений. Контрастирование не проводилось. МР-ангиография: без особенностей. Хиазмально-селлярная область. Аденогипофиз. Переднезадняя ось. Мосто-мозжечковые углы. T1, T2, DWI, ADC, FLAIR.';
   assert.deepEqual(await check(text), []);
+});
+
+test('Latin misspellings are underlined while common MRI abbreviations and English sequence names are accepted', async () => {
+  const text = 'Мама мыла раму. safsaf T1 T2 DWI ADC FLAIR STIR diffusion-weighted.';
+  const issues = await check(text);
+  const typo = issues.find(issue => issue.text === 'safsaf');
+  assert.ok(typo);
+  assert.equal(typo.kind, 'spelling');
+  assert.equal(text.slice(typo.start, typo.end), 'safsaf');
+  assert.deepEqual(issues.filter(issue => ['T1', 'T2', 'DWI', 'ADC', 'FLAIR', 'STIR', 'diffusion-weighted'].includes(issue.text)), []);
 });
 
 test('contextual grammar rules catch infinitive, agreement and preposition errors', async () => {

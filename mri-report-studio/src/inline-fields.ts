@@ -133,9 +133,7 @@ function placeholderRange(state: EditorState, pos?: number): FieldRange | null {
   return ranges.find(r => cursor >= r.from && (pos === undefined ? cursor < r.to && state.selection.to <= r.to : cursor <= r.to)) ?? null;
 }
 
-function replacePlaceholder(view: EditorView, text: string, pos?: number): boolean {
-  const range = placeholderRange(view.state, pos);
-  if (!range) return false;
+function replacePlaceholder(view: EditorView, text: string, range: FieldRange): boolean {
   const tr = view.state.tr;
   const marks = view.state.doc.resolve(range.from).nodeAfter?.marks.filter(m => m.type.name !== 'templateField') ?? [];
   if (text) {
@@ -172,26 +170,18 @@ export const InlineFieldEditing = Extension.create({
           };
           return new Slice(copy(slice.content), slice.openStart, slice.openEnd);
         },
-        handleClick(view, pos, event) {
-          const el = (event.target as HTMLElement).closest<HTMLElement>('[data-template-field][data-filled="false"]');
-          if (!el) return false;
-          const range = placeholderRange(view.state, pos);
-          if (!range) return false;
-          view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, range.from, range.to)));
-          return true;
+        handleTextInput(view, from, to, text) {
+          const range = placeholderRange(view.state, from);
+          if (!range || from !== range.from || to !== range.to) return false;
+          return replacePlaceholder(view, text, range);
         },
-        handleTextInput(view, _from, _to, text) { return replacePlaceholder(view, text); },
         handlePaste(view, event) {
-          if (!placeholderRange(view.state)) return false;
+          const selection = view.state.selection;
+          const range = placeholderRange(view.state, selection.from);
+          if (!range || selection.from !== range.from || selection.to !== range.to) return false;
           const text = event.clipboardData?.getData('text/plain');
           if (text === undefined) return false;
-          return replacePlaceholder(view, text.replace(/\r\n?/g, '\n'));
-        },
-        handleKeyDown: (view, event) => {
-          if (!['Backspace', 'Delete', 'Enter'].includes(event.key) || !placeholderRange(view.state)) return false;
-          if (!replacePlaceholder(view, '')) return false;
-          if (event.key === 'Enter') this.editor.commands.splitBlock();
-          return true;
+          return replacePlaceholder(view, text.replace(/\r\n?/g, '\n'), range);
         },
       },
       // Input methods and formatted paste can bypass handleTextInput. A changed
@@ -222,7 +212,7 @@ export const SourceFormat = Extension.create({
     const attr = (defaultValue: unknown = null) => ({ default: defaultValue, renderHTML: () => ({}) });
     const paragraphAttrs: Record<string, any> = { templateOriginal: attr(), sourceStyle: { default: null, renderHTML: (a: Record<string,any>) => a.sourceStyle ? { 'data-source-style':a.sourceStyle } : {} } };
     for (const [name, property, unit] of [
-      ['fontFamily', 'font-family', ''], ['fontSizePt', 'font-size', 'pt'], ['spaceBeforePt', 'margin-top', 'pt'], ['spaceAfterPt', 'margin-bottom', 'pt'], ['lineHeight', 'line-height', ''],
+      ['fontFamily', 'font-family', ''], ['fontSizePt', 'font-size', 'pt'], ['spaceBeforePt', 'margin-top', 'pt'], ['spaceAfterPt', 'margin-bottom', 'pt'], ['lineHeight', 'line-height', ''], ['firstLineIndentPt', 'text-indent', 'pt'], ['leftIndentPt', 'margin-left', 'pt'], ['rightIndentPt', 'margin-right', 'pt'],
     ]) paragraphAttrs[name] = { default: null, renderHTML: (a: Record<string, any>) => a[name] != null ? { style: `${property}:${a[name]}${unit}` } : {} };
     paragraphAttrs.keepNext = { default: null, renderHTML: (a: Record<string, any>) => a.keepNext ? { style: 'break-after:avoid', 'data-keep-next':'true' } : {} };
     paragraphAttrs.pageBreakBefore = { default: null, renderHTML: (a: Record<string, any>) => a.pageBreakBefore ? { style: 'break-before:page', 'data-page-break-before':'true' } : {} };

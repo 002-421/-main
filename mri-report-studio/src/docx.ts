@@ -160,6 +160,7 @@ function paragraph(node: RichNode, context: Context, extra: IParagraphOptions = 
     ...(style ? { style } : { heading }),
     alignment: ALIGNMENTS[attrs.textAlign],
     spacing: { line, lineRule: LineRuleType.AUTO, before: pt(attrs.spaceBeforePt, context.source && sourceStyle !== 'Normal' ? 180 : heading ? (level === 1 ? 0 : 180) : 0), after: pt(attrs.spaceAfterPt, heading ? 100 : Math.round((context.spaceAfterPt ?? 4.25) * 20)) },
+    ...(typeof attrs.firstLineIndentPt === 'number' || typeof attrs.leftIndentPt === 'number' || typeof attrs.rightIndentPt === 'number' ? { indent: { ...(typeof attrs.firstLineIndentPt === 'number' ? { firstLine: pt(attrs.firstLineIndentPt, 0) } : {}), ...(typeof attrs.leftIndentPt === 'number' ? { left: pt(attrs.leftIndentPt, 0) } : {}), ...(typeof attrs.rightIndentPt === 'number' ? { right: pt(attrs.rightIndentPt, 0) } : {}) } } : {}),
     widowControl: true,
     ...(heading ? { keepNext: true, keepLines: true } : {}),
     ...(typeof attrs.keepNext === 'boolean' ? { keepNext: attrs.keepNext } : {}),

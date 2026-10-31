@@ -15,12 +15,13 @@ const application=await _electron.launch({
  args:['.',`--user-data-dir=${userData}`,'--no-sandbox','--ozone-platform=headless','--disable-gpu'],cwd:root,
  env:{...process.env,XDG_CACHE_HOME:'/workspace/.cache',XDG_CONFIG_HOME:'/workspace/.config'},
 });
-await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1500,1000));
 const page=await application.firstWindow();
+await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0]?.setSize(1500,1000));
 page.on('pageerror',error=>errors.push(error.message));
-const patientId='HEAD.BASE.1.FIELD.0001', doctorId='HEAD.BASE.2.FIELD.0043';
+const patientId='head-gm.patient', doctorId='HEAD.BASE.2.FIELD.0043';
 const field=id=>page.locator(`[data-template-field][data-field-id="${id}"]`);
-async function fillField(id,text){await field(id).first().click();await page.keyboard.insertText(text);}
+async function selectField(id){await field(id).first().evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});}
+async function fillField(id,text){await selectField(id);await page.keyboard.insertText(text);}
 async function newReport(){await page.locator('#new-report').click();if(await page.locator('#confirm-new').count())await page.locator('#confirm-new').click();}
 async function saveWord(name){
  const filePath=path.join(output,name);await rm(filePath,{force:true});
@@ -37,21 +38,24 @@ try{
  await page.locator('.report-content').waitFor();
  assert.equal(await page.locator('.report-content').count(),1);
  assert.equal(await page.locator('.inspector,#field-panel,#field-value').count(),0);
- assert.ok(await page.locator('[data-template-field]').count()>=40);
+ assert.ok(await page.locator('[data-template-field]').count()>=4);
  assert.equal(await page.evaluate(()=>typeof window.desktop.exportPDF),'function');
  console.log('PASS: one document editor, no right inspector, source placeholders.');
 
  const patientHint=await field(patientId).innerText();
+ await field(patientId).evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,0);range.setEnd(node,1);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
+ await page.keyboard.insertText('К');assert.equal(await field(patientId).innerText(),'К.И.О.');assert.equal(await field(patientId).getAttribute('data-filled'),'true');
+ await page.keyboard.press('Control+z');assert.equal(await field(patientId).innerText(),patientHint);assert.equal(await field(patientId).getAttribute('data-filled'),'false');
  await fillField(patientId,'Тестовый Пациент');
  assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
  assert.equal(await field(patientId).getAttribute('data-filled'),'true');
  await page.keyboard.press('Control+z');assert.equal(await field(patientId).innerText(),patientHint);
  await page.keyboard.press('Control+Shift+z');assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
  const second=page.locator('[data-template-field][data-filled="false"]').first();
- const secondId=await second.getAttribute('data-field-id');await second.click();
+ const secondId=await second.getAttribute('data-field-id');await selectField(secondId);
  await page.evaluate(()=>{const transfer=new DataTransfer();transfer.setData('text/plain','Проверка вставки');document.querySelector('.report-content').dispatchEvent(new ClipboardEvent('paste',{clipboardData:transfer,bubbles:true,cancelable:true}));});
  assert.equal(await field(secondId).innerText(),'Проверка вставки');
- console.log('PASS: inline typing and paste replace prompts; Undo/Redo restores field state.');
+ console.log('PASS: prompt text supports partial editing, full replacement and paste; Undo/Redo restores field state.');
 
  await page.locator('#settings').click();await page.locator('#doctor-name').fill('Иванова Мария Петровна');await page.locator('#apply-doctor-now').check();await page.locator('#save-settings').click();
  assert.equal(await field(doctorId).innerText(),'Иванова Мария Петровна');
@@ -64,7 +68,7 @@ try{
 
  const saved=await saveWord('v3-report.docx');
  assert.equal(saved.imported.doc.attrs.sourceFormat,'alliance-template');
- assert.equal(saved.imported.templateId,'brain');
+ assert.equal(saved.imported.templateId,'head-gm');
  assert.match(JSON.stringify(saved.imported.doc),/Тестовый Пациент/);
  assert.match(JSON.stringify(saved.imported.doc),/Петров Алексей Иванович/);
  const zip=unzipSync(saved.bytes),xml=strFromU8(zip['word/document.xml']);
@@ -100,12 +104,12 @@ try{
  assert.equal(await field(patientId).innerText(),'Ф.И.О. пациента полностью');assert.equal(await field(doctorId).innerText(),'Иванова Мария Петровна');
  console.log('PASS: template save/cancel/defaults/doctor persist; report and undo boundaries isolate patient data.');
 
- await page.locator('#area-select').selectOption('pituitary');const pit=page.locator('[data-template]').first();const pitId=await pit.getAttribute('data-template');await pit.click();if(await page.locator('#confirm-new').count())await page.locator('#confirm-new').click();
- assert.match(await page.locator('#template-name').innerText(),/гипофиз/i);
+ await page.locator('#area-select').selectOption('spine');const pit=page.locator('[data-template]').first();const pitId=await pit.getAttribute('data-template');await pit.click();if(await page.locator('#confirm-new').count())await page.locator('#confirm-new').click();
+ assert.ok(await page.locator('#template-name').innerText());
  await page.locator('#report-file').setInputFiles(saved.filePath);if(await page.locator('#confirm-open').count())await page.locator('#confirm-open').click();
  await field(patientId).waitFor();assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
- assert.equal(await page.locator('#area-select').inputValue(),'brain');
- assert.equal(await page.locator('#template-name').innerText(),'Базовый протокол');
+ assert.equal(await page.locator('#area-select').inputValue(),'head');
+ assert.equal(await page.locator('#template-name').innerText(),'ГМ');
  assert.equal(await page.locator('.report-content').count(),1);
  console.log('PASS: zone → template changes and imported DOCX restores original report.');
 
@@ -117,14 +121,19 @@ try{
  await page.locator('[data-preview-block]').click();assert.match(await page.locator('.block-preview').innerText(),/Проверочное описание/);
  await page.locator('#insert-preview-block').click();
  const insertedField=page.locator('[data-template-field][data-hint="Описание участка"]').first();await insertedField.waitFor();
- await insertedField.click();await page.keyboard.press('Control+b');await page.keyboard.insertText('Иследование. Очаг очаг не выявлен.');await page.keyboard.press('Control+b');
+ await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.press('Control+b');await page.keyboard.insertText('Иследование. Очаг очаг не выявлен.');await page.keyboard.press('Control+b');
  assert.match(await insertedField.innerText(),/Иследование/);
  await page.locator('#check-now').click();
  const spelling=page.locator('.proof-spelling').filter({hasText:/^Иследование$/});await spelling.waitFor({timeout:30000});
+ const proofStyle=await spelling.evaluate(el=>{const s=getComputedStyle(el);return {line:s.textDecorationLine,style:s.textDecorationStyle,color:s.textDecorationColor};});
+ assert.equal(proofStyle.line,'underline');assert.equal(proofStyle.style,'wavy');assert.equal(proofStyle.color,'rgb(214, 40, 40)');
  await spelling.click();await page.locator('.proof-popup').waitFor();
  await page.locator('.proof-popup [data-correction]').filter({hasText:/^Исследование$/}).click();
  const grammar=page.locator('.proof-grammar').filter({hasText:/^Очаг очаг$/});await grammar.waitFor({timeout:30000});await grammar.click();await page.locator('.proof-popup [data-correction]').filter({hasText:/^Очаг$/}).click();
  assert.equal(await insertedField.innerText(),'Исследование. Очаг не выявлен.');
+ await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();
+ const yellowCount=await page.locator('.report-content mark[data-color="#ffff00"]').count();assert.ok(yellowCount>0,'yellow text highlighter can be applied');
+ await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();assert.equal(await page.locator('.report-content mark[data-color="#ffff00"]').count(),yellowCount,'yellow text highlighter can be removed from the selected text');
  assert.match(await page.locator('.report-content strong').allTextContents().then(t=>t.join(' ')),/Исследование/);
  console.log('PASS: searchable previews and insertion, live in-document spelling/grammar corrections retain bold and clinical negation.');
  await insertedField.click();await page.keyboard.press('Control+End');

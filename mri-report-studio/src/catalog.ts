@@ -17,23 +17,16 @@ export type ReportBlock = {
   conclusion: RichNode[];
 };
 
-export const areas = [
-  { id: 'brain', title: 'Головной мозг' },
-  { id: 'vessels', title: 'Сосуды головного мозга' },
-  { id: 'pituitary', title: 'Гипофиз' },
-  { id: 'orbits', title: 'Орбиты' },
-  { id: 'sinuses', title: 'Околоносовые пазухи' },
-  { id: 'custom', title: 'Другая область' },
-];
-
-export const PATIENT_FIELD_ID = 'HEAD.BASE.1.FIELD.0001';
-export const DOCTOR_FIELD_ID = 'HEAD.BASE.2.FIELD.0043';
+export const areas = source.areas;
+export const PATIENT_FIELD_ID = source.patientFieldId;
+export const DOCTOR_FIELD_ID = source.doctorFieldId;
+export const DEFAULT_TEMPLATE_ID = source.defaultTemplateId;
 export const templatePage = source.page;
 export const reportTemplates = source.templates as ReportTemplate[];
 export const reportBlocks = source.blocks as ReportBlock[];
 
 /** A new independent document with source formatting and blank entry fields. */
-export function makeTemplateDocument(templateId = 'brain'): RichNode {
+export function makeTemplateDocument(templateId = DEFAULT_TEMPLATE_ID): RichNode {
   const template = reportTemplates.find(item => item.id === templateId);
   if (!template) throw new Error('Шаблон исследования не найден.');
   return structuredClone(template.doc);

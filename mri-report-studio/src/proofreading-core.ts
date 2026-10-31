@@ -138,8 +138,9 @@ function grammarIssues(text: string): ProofIssue[] {
  * This does not attempt full syntactic or medical interpretation. Offsets use
  * JavaScript UTF-16 indices, the same coordinate system as editor text offsets.
  */
-export function createRussianChecker(aff: string, dic: string) {
+export function createRussianChecker(aff: string, dic: string, englishAff = '', englishDic = '') {
   const spell = nspell(aff, dic);
+  const latinSpell = englishAff && englishDic ? nspell(englishAff, englishDic) : null;
   for (const word of medicalWords()) spell.add(word);
   const spellingCache = new Map<string, { correct: boolean; suggestions: string[] }>();
   return async function checkRussian(text: string, personalWords: string[] = []): Promise<ProofIssue[]> {
@@ -150,11 +151,12 @@ export function createRussianChecker(aff: string, dic: string) {
     // Uppercase abbreviations, Latin sequence names, and numbers are not
     // interpreted as Russian spelling mistakes. Compound medical terms are
     // accepted when each component is a known word or an abbreviation.
-    const correct = (word: string): boolean => {
+    const correct = (word: string, english = false): boolean => {
       if (word.length < 3 || abbreviation(word)) return true;
-      if (spell.correct(word) || spell.correct(word.replace(/ё/g, 'е').replace(/Ё/g, 'Е'))) return true;
+      const dictionary = english ? latinSpell : spell;
+      if (dictionary?.correct(word) || (!english && (spell.correct(word.replace(/ё/g, 'е').replace(/Ё/g, 'Е'))))) return true;
       const parts = word.split(/[-‑]/u);
-      return parts.length > 1 && parts.every(part => correct(part));
+      return parts.length > 1 && parts.every(part => correct(part, english));
     };
     for (const match of text.matchAll(/[А-Яа-яЁё]+(?:[-‑][А-Яа-яЁё]+)*/gu)) {
       if (issues.length >= MAX_PROOF_ISSUES) break;
@@ -181,6 +183,25 @@ export function createRussianChecker(aff: string, dic: string) {
       // second spelling warning for the same fragment.
       if (issues.some(issue => issue.start < end && issue.end > start)) continue;
       issues.push({ id: `spelling.${start}.${end}`, start, end, text: word, kind: 'spelling', message: 'Слово не найдено в русском словаре. Проверьте написание или добавьте свой термин в словарь.', suggestions: result.suggestions });
+    }
+    if (latinSpell) for (const match of text.matchAll(/[A-Za-z]+(?:[-‑][A-Za-z]+)*/gu)) {
+      if (issues.length >= MAX_PROOF_ISSUES) break;
+      const word = match[0];
+      if (word.length < 3 || abbreviation(word) || personal.has(normalize(word))) continue;
+      if (++examined % 24 === 0) await pause();
+      let result = spellingCache.get(`en:${word}`);
+      if (!result) {
+        const isCorrect = correct(word, true);
+        const canSuggest = !isCorrect && word.length <= 28 && suggested < 40;
+        if (canSuggest) suggested++;
+        result = { correct: isCorrect, suggestions: canSuggest ? latinSpell.suggest(word).slice(0, 3) : [] };
+        if (spellingCache.size > 10_000) spellingCache.clear();
+        if (isCorrect || canSuggest || word.length > 28) spellingCache.set(`en:${word}`, result);
+      }
+      if (result.correct) continue;
+      const start = match.index!, end = start + word.length;
+      if (issues.some(issue => issue.start < end && issue.end > start)) continue;
+      issues.push({ id: `spelling.en.${start}.${end}`, start, end, text: word, kind: 'spelling', message: 'Слово не найдено в английском словаре. Проверьте написание или добавьте термин в личный словарь.', suggestions: result.suggestions });
     }
     return issues.sort((a, b) => a.start - b.start || a.end - b.end).slice(0, MAX_PROOF_ISSUES);
   };

@@ -229,7 +229,7 @@ export function migrateLegacyHeader(doc: RichNode): RichNode {
 
 const blockTypes = new Set(['paragraph', 'heading', 'reportSection', 'blockquote', 'bulletList', 'orderedList', 'codeBlock', 'horizontalRule', 'table']);
 const inlineTypes = new Set(['text', 'reportField', 'hardBreak']);
-const simpleMarks = new Set(['bold', 'italic', 'underline', 'strike', 'code']);
+const simpleMarks = new Set(['bold', 'italic', 'underline', 'strike', 'code', 'subscript', 'superscript']);
 
 /** Validate a reusable rich template and return a safe copy with every patient value cleared. */
 export function validateTemplate(input: unknown): RichNode {
@@ -337,7 +337,7 @@ export function validateTemplate(input: unknown): RichNode {
     if (type === 'paragraph' && a.moduleRef != null) attrs.moduleRef = id(a.moduleRef);
     if (['doc', 'paragraph', 'heading'].includes(type)) {
       if (a.fontFamily != null && /^[\p{L}\d\s,'"_-]+$/u.test(string(a.fontFamily, 200))) attrs.fontFamily = a.fontFamily;
-      for (const key of ['fontSizePt', 'spaceBeforePt', 'spaceAfterPt', 'lineHeight', 'pageWidthMm', 'pageHeightMm', 'marginTopMm', 'marginBottomMm', 'marginLeftMm', 'marginRightMm']) {
+      for (const key of ['fontSizePt', 'spaceBeforePt', 'spaceAfterPt', 'lineHeight', 'pageWidthMm', 'pageHeightMm', 'marginTopMm', 'marginBottomMm', 'marginLeftMm', 'marginRightMm', 'firstLineIndentPt', 'leftIndentPt', 'rightIndentPt']) {
         if (a[key] == null) continue;
         if (typeof a[key] !== 'number' || !Number.isFinite(a[key]) || a[key] < 0 || a[key] > 1000) return fail();
         attrs[key] = a[key];

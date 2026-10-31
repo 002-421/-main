@@ -1,7 +1,7 @@
 /** Rebuild the downloadable Word template using the same exporter as the app. */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { makeTemplateDocument } from '../src/catalog.ts';
+import { makeTemplateDocument, DEFAULT_TEMPLATE_ID } from '../src/catalog.ts';
 import { prepareInlineDocument } from '../src/inline-fields.ts';
 import { exportDocx } from '../src/docx.ts';
 
@@ -13,9 +13,9 @@ const font = {
   italic: new Uint8Array(await readFile(new URL('src/assets/fonts/DejaVuSans-Oblique.ttf', root))),
   boldItalic: new Uint8Array(await readFile(new URL('src/assets/fonts/DejaVuSans-BoldOblique.ttf', root))),
 };
-const doc = prepareInlineDocument(makeTemplateDocument('brain'));
+const doc = prepareInlineDocument(makeTemplateDocument(DEFAULT_TEMPLATE_ID));
 const blob = await exportDocx(doc, {
-  profile: 'brain', templateId: 'brain', kind: 'template',
+  profile: 'brain', templateId: DEFAULT_TEMPLATE_ID, kind: 'template',
   title: 'МРТ головы — шаблон описания', fonts: [font],
 });
 const output = new URL('downloads/MRI_Alliance_Head_Template.docx', root);
