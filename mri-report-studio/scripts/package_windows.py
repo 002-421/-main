@@ -5,6 +5,7 @@ from zipfile import ZipFile, ZIP_DEFLATED
 import hashlib
 import json
 import shutil
+import subprocess
 from package_setup import collect_licenses
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,13 +49,17 @@ with ZipFile(archive) as package:
             raise RuntimeError('Invalid archive path')
     package.extractall(destination)
 (destination / 'electron.exe').rename(destination / 'MRI Report Studio.exe')
+subprocess.run([
+    'node', str(ROOT / 'scripts/set_exe_icon.mjs'),
+    str(destination / 'MRI Report Studio.exe'), str(ROOT / 'public/mri-report-studio.ico'),
+], check=True)
 app = destination / 'resources/app'
 (app / 'electron').mkdir(parents=True)
 (app / 'dist').mkdir()
 for filename in ['main.cjs', 'preload.cjs']:
     shutil.copy2(ROOT / 'electron' / filename, app / 'electron' / filename)
 shutil.copy2(ROOT / 'dist/index.html', app / 'dist/index.html')
-shutil.copy2(ROOT / 'public/mri-alliance.ico', app / 'dist/mri-alliance.ico')
+shutil.copy2(ROOT / 'public/mri-report-studio.ico', app / 'dist/mri-report-studio.ico')
 (app / 'package.json').write_text(json.dumps({
     'name': 'mri-report-studio', 'productName': 'MRI Report Studio',
     'version': json.loads((ROOT / 'package.json').read_text())['version'], 'main': 'electron/main.cjs', 'private': True,

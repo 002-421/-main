@@ -44,6 +44,14 @@ try{
  assert.equal(await page.evaluate(()=>typeof window.desktop.exportPDF),'function');
  console.log('PASS: one document editor, no right inspector, source placeholders.');
 
+ await page.locator('#toggle-theme').click();
+ assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+ assert.equal(await page.locator('#toggle-theme').getAttribute('aria-pressed'),'true');
+ assert.equal(await page.locator('.paper').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)');
+ await page.locator('#toggle-theme').click();
+ assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
+ console.log('PASS: visible theme toggle changes and restores dark mode while keeping the report paper white.');
+
  const patientHint=await field(patientId).innerText();
  await field(patientId).evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,0);range.setEnd(node,1);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
  await page.keyboard.insertText('К');assert.equal(await field(patientId).innerText(),'К.И.О.');assert.equal(await field(patientId).getAttribute('data-filled'),'true');

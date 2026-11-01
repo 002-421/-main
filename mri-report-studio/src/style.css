@@ -9,3 +9,34 @@
 .report-content table{margin-left:-5.65pt}
 
 #highlight-yellow{position:relative;font-size:16px!important;padding-bottom:7px!important}#highlight-yellow:after{content:"";position:absolute;left:4px;right:4px;bottom:2px;height:3px;border-radius:2px;background:#ffff00}
+
+/* The report paper stays white so its on-screen layout matches Word/PDF output. */
+html[data-theme="dark"]{color-scheme:dark;color:#e4eaf2;background:#111821;--navy:#142d43;--border:#34414f}
+html[data-theme="dark"] body{background:#111821;color:#e4eaf2}
+html[data-theme="dark"] .sidebar,html[data-theme="dark"] .topbar,html[data-theme="dark"] .ribbon,html[data-theme="dark"] .statusbar,html[data-theme="dark"] .dialog,html[data-theme="dark"] .proof-popup{background:#1b2531;color:#e4eaf2}
+html[data-theme="dark"] .main,html[data-theme="dark"] .canvas{background:#111821}
+html[data-theme="dark"] .document-tools{background:#18222d;border-color:#34414f}
+html[data-theme="dark"] .sidebar,html[data-theme="dark"] .topbar,html[data-theme="dark"] .ribbon,html[data-theme="dark"] .statusbar{border-color:#34414f}
+html[data-theme="dark"] input,html[data-theme="dark"] textarea,html[data-theme="dark"] select,html[data-theme="dark"] .btn,html[data-theme="dark"] .chip,html[data-theme="dark"] .block-card{background:#222e3b;color:#e4eaf2;border-color:#3a4857}
+html[data-theme="dark"] #area-select{background:#222e3b;color:#e4eaf2}
+html[data-theme="dark"] .side-tabs button{color:#a3b1bf}
+html[data-theme="dark"] .side-tabs button.active{color:#9de1d8}
+html[data-theme="dark"] .btn.primary{background:#176a78;border-color:#176a78;color:white}
+html[data-theme="dark"] .btn:hover,html[data-theme="dark"] .chip:hover{background:#2b3948}
+html[data-theme="dark"] .btn.primary:hover{background:#218495}
+html[data-theme="dark"] .template-card:hover,html[data-theme="dark"] .template-card.selected{background:#223842;border-color:#39717a}
+html[data-theme="dark"] .side-tabs,html[data-theme="dark"] .side-bottom,html[data-theme="dark"] .dialog>header,html[data-theme="dark"] .dialog>footer{border-color:#34414f}
+html[data-theme="dark"] .document-heading strong,html[data-theme="dark"] .dialog h2,html[data-theme="dark"] .dialog label,html[data-theme="dark"] .block-card strong{color:#e4eaf2}
+html[data-theme="dark"] .eyebrow,html[data-theme="dark"] .document-heading small,html[data-theme="dark"] .side-heading,html[data-theme="dark"] .side-label,html[data-theme="dark"] .dialog-body>p,html[data-theme="dark"] .dialog small,html[data-theme="dark"] .block-card p,html[data-theme="dark"] .empty-state{color:#a3b1bf}
+html[data-theme="dark"] .template-banner{background:#1d342f;border-color:#35584e}
+html[data-theme="dark"] .template-banner small{color:#b4c9c1}
+html[data-theme="dark"] .template-mode .paper{border-color:#39717a}
+html[data-theme="dark"] .paper{background:#fff}
+html[data-theme="dark"] .report-content{color:#172333}
+html[data-theme="dark"] .tool-group{border-color:#34414f}
+html[data-theme="dark"] .tool-group select{background:#222e3b}
+html[data-theme="dark"] .tool-group button:hover,html[data-theme="dark"] .tool-group button.active{background:#29444a;color:#9de1d8}
+html[data-theme="dark"] .block-tag{background:#29413d;color:#a9d4c7}
+html[data-theme="dark"] .block-card .insert{background:#23433f;color:#a8e0d4;border-color:#35685f}
+html[data-theme="dark"] .notice{background:#203832;border-color:#35584e;color:#d5e9e1}
+html[data-theme="dark"] .dialog-overlay{background:#0009}

@@ -25,7 +25,7 @@ app.whenReady().then(() => {
   mainWindow = new BrowserWindow({
     width: 1500, height: 1000, minWidth: 900, minHeight: 650,
     title: 'MRI Report Studio', backgroundColor: '#eef1f5',
-    icon: path.join(__dirname, '..', 'dist', 'mri-alliance.ico'),
+    icon: path.join(__dirname, '..', 'dist', 'mri-report-studio.ico'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
