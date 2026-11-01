@@ -136,14 +136,8 @@ def main():
     write_zip(browser, DOWNLOADS / 'MRI_Alliance_Browser.zip')
     shutil.copy2(BUILD, DOWNLOADS / 'MRI_Alliance.html')
     (DOWNLOADS / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
-    # Keep earlier download URLs useful: they must deliver the current app too.
-    for suffix in ('Windows_Setup.zip', 'Browser.zip', '.html'):
-        separator = '' if suffix.startswith('.') else '_'
-        shutil.copy2(DOWNLOADS / f'MRI_Alliance{separator}{suffix}',
-                     DOWNLOADS / f'MRI_Report_Studio{separator}{suffix}')
-    preview = DOWNLOADS / 'MRI_Alliance_Preview.png'
-    if preview.exists():
-        shutil.copy2(preview, DOWNLOADS / 'MRI_Report_Studio_Preview.png')
+    for duplicate in DOWNLOADS.glob('MRI_Report_Studio*'):
+        duplicate.unlink()
     print('Standalone HTML and license notices updated.', flush=True)
 
 
