@@ -98,7 +98,15 @@ function createAIReviewer({
       onProgress({ phase: 'loaded' });
       return { llama, model };
     })();
-    try { return await modelPromise; } catch (error) { modelPromise = undefined; modelPath = undefined; throw error; }
+    try { return await modelPromise; } catch (error) {
+      modelPromise = undefined;
+      modelPath = undefined;
+      const wrapped = new Error(error?.message === 'Failed to load model'
+        ? 'Встроенный движок не смог открыть файл Qwen из кэша.'
+        : `Не удалось запустить встроенный движок модели: ${error?.message ?? 'неизвестная ошибка'}`);
+      wrapped.code = 'AI_MODEL_LOAD_FAILED';
+      throw wrapped;
+    }
   }
 
   async function review(blocksInput, path, onProgress = () => {}) {

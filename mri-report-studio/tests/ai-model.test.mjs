@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createModelManager, modelDirectory } from '../electron/ai-model.cjs';
 
 const fixture = Buffer.alloc(2 * 1024 * 1024, 0x5a);
+fixture.write('GGUF', 0, 'ascii');
 async function serverFor(requestHandler) {
   const server = createServer(requestHandler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -48,6 +49,26 @@ test('a completed Qwen model is reused on later app iterations without another d
     assert.deepEqual(await readFile(first.path), fixture);
     assert.ok(progress.length > 0);
     assert.equal((await manager.status()).ready, true);
+  } finally {
+    server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('the model cache detects a damaged GGUF file and marks it for redownload', async () => {
+  const { server, url } = await serverFor((_request, response) => {
+    response.writeHead(200, { 'content-length': fixture.length });
+    response.end(fixture);
+  });
+  const root = await mkdtemp(path.join(os.tmpdir(), 'mri-qwen-integrity-'));
+  const manager = createModelManager({ root, model: { id: 'qwen-integrity-v1', filename: 'qwen.gguf', url, maxBytes: fixture.length + 1 } });
+  try {
+    const cached = await manager.ensure();
+    assert.equal((await manager.verifyIntegrity()).valid, true);
+    const damaged = Buffer.from(fixture); damaged[damaged.length - 1] ^= 0xff;
+    await writeFile(cached.path, damaged);
+    assert.deepEqual(await manager.verifyIntegrity(), { valid: false, reason: 'checksum', size: fixture.length });
+    assert.equal((await manager.status()).ready, false);
   } finally {
     server.close();
     await rm(root, { recursive: true, force: true });

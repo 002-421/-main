@@ -26,7 +26,7 @@ declare global { interface Window { desktop?: {
   downloadAIModel:()=>Promise<{ready:boolean;modelId:string;size:number}>;
   onAIModelProgress:(callback:(progress:{loaded:number;total:number})=>void)=>()=>void;
   reviewAIReport:(blocks:{id:string;text:string}[])=>Promise<{blockId:string;quote:string;start:number;end:number;category:'grammar'|'style'|'meaning';severity:'low'|'medium'|'high';explanation:string;suggestion:string}[]>;
-  onAIReviewProgress:(callback:(progress:{phase:'loading'|'loaded'|'review';completed?:number;total?:number})=>void)=>()=>void;
+  onAIReviewProgress:(callback:(progress:{phase:'loading'|'loaded'|'review'|'diagnosing';completed?:number;total?:number})=>void)=>()=>void;
 } } }
 const $ = <T extends HTMLElement = HTMLElement>(s:string) => document.querySelector<T>(s)!;
 const esc = (v:unknown) => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
@@ -218,7 +218,7 @@ async function openAIReviewDialog(){
   const blocks=collectAIReviewBlocks();
   if(!blocks.length){state.textContent='В описании нет текста для проверки.';return;}
   action.disabled=true;action.textContent='Проверяем…';findingsBox.replaceChildren();setAIReviewHighlights(editor,[]);progress.value=0;progress.classList.remove('hidden');progressLabel.classList.remove('hidden');state.textContent='Загружаем движок llama.cpp и модель в память компьютера. Первый запуск может занять несколько минут.';
-  const unsubscribe=window.desktop!.onAIReviewProgress(({phase,completed,total})=>{if(!d.isConnected)return;if(phase==='loading')state.textContent='Запускаем локальный движок и загружаем Qwen в память…';else if(phase==='loaded')state.textContent='Модель запущена. Проверяем текст локально…';else if(phase==='review'){progress.value=total?completed!/total!:0;progressLabel.textContent=`Проверено частей: ${completed} из ${total}`;}});
+  const unsubscribe=window.desktop!.onAIReviewProgress(({phase,completed,total})=>{if(!d.isConnected)return;if(phase==='loading')state.textContent='Запускаем локальный движок и загружаем Qwen в память…';else if(phase==='loaded')state.textContent='Модель запущена. Проверяем текст локально…';else if(phase==='diagnosing')state.textContent='Движок не открыл модель. Проверяем целостность кэша Qwen; это может занять некоторое время…';else if(phase==='review'){progress.value=total?completed!/total!:0;progressLabel.textContent=`Проверено частей: ${completed} из ${total}`;}});
   try{
    const findings=await window.desktop!.reviewAIReport(blocks.map(({id,text})=>({id,text})));
    if(!d.isConnected)return;
@@ -233,7 +233,7 @@ async function openAIReviewDialog(){
    }).join('')}`:'<p class="ai-review-empty">Замечаний не найдено.</p>';
    findingsBox.querySelectorAll<HTMLButtonElement>('[data-ai-open]').forEach(button=>button.onclick=()=>{const index=Number(button.dataset.aiOpen),range=ranges.find(item=>item.finding===index);if(!range)return;closeDialog();editor.chain().focus().setTextSelection({from:range.from,to:range.to}).run();editor.view.dispatch(editor.state.tr.scrollIntoView());});
    action.textContent='Проверить ещё раз';action.disabled=false;
-  }catch(error){if(d.isConnected){state.textContent=`Не удалось выполнить ИИ-проверку: ${(error as Error).message}`;action.textContent='Повторить проверку';action.disabled=false;}}
+  }catch(error){if(d.isConnected){state.textContent=`Не удалось выполнить ИИ-проверку: ${(error as Error).message}`;try{const status=await window.desktop!.aiModelStatus();if(!status.ready){modelReady=false;action.textContent='Загрузить Qwen заново';}else action.textContent='Повторить проверку';}catch{action.textContent='Повторить проверку';}action.disabled=false;}}
   finally{unsubscribe();}
  };
 }
