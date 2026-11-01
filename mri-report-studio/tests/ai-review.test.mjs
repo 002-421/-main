@@ -51,3 +51,17 @@ test('local reviewer loads the model once and reports progress for each batch', 
   assert.ok(events.some(event => event.phase === 'loading'));
   assert.equal(events.filter(event => event.phase === 'review').length, 2);
 });
+
+test('model load errors preserve llama.cpp diagnostics for troubleshooting', async () => {
+  const reviewer = createAIReviewer({
+    getLlama: async options => {
+      options.logger('error', 'unsupported model architecture qwen3-test');
+      return { loadModel: async () => { throw new Error('Failed to load model'); } };
+    },
+  });
+  await assert.rejects(reviewer.review([{ id: 'b0', text: 'Протокол.' }], '/cache/model.gguf'), error => {
+    assert.equal(error.code, 'AI_MODEL_LOAD_FAILED');
+    assert.match(error.engineLogs.join('\n'), /unsupported model architecture/);
+    return true;
+  });
+});

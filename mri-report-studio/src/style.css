@@ -49,6 +49,9 @@ html[data-theme="dark"] .dialog-overlay{background:#0009}
 .ai-finding-heading{font-size:11px;font-weight:700;color:#765100}
 .ai-finding q{font-style:italic}
 .ai-review-empty{padding:10px;color:#66798a}
+.ai-engine-diagnostics{font-size:11px;border:1px solid var(--border);border-radius:6px;padding:8px}
+.ai-engine-diagnostics summary{cursor:pointer;font-weight:650}
+.ai-engine-diagnostics pre{white-space:pre-wrap;overflow:auto;max-height:220px;font:10px/1.4 ui-monospace,monospace}
 @media print{.ai-review-highlight{background:transparent!important;box-shadow:none!important}}
 html[data-theme="dark"] .ai-review-highlight{background:#8b650e;box-shadow:0 0 0 2px #8b650e}
 html[data-theme="dark"] .ai-finding{background:#222e3b;color:#e4eaf2;border-color:#3a4857}

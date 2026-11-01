@@ -233,7 +233,7 @@ async function openAIReviewDialog(){
    }).join('')}`:'<p class="ai-review-empty">Замечаний не найдено.</p>';
    findingsBox.querySelectorAll<HTMLButtonElement>('[data-ai-open]').forEach(button=>button.onclick=()=>{const index=Number(button.dataset.aiOpen),range=ranges.find(item=>item.finding===index);if(!range)return;closeDialog();editor.chain().focus().setTextSelection({from:range.from,to:range.to}).run();editor.view.dispatch(editor.state.tr.scrollIntoView());});
    action.textContent='Проверить ещё раз';action.disabled=false;
-  }catch(error){if(d.isConnected){state.textContent=`Не удалось выполнить ИИ-проверку: ${(error as Error).message}`;try{const status=await window.desktop!.aiModelStatus();if(!status.ready){modelReady=false;action.textContent='Загрузить Qwen заново';}else action.textContent='Повторить проверку';}catch{action.textContent='Повторить проверку';}action.disabled=false;}}
+  }catch(error){if(d.isConnected){const message=(error as Error).message,split=message.split('\n\nДиагностика llama.cpp:\n');state.textContent=`Не удалось выполнить ИИ-проверку: ${split[0]}`;if(split[1])findingsBox.innerHTML=`<details class="ai-engine-diagnostics"><summary>Технический вывод llama.cpp</summary><pre>${esc(split[1])}</pre></details>`;try{const status=await window.desktop!.aiModelStatus();if(!status.ready){modelReady=false;action.textContent='Загрузить Qwen заново';}else action.textContent='Повторить проверку';}catch{action.textContent='Повторить проверку';}action.disabled=false;}}
   finally{unsubscribe();}
  };
 }

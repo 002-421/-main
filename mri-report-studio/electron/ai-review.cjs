@@ -85,12 +85,21 @@ function createAIReviewer({
   let modelPath;
   let llamaPromise;
   let modelPromise;
+  const engineLogs = [];
 
   async function loadModel(path, onProgress) {
     if (modelPromise && modelPath === path) return modelPromise;
     if (modelPromise && modelPath !== path) throw new Error('Уже загружается другая модель.');
     modelPath = path;
-    llamaPromise ??= getLlama({ gpu: false, build: 'never', progressLogs: false, logLevel: 'error' });
+    llamaPromise ??= getLlama({
+      gpu: false, build: 'never', progressLogs: false, logLevel: 'info',
+      logger: (level, message) => {
+        if (['fatal', 'error', 'warn', 'info'].includes(level) && message?.trim()) {
+          engineLogs.push(`${level}: ${message.trim().slice(0, 600)}`);
+          if (engineLogs.length > 30) engineLogs.shift();
+        }
+      },
+    });
     onProgress({ phase: 'loading' });
     modelPromise = (async () => {
       const llama = await llamaPromise;
@@ -105,6 +114,7 @@ function createAIReviewer({
         ? 'Встроенный движок не смог открыть файл Qwen из кэша.'
         : `Не удалось запустить встроенный движок модели: ${error?.message ?? 'неизвестная ошибка'}`);
       wrapped.code = 'AI_MODEL_LOAD_FAILED';
+      wrapped.engineLogs = [...engineLogs];
       throw wrapped;
     }
   }
@@ -135,7 +145,7 @@ function createAIReviewer({
     return [...deduped.values()];
   }
 
-  return { review };
+  return { review, getEngineLogs: () => [...engineLogs] };
 }
 
 module.exports = { MAX_REPORT_CHARS, findingSchema, validateBlocks, normalizeFindings, makeBatches, createAIReviewer };

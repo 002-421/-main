@@ -92,18 +92,21 @@ app.whenReady().then(() => {
     } catch (error) {
       if (error.code !== 'AI_MODEL_LOAD_FAILED') throw error;
       progress({ phase: 'diagnosing' });
+      const engineDetails = (error.engineLogs ?? aiReviewer.getEngineLogs())
+        .slice(-12).map(line => String(line).replaceAll(aiModelStore.modelPath, '[файл Qwen]').replaceAll('\\', '/'))
+        .join('\n').slice(0, 4_000);
       const integrity = await aiModelStore.verifyIntegrity();
       if (!integrity.valid) {
         throw new Error(integrity.reason === 'checksum'
-          ? 'Файл Qwen в кэше повреждён (контрольная сумма не совпала). Закройте это окно, снова нажмите «ИИ проверка» и загрузите модель заново.'
-          : 'Файл Qwen не прошёл проверку формата GGUF. Закройте это окно, снова нажмите «ИИ проверка» и загрузите модель заново.');
+          ? `Файл Qwen в кэше повреждён (контрольная сумма не совпала). Закройте это окно, снова нажмите «ИИ проверка» и загрузите модель заново.${engineDetails ? `\n\nДиагностика llama.cpp:\n${engineDetails}` : ''}`
+          : `Файл Qwen не прошёл проверку формата GGUF. Закройте это окно, снова нажмите «ИИ проверка» и загрузите модель заново.${engineDetails ? `\n\nДиагностика llama.cpp:\n${engineDetails}` : ''}`);
       }
       const totalGb = os.totalmem() / 1024 ** 3;
       const freeGb = os.freemem() / 1024 ** 3;
       const memoryAdvice = totalGb < 12 || freeGb < 6
         ? ` Сейчас доступно ${freeGb.toFixed(1)} ГБ из ${totalGb.toFixed(1)} ГБ ОЗУ; для Qwen 8B желательно иметь не менее 16 ГБ всего и около 6 ГБ свободной памяти.`
         : ` Доступно ${freeGb.toFixed(1)} ГБ из ${totalGb.toFixed(1)} ГБ ОЗУ.`;
-      throw new Error(`Движок не открыл Qwen, хотя файл прошёл проверку SHA-256.${memoryAdvice} Закройте другие программы и повторите попытку. Если ошибка сохранится, пришлите это сообщение разработчику.`);
+      throw new Error(`Движок не открыл Qwen, хотя файл прошёл проверку SHA-256.${memoryAdvice} Закройте другие программы и повторите попытку. Если ошибка сохранится, пришлите это сообщение разработчику.${engineDetails ? `\n\nДиагностика llama.cpp:\n${engineDetails}` : ''}`);
     }
   });
 });
