@@ -176,7 +176,7 @@ def split_range(nodes, start, end, mark):
             if a == b: continue
             clone = {'type': 'text', 'text': text[a:b]}
             marks = deepcopy(node.get('marks', []))
-            if start < cursor + b and end > cursor + a:
+            if start < cursor + b and end > cursor + a and not any(m.get('type') == mark.get('type') for m in marks):
                 marks.append(deepcopy(mark))
             if marks: clone['marks'] = marks
             result.append(clone)
@@ -228,9 +228,28 @@ def transform_paragraph(node, template_id, counter):
             node['content'] = split_range(node['content'], date.start(), date.end(), field_mark(f'{template_id}.reportdate', 'дд.мм.гггг'))
             text = plain(node)
 
-    # Make the slash-separated alternatives yellow. These remain ordinary editable text.
-    for match in list(re.finditer(r'(?<![\w])(?:[А-Яа-яЁёA-Za-z0-9.-]{2,}\s*/\s*[А-Яа-яЁёA-Za-z0-9.-]{2,})(?![\w])', text, re.U))[::-1]:
-        node['content'] = split_range(node['content'], match.start(), match.end(), YELLOW_MARK)
+    # The source uses slashes both for true alternatives and for parenthetical
+    # clarifications/sequences. Highlight only explicit choice constructions.
+    choices = [
+        r'сохранен\s*/\s*выпрямлен', r'выпрямлен\s*/\s*сохранен',
+        r'прав(?:ой|ого)\s*/\s*лев(?:ой|ого)', r'лев(?:ой|ого)\s*/\s*прав(?:ой|ого)',
+        r'не\s+выявлен(?:ы|о)?\s*/\s*[^,;:.]+', r'[^,;:.]+\s*/\s*не\s+выявлен(?:ы|о)?',
+    ]
+    for pattern in choices:
+        for match in list(re.finditer(pattern, text, re.I | re.U))[::-1]:
+            value = match.group(0)
+            # Never color sequence names or a slash that simply opens/closes a note.
+            if (re.search(r'\b(?:T1|T2|FLAIR|STIR|DWI|ADC)\s*$', value, re.I)
+                    or (match.start() > 0 and text[match.start()-1] == '/')
+                    or (match.end() < len(text) and text[match.end()] == '/')):
+                continue
+            node['content'] = split_range(node['content'], match.start(), match.end(), YELLOW_MARK)
+    # Empty measurements are genuinely missing report data and must stand out.
+    for match in list(re.finditer(r'(?i)(?:размер(?:ами|ом)?|диаметр(?:ом)?)\s*(?:[-:=]\s*)?(?:см|мм)(?![\w])', text))[::-1]:
+        start = match.start()
+        if text[match.start():match.end()].strip().lower() in ('см','мм'):
+            start = match.start()
+        node['content'] = split_range(node['content'], start, match.end(), YELLOW_MARK)
     return node
 
 
@@ -291,6 +310,14 @@ def blocks_from_document(path, ident):
         elif tag == 'p' and element.get('style') and 'table' not in ancestors:
             node = transform_paragraph(make_paragraph(element), ident, {})
             if node is not None: blocks.append(node)
+    # wvHtml represents Word paragraph spacing as empty paragraphs containing
+    # several <br> tags. They are layout noise; actual spacing is preserved in
+    # paragraph attributes and should not become large blank gaps in the editor.
+    blocks = [block for block in blocks if not (
+        block.get('type') == 'paragraph'
+        and not plain(block).strip()
+        and all(child.get('type') == 'hardBreak' for child in block.get('content', []))
+    )]
     return blocks
 
 

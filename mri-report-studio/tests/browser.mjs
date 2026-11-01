@@ -132,8 +132,8 @@ try{
  const grammar=page.locator('.proof-grammar').filter({hasText:/^Очаг очаг$/});await grammar.waitFor({timeout:30000});await grammar.click();await page.locator('.proof-popup [data-correction]').filter({hasText:/^Очаг$/}).click();
  assert.equal(await insertedField.innerText(),'Исследование. Очаг не выявлен.');
  await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();
- const yellowCount=await page.locator('.report-content mark[data-color="#ffff00"]').count();assert.ok(yellowCount>0,'yellow text highlighter can be applied');
- await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();assert.equal(await page.locator('.report-content mark[data-color="#ffff00"]').count(),yellowCount,'yellow text highlighter can be removed from the selected text');
+ assert.ok((await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Исследование. Очаг не выявлен.')),'yellow text highlighter can be applied');
+ await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();assert.ok(!(await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Исследование. Очаг не выявлен.')),'yellow text highlighter can be removed from the selected text');
  assert.match(await page.locator('.report-content strong').allTextContents().then(t=>t.join(' ')),/Исследование/);
  console.log('PASS: searchable previews and insertion, live in-document spelling/grammar corrections retain bold and clinical negation.');
  await insertedField.click();await page.keyboard.press('Control+End');
@@ -163,7 +163,7 @@ const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'
 try{
  const browserPage=await browser.newPage({viewport:{width:1500,height:1050}});const requests=[];browserPage.on('request',request=>requests.push(request.url()));
  await browserPage.goto(`http://127.0.0.1:${server.address().port}`);await browserPage.locator('.report-content').waitFor();
- await browserPage.locator(`[data-field-id="${patientId}"]`).click();await browserPage.keyboard.insertText('Проверка браузерной версии');
+ await browserPage.locator(`[data-field-id="${patientId}"]`).evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await browserPage.keyboard.insertText('Проверка браузерной версии');
  await browserPage.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await browserPage.reload();
  assert.equal(await browserPage.locator(`[data-field-id="${patientId}"]`).innerText(),'Проверка браузерной версии');
  await browserPage.screenshot({path:path.join(root,'downloads','MRI_Alliance_Preview.png')});
