@@ -5,6 +5,8 @@ import { readFile } from 'node:fs/promises';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { exportDocx, importOwnDocx, DOCX_MIME } from '../src/docx.ts';
 import { makeDocument, collectFields, builtinModules, moduleNode, insertModule } from '../src/model.ts';
+import { makeTemplateDocument } from '../src/catalog.ts';
+import { initializeReportFooter } from '../src/report-footer.ts';
 
 const STATE_PART = 'customXml/mri-report-studio.xml';
 const p = (text, attrs) => ({ type: 'paragraph', ...(attrs ? { attrs } : {}), content: [{ type: 'text', text }] });
@@ -226,6 +228,17 @@ test('editable inline fields export user values as ordinary Word text and retain
   const restored = await importOwnDocx(blob);
   assert.deepEqual(restored.doc, doc);
   assert.equal(restored.templateId, 'brain-contrast');
+});
+
+test('source template physician and date sit at opposite sides of the signature line', async () => {
+  const doc = initializeReportFooter(makeTemplateDocument('head-gm'), '03.11.2026');
+  const { xml } = await exported(doc, { templateId: 'head-gm' });
+  const doctorText = xml.indexOf('Врач:');
+  const signature = xml.slice(xml.lastIndexOf('<w:p', doctorText), xml.indexOf('</w:p>', doctorText) + 6);
+  assert.match(signature, /<w:tabs><w:tab w:val="right" w:pos="[0-9]+"\/><\/w:tabs>/);
+  assert.match(signature, /<w:tab\/>/);
+  assert.match(signature, /дата:/);
+  assert.match(signature, /03\.11\.2026/);
 });
 
 test('source font faces are embedded with Word font relationships and cannot be modified behind embedded draft metadata', async () => {
