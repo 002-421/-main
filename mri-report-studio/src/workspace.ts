@@ -9,6 +9,7 @@ import { builtinModules, moduleNode, compiler, validateDraft, validateTemplate, 
 import { exportDocx, importOwnDocx } from './docx';
 import { russianProofreadingLicense } from './proofreading';
 import { buildReportFilename, extractFilenameFields } from './report-filename';
+import { initializeReportFooter } from './report-footer';
 import fontLicense from './assets/fonts/LICENSE.txt?raw';
 import allianceLogo from './assets/logo.png?url';
 import regularFont from './assets/fonts/DejaVuSans.ttf?url';
@@ -54,7 +55,7 @@ function defaultDoctor(doc:RichNode):RichNode {
   let applied=false;
   const walk=(n:RichNode)=>{if(n.content)n.content=n.content.filter(child=>{const m=fieldMark(child);if(m?.attrs?.id===DOCTOR_FIELD_ID&&child.type==='text'){if(applied)return false;applied=true;child.text=settings.doctor.trim();m.attrs={...m.attrs,filled:true};}walk(child);return true;});};walk(doc);return doc;
 }
-function newDocument(id:string) { return defaultDoctor(prepareInlineDocument(resetInlineTemplate(overrides[id]??makeTemplateDocument(id)))); }
+function newDocument(id:string) { return defaultDoctor(prepareInlineDocument(initializeReportFooter(resetInlineTemplate(overrides[id]??makeTemplateDocument(id))))); }
 let initial = newDocument(activeTemplateId);
 try {
   const raw=read<any>(KEYS.draft,null);

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { areas, reportTemplates, reportBlocks, makeTemplateDocument, PATIENT_FIELD_ID, DOCTOR_FIELD_ID, DEFAULT_TEMPLATE_ID } from '../src/catalog.ts';
 import { validateTemplate } from '../src/model.ts';
 import { collectInlineFields, prepareInlineDocument } from '../src/inline-fields.ts';
+import { initializeReportFooter } from '../src/report-footer.ts';
 
 function walk(node, callback) { callback(node); node.content?.forEach(child => walk(child, callback)); }
 function plain(node) { return (node.text ?? '') + (node.content ?? []).map(plain).join(''); }
@@ -31,6 +32,23 @@ test('source protocols preserve wording and have editable unique fields', () => 
     assert.ok(copy.content.length > 0, template.title);
   }
   assert.throws(() => makeTemplateDocument('missing'), /не найден/);
+});
+
+test('all protocol templates separate the closing block and fill its date automatically', () => {
+  for (const template of reportTemplates) {
+    const doc = initializeReportFooter(prepareInlineDocument(makeTemplateDocument(template.id)), '03.11.2026');
+    const physician = doc.content.findIndex(node => node.type === 'paragraph' && plain(node).includes('Врач:') && node.content?.some(child => child.marks?.some(mark => mark.type === 'templateField' && mark.attrs?.id.endsWith('.reportdate'))));
+    const disclaimer = doc.content.findIndex(node => node.type === 'paragraph' && plain(node).includes('Данное заключение не является диагнозом'));
+    const equipment = doc.content.findIndex(node => node.type === 'paragraph' && plain(node).includes('Исследование выполнено на магнитно-резонансном томографе'));
+    assert.ok(physician >= 0 && disclaimer > physician && equipment > disclaimer, template.title);
+    assert.equal(doc.content[physician - 1].type, 'paragraph');
+    assert.equal(plain(doc.content[physician - 1]), '');
+    assert.equal(plain(doc.content[disclaimer - 1]), '');
+    assert.equal(plain(doc.content[equipment - 1]), '');
+    const date = doc.content[physician].content.find(node => node.marks?.some(mark => mark.type === 'templateField' && mark.attrs?.id.endsWith('.reportdate')));
+    assert.equal(date.text, '03.11.2026', template.title);
+    assert.equal(date.marks.find(mark => mark.type === 'templateField').attrs.filled, true, template.title);
+  }
 });
 
 test('default head protocol retains editable patient and doctor fields and omits age and clinical goal', () => {
