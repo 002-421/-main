@@ -4,6 +4,7 @@ import { areas, reportTemplates, reportBlocks, makeTemplateDocument, PATIENT_FIE
 import { validateTemplate } from '../src/model.ts';
 import { collectInlineFields, prepareInlineDocument } from '../src/inline-fields.ts';
 import { initializeReportFooter } from '../src/report-footer.ts';
+import { highlightDeletionNotes } from '../src/table-layout.ts';
 
 function walk(node, callback) { callback(node); node.content?.forEach(child => walk(child, callback)); }
 function plain(node) { return (node.text ?? '') + (node.content ?? []).map(plain).join(''); }
@@ -160,6 +161,16 @@ test('both age-specific alternatives are highlighted for choosing the matching n
   assert.match(marked, /норма 18-22,1, после 60 лет 22,6-26,0/);
   assert.match(marked, /норма 24,0-26,3, после 50 лет - 28,2-29,4/);
   assert.ok(markedRuns.every(node => node.marks.some(mark => mark.type === 'textStyle' && mark.attrs.fontSize === '13.333px')));
+});
+
+test('patient-specific dimensions are highlighted while reference norms are left untouched', () => {
+  const doc = highlightDeletionNotes({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Размеры 1,6x3,3 см, от 0,3 см до 0,0 см. Норма 0,5-0,8 см.' }] }] });
+  const paragraph = doc.content[0];
+  const highlighted = paragraph.content.filter(node => node.marks?.some(mark => mark.type === 'highlight' && mark.attrs?.color === '#ffff00')).map(node => node.text).join('');
+  assert.equal(highlighted, '1,6x3,3 см0,3 см0,0 см');
+  const norm = paragraph.content.filter(node => node.text?.includes('0,5-0,8 см'));
+  assert.ok(norm.length > 0);
+  assert.ok(norm.every(node => !node.marks?.some(mark => mark.type === 'highlight' && mark.attrs?.color === '#ffff00')));
 });
 
 test('default head protocol retains editable patient and doctor fields and omits age and clinical goal', () => {

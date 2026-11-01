@@ -113,15 +113,8 @@ export function highlightDeletionNotes(input: RichNode): RichNode {
     };
     style(paragraph);
   };
-  const styleAgeBasedNorms = (paragraph: RichNode) => {
-    if (paragraph.type !== 'paragraph' || !paragraph.content) return;
-    const number = String.raw`\d+(?:[,.]\d+)?`;
-    const range = `${number}(?:\\s*[-–—]\\s*${number})?`;
-    const ageClause = `(?:после|до)\\s*\\d+\\s*лет\\s*[-–—:]?\\s*${range}`;
-    const pairedNorm = new RegExp(`норма\\s*${range}\\s*,\\s*${ageClause}(?:\\s*,\\s*${ageClause})*`, 'gi');
-    const fullText = paragraph.content.map(child => child.type === 'text' ? child.text ?? '' : child.type === 'hardBreak' ? '\n' : '').join('');
-    const ranges = [...fullText.matchAll(pairedNorm)].map(match => ({ start: match.index!, end: match.index! + match[0].length }));
-    if (!ranges.length) return;
+  const highlightRanges = (paragraph: RichNode, ranges: Array<{ start: number; end: number }>, styleRange: (node: RichNode) => void) => {
+    if (!paragraph.content || !ranges.length) return;
     const split: RichNode[] = [];
     let offset = 0;
     for (const child of paragraph.content) {
@@ -139,12 +132,38 @@ export function highlightDeletionNotes(input: RichNode): RichNode {
         if (finish <= start) continue;
         const part = { ...child, text: text.slice(start, finish), ...(child.marks ? { marks: structuredClone(child.marks) } : {}) };
         const absoluteStart = offset + start, absoluteEnd = offset + finish;
-        if (ranges.some(selected => absoluteStart >= selected.start && absoluteEnd <= selected.end)) styleText(part);
+        if (ranges.some(selected => absoluteStart >= selected.start && absoluteEnd <= selected.end)) styleRange(part);
         split.push(part);
       }
       offset = end;
     }
     paragraph.content = split;
+  };
+  const styleAgeBasedNorms = (paragraph: RichNode) => {
+    if (paragraph.type !== 'paragraph' || !paragraph.content) return;
+    const number = String.raw`\d+(?:[,.]\d+)?`;
+    const range = `${number}(?:\\s*[-–—]\\s*${number})?`;
+    const ageClause = `(?:после|до)\\s*\\d+\\s*лет\\s*[-–—:]?\\s*${range}`;
+    const pairedNorm = new RegExp(`норма\\s*${range}\\s*,\\s*${ageClause}(?:\\s*,\\s*${ageClause})*`, 'gi');
+    const fullText = paragraph.content.map(child => child.type === 'text' ? child.text ?? '' : child.type === 'hardBreak' ? '\n' : '').join('');
+    const ranges = [...fullText.matchAll(pairedNorm)].map(match => ({ start: match.index!, end: match.index! + match[0].length }));
+    if (!ranges.length) return;
+    highlightRanges(paragraph, ranges, styleText);
+  };
+  const highlightPatientDimensions = (paragraph: RichNode) => {
+    if (paragraph.type !== 'paragraph' || !paragraph.content) return;
+    const fullText = paragraph.content.map(child => child.type === 'text' ? child.text ?? '' : child.type === 'hardBreak' ? '\n' : '').join('');
+    const number = String.raw`\d+(?:[,.]\d+)?`;
+    const dimension = new RegExp(`${number}(?:\\s*[xх×]\\s*${number})?\\s*(?:см|мм|мл|м)(?:²|2)?(?![а-яё])`, 'gi');
+    const reference = /(?:норм(?:а|ы|альный|альные|атив)|референсн\w*)[^.!?;\n]*/gi;
+    const exclusions = [...fullText.matchAll(reference)].map(match => ({ start: match.index!, end: match.index! + match[0].length }));
+    const ranges = [...fullText.matchAll(dimension)].map(match => ({ start: match.index!, end: match.index! + match[0].length }))
+      .filter(range => !exclusions.some(excluded => range.start >= excluded.start && range.start < excluded.end));
+    highlightRanges(paragraph, ranges, node => {
+      const marks = [...(node.marks ?? [])];
+      if (!marks.some(mark => mark.type === 'highlight')) marks.push(DELETION_HIGHLIGHT);
+      node.marks = marks;
+    });
   };
   const walk = (node: RichNode) => {
     if (!node.content) return;
@@ -165,7 +184,7 @@ export function highlightDeletionNotes(input: RichNode): RichNode {
   };
   walk(doc);
   const markAgeNorms = (node: RichNode) => {
-    if (node.type === 'paragraph') styleAgeBasedNorms(node);
+    if (node.type === 'paragraph') { styleAgeBasedNorms(node); highlightPatientDimensions(node); }
     node.content?.forEach(markAgeNorms);
   };
   markAgeNorms(doc);
