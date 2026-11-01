@@ -1,7 +1,7 @@
 import {
   AlignmentType, BorderStyle, Document, ExternalHyperlink, Footer, HeadingLevel,
   LevelFormat, LineRuleType, Packer, Paragraph, ShadingType, Table, TableCell,
-  TableLayoutType, TableRow, Tab, TabStopType, TextRun, UnderlineType, WidthType, PageNumber, VerticalAlign,
+  TableLayoutType, TableRow, Tab, TabStopType, TabStopPosition, TextRun, UnderlineType, WidthType, PageNumber,
   type IParagraphOptions, type IRunOptions, type NumberingDefinition, type ParagraphChild,
 } from 'docx';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
@@ -162,7 +162,7 @@ function paragraph(node: RichNode, context: Context, extra: IParagraphOptions = 
     children: inline(paragraphContent, inherited),
     ...(style ? { style } : { heading }),
     alignment: ALIGNMENTS[attrs.textAlign],
-    ...(signatureRow && context.width ? { tabStops: [{ type: TabStopType.RIGHT, position: context.width }] } : {}),
+    ...(signatureRow ? { tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }] } : {}),
     spacing: { line, lineRule: LineRuleType.AUTO, before: pt(attrs.spaceBeforePt, context.source && sourceStyle !== 'Normal' ? 180 : heading ? (level === 1 ? 0 : 180) : 0), after: pt(attrs.spaceAfterPt, heading ? 100 : Math.round((context.spaceAfterPt ?? 4.25) * 20)) },
     ...(typeof attrs.firstLineIndentPt === 'number' || typeof attrs.leftIndentPt === 'number' || typeof attrs.rightIndentPt === 'number' ? { indent: { ...(typeof attrs.firstLineIndentPt === 'number' ? { firstLine: pt(attrs.firstLineIndentPt, 0) } : {}), ...(typeof attrs.leftIndentPt === 'number' ? { left: pt(attrs.leftIndentPt, 0) } : {}), ...(typeof attrs.rightIndentPt === 'number' ? { right: pt(attrs.rightIndentPt, 0) } : {}) } } : {}),
     widowControl: true,
@@ -371,18 +371,11 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
         left: marginLeft, right: marginRight,
         ...(source ? { header: 369, footer: 369 } : {}),
       } } },
-      ...(source ? { footers: { default: new Footer({ children: [new Table({
-        rows: [new TableRow({ children: [
-          new TableCell({ width: { size: pageWidth - marginLeft - marginRight - 500, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 80 }, children: [
-            new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0, line: 220, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: 16, color: '64748B', text: DISCLAIMER_TEXT })] }),
-            new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0, line: 220, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: 16, color: '64748B', italics: true, text: EQUIPMENT_TEXT })] }),
-          ] }),
-          new TableCell({ width: { size: 500, type: WidthType.DXA }, verticalAlign: VerticalAlign.BOTTOM, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 0, after: 0, line: 220, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: fontSize, color: '000000', children: [PageNumber.CURRENT] })] })] }),
-        ] })],
-        columnWidths: [pageWidth - marginLeft - marginRight - 500, 500],
-        width: { size: pageWidth - marginLeft - marginRight, type: WidthType.DXA }, layout: TableLayoutType.FIXED,
-        borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideVertical: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } },
-      })] }) } } : {}),
+      ...(source ? { footers: { default: new Footer({ children: [
+        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0, line: 200, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: 16, color: '64748B', text: DISCLAIMER_TEXT })] }),
+        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0, line: 200, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: 16, color: '64748B', italics: true, text: EQUIPMENT_TEXT })] }),
+        new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 0, after: 0, line: 200, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: fontSize, color: '000000', children: [PageNumber.CURRENT] })] }),
+      ] }) } } : {}),
       children,
     }],
   });
