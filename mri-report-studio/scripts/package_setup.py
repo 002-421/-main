@@ -119,9 +119,6 @@ def main():
         encoding='utf-8-sig')
     notices = collect_licenses()
     (setup / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
-    example = DOWNLOADS / 'MRI_Alliance_Head_Template.docx'
-    if example.is_file():
-        shutil.copy2(example, setup / example.name)
     write_zip(setup, DOWNLOADS / 'MRI_Alliance_Windows_Setup.zip')
 
     browser = stage / 'MRI Alliance Browser'
@@ -136,8 +133,6 @@ def main():
         'Локальный черновик и настройки связаны с этим браузером и адресом файла. '
         'Храните нужные описания отдельными файлами DOCX.\n', encoding='utf-8-sig')
     (browser / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
-    if example.is_file():
-        shutil.copy2(example, browser / example.name)
     write_zip(browser, DOWNLOADS / 'MRI_Alliance_Browser.zip')
     shutil.copy2(BUILD, DOWNLOADS / 'MRI_Alliance.html')
     (DOWNLOADS / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
