@@ -347,7 +347,7 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
   const draft = { format: 'mri-report-studio', version: draftVersion, profile: options.profile ?? 'brain', doc, customModules: options.customModules ?? [], cache: options.cache ?? {}, kind: options.kind ?? 'report', templateId: validatedTemplateId(options.templateId) };
   validateDraft(draft);
   validatedCache(draft.cache);
-  const source = doc.attrs?.sourceFormat === 'alliance-template';
+  const source = doc.attrs?.sourceFormat === 'alliance-template' || Boolean(options.templateId);
   const a = doc.attrs ?? {};
   const millimetres = (value: unknown, fallback: number, min = 0, max = 1000) => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max ? Math.round(value / 25.4 * 1440) : fallback;
   const pageWidth = source ? millimetres(a.pageWidthMm, PAGE_WIDTH, 100) : PAGE_WIDTH;

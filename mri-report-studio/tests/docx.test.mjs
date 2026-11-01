@@ -241,6 +241,18 @@ test('source template physician and date sit at opposite sides of the signature 
   assert.match(signature, /03\.11\.2026/);
 });
 
+test('template export retains the footer when editor document attrs are absent', async () => {
+  const doc = makeTemplateDocument('head-gm');
+  delete doc.attrs.sourceFormat;
+  const { xml, zip } = await exported(doc, { templateId: 'head-gm' });
+  const footer = Object.entries(zip).find(([name]) => /^word\/footer\d+\.xml$/.test(name));
+  assert.ok(footer);
+  assert.match(strFromU8(footer[1]), /Данное заключение не является диагнозом/);
+  assert.match(strFromU8(footer[1]), /Исследование выполнено на магнитно-резонансном томографе/);
+  assert.match(strFromU8(footer[1]), /PAGE/);
+  assert.match(xml, /<w:footerReference w:type="default"/);
+});
+
 test('source font faces are embedded with Word font relationships and cannot be modified behind embedded draft metadata', async () => {
   const dir = new URL('../src/assets/fonts/', import.meta.url);
   const font = {
