@@ -48,6 +48,24 @@ test('all protocol templates separate the closing block and fill its date automa
   }
 });
 
+test('tables in every template use compact widths, cell text and line breaks', () => {
+  for (const template of reportTemplates) {
+    const doc = makeTemplateDocument(template.id);
+    walk(doc, node => {
+      if (node.type !== 'table') return;
+      const firstRow = node.content.find(child => child.type === 'tableRow');
+      const widths = firstRow.content.flatMap(cell => cell.attrs?.colwidth ?? []);
+      assert.ok(widths.reduce((sum, value) => sum + value, 0) <= 640, template.title);
+      walk(node, cell => {
+        if (cell.type === 'paragraph') assert.ok((cell.attrs?.fontSizePt ?? 9) <= 9, template.title);
+        for (let index = 1; index < (cell.content ?? []).length; index++) {
+          assert.ok(!(cell.content[index - 1].type === 'hardBreak' && cell.content[index].type === 'hardBreak'), template.title);
+        }
+      });
+    });
+  }
+});
+
 test('default head protocol retains editable patient and doctor fields and omits age and clinical goal', () => {
   const doc = makeTemplateDocument(DEFAULT_TEMPLATE_ID);
   const fields = collectInlineFields(prepareInlineDocument(doc));
