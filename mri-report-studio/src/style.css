@@ -40,3 +40,4 @@ html[data-theme="dark"] .block-tag{background:#29413d;color:#a9d4c7}
 html[data-theme="dark"] .block-card .insert{background:#23433f;color:#a8e0d4;border-color:#35685f}
 html[data-theme="dark"] .notice{background:#203832;border-color:#35584e;color:#d5e9e1}
 html[data-theme="dark"] .dialog-overlay{background:#0009}
+.report-content img{display:block;max-width:100%;height:auto;margin:8px auto}

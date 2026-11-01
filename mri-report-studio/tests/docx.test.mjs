@@ -57,6 +57,16 @@ test('Word export is an OPC ZIP with A4 pages, report content and resolvable cus
   assert.match(strFromU8(zip['word/styles.xml']), /w:ascii="Arial"/);
 });
 
+test('male pelvis Word templates embed the PI-RADS reference image and retain it in editable state', async () => {
+  const doc = makeTemplateDocument('pelvis-omt-m-ku');
+  const { zip, xml } = await exported(doc, { templateId: 'pelvis-omt-m-ku' });
+  assert.ok(Object.keys(zip).some(name => /^word\/media\/.*\.png$/.test(name)));
+  assert.match(xml, /<w:drawing>/);
+  const imported = await importOwnDocx(zipSync(zip));
+  assert.ok(imported);
+  assert.ok(imported.doc.content.some(node => node.type === 'image' && node.attrs?.alt === 'Справочная схема PI-RADS v2.1 (2019)'));
+});
+
 test('Word runs preserve typography and line spacing while filled fields have no colored field background', async () => {
   const doc = { type: 'doc', content: [{ type: 'paragraph', attrs: { textAlign: 'center' }, content: [
     { type: 'text', text: 'Формат', marks: [

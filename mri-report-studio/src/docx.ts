@@ -1,6 +1,6 @@
 import {
   AlignmentType, BorderStyle, Document, ExternalHyperlink, Footer, HeadingLevel,
-  LevelFormat, LineRuleType, Packer, Paragraph, ShadingType, Table, TableCell,
+  LevelFormat, LineRuleType, Packer, Paragraph, ImageRun, ShadingType, Table, TableCell,
   TableLayoutType, TableRow, Tab, TextRun, UnderlineType, WidthType, PageNumber,
   type IParagraphOptions, type IRunOptions, type NumberingDefinition, type ParagraphChild,
 } from 'docx';
@@ -269,6 +269,20 @@ function table(node: RichNode, context: Context): Table {
 
 function blocks(nodes: RichNode[], context: Context): (Paragraph | Table)[] {
   return nodes.flatMap((node): (Paragraph | Table)[] => {
+    if (node.type === 'image') {
+      const attrs = node.attrs ?? {};
+      const source = String(attrs.src ?? '');
+      if (!/^data:image\/png;base64,/.test(source)) return [];
+      return [new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 100, after: 120 },
+        children: [new ImageRun({
+          type: 'png', data: source,
+          transformation: { width: Number(attrs.width) || 640, height: Number(attrs.height) || 291 },
+          altText: { title: String(attrs.alt ?? 'Справочная схема'), description: String(attrs.alt ?? 'Справочная схема'), name: 'Справочная схема' },
+        })],
+      })];
+    }
     if (node.type === 'paragraph' && /Врач\s*:/i.test((node.content ?? []).map(child => child.text ?? '').join('')) && node.content?.some(child => child.marks?.some(mark => mark.type === 'templateField' && String(mark.attrs?.id ?? '').endsWith('.reportdate')))) {
       const left: RichNode[] = [], right: RichNode[] = [];
       let isDate = false;

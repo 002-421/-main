@@ -227,7 +227,7 @@ export function migrateLegacyHeader(doc: RichNode): RichNode {
   return next;
 }
 
-const blockTypes = new Set(['paragraph', 'heading', 'reportSection', 'blockquote', 'bulletList', 'orderedList', 'codeBlock', 'horizontalRule', 'table']);
+const blockTypes = new Set(['paragraph', 'heading', 'reportSection', 'blockquote', 'bulletList', 'orderedList', 'codeBlock', 'horizontalRule', 'table', 'image']);
 const inlineTypes = new Set(['text', 'reportField', 'hardBreak']);
 const simpleMarks = new Set(['bold', 'italic', 'underline', 'strike', 'code', 'subscript', 'superscript']);
 
@@ -321,6 +321,15 @@ export function validateTemplate(input: unknown): RichNode {
       const language = string(a.language, 60);
       if (!/^[\w+-]*$/.test(language)) return fail();
       attrs.language = language;
+    } else if (type === 'image') {
+      const src = string(a.src, 500000);
+      if (!/^data:image\/png;base64,[A-Za-z\d+/]+=*$/.test(src)) return fail();
+      attrs.src = src;
+      attrs.alt = string(a.alt ?? '', 300);
+      for (const key of ['width', 'height']) {
+        if (!Number.isInteger(a[key]) || a[key] < 1 || a[key] > 2000) return fail();
+        attrs[key] = a[key];
+      }
     } else if (type === 'tableCell' || type === 'tableHeader') {
       for (const key of ['colspan', 'rowspan']) {
         if (a[key] === undefined) continue;
@@ -360,7 +369,7 @@ export function validateTemplate(input: unknown): RichNode {
     if (raw.content !== undefined && !Array.isArray(raw.content)) return fail();
     const children: RichNode[] = (raw.content ?? []).map((child: unknown) => node(child, depth + 1));
     const validChildren = (allowed: Set<string>) => children.every(child => allowed.has(child.type));
-    if (inlineTypes.has(type) || type === 'horizontalRule') {
+    if (inlineTypes.has(type) || type === 'horizontalRule' || type === 'image') {
       if (children.length) return fail();
     } else {
       let valid = false;

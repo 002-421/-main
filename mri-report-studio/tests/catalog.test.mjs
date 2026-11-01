@@ -173,6 +173,17 @@ test('patient-specific dimensions are highlighted while reference norms are left
   assert.ok(norm.every(node => !node.marks?.some(mark => mark.type === 'highlight' && mark.attrs?.color === '#ffff00')));
 });
 
+test('male pelvis protocols include the restored PI-RADS reference image', () => {
+  for (const id of ['pelvis-omt-m', 'pelvis-omt-m-ku']) {
+    const doc = makeTemplateDocument(id);
+    validateTemplate(doc);
+    const imageIndex = doc.content.findIndex(node => node.type === 'image' && node.attrs?.alt === 'Справочная схема PI-RADS v2.1 (2019)');
+    assert.ok(imageIndex > 0, `${id}: PI-RADS image`);
+    assert.match(doc.content[imageIndex].attrs.src, /^data:image\/png;base64,/);
+    assert.ok(plain(doc.content[imageIndex - 1]).includes('Справочная информация. Удалять!'));
+  }
+});
+
 test('default head protocol retains editable patient and doctor fields and omits age and clinical goal', () => {
   const doc = makeTemplateDocument(DEFAULT_TEMPLATE_ID);
   const fields = collectInlineFields(prepareInlineDocument(doc));
