@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { importOwnDocx } from '../src/docx.ts';
+import { reportTemplates } from '../src/catalog.ts';
 import { unzipSync, strFromU8 } from 'fflate';
 
 const root=process.cwd(), output=path.join(root,'test-output');
@@ -51,6 +52,15 @@ try{
  await page.locator('#toggle-theme').click();
  assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
  console.log('PASS: visible theme toggle changes and restores dark mode while keeping the report paper white.');
+
+ for (const areaId of [...new Set(reportTemplates.map(template=>template.areaId))]) {
+  await page.locator('#area-select').selectOption(areaId);
+  for (const template of reportTemplates.filter(item=>item.areaId===areaId)) {
+   await page.locator(`[data-template="${template.id}"]`).click();
+   assert.ok((await page.locator('.report-content').innerText()).trim().length>100,`${template.title} must render its content`);
+  }
+ }
+ console.log('PASS: all 55 source templates across six zones render nonempty content.');
 
  const patientHint=await field(patientId).innerText();
  await field(patientId).evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,0);range.setEnd(node,1);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});

@@ -3,6 +3,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { TextStyleKit } from '@tiptap/extension-text-style';
 import TextAlign from '@tiptap/extension-text-align';
 import Highlight from '@tiptap/extension-highlight';
+import Superscript from '@tiptap/extension-superscript';
 import { TableKit } from '@tiptap/extension-table';
 import type { RichNode } from './model';
 import { TemplateField, InlineFieldEditing, TemplateReview, SourceFormat, prepareInlineDocument } from './inline-fields';
@@ -71,6 +72,7 @@ export function makeEditor(element: HTMLElement, content: RichNode, options: Rep
       TextStyleKit,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Highlight.configure({ multicolor: true }),
+      Superscript,
       TableKit.configure({ table: { resizable: true, allowTableNodeSelection: true } }),
       ReportSection, ReportField, ModuleReference, SourceFormat, TemplateField, InlineFieldEditing, TemplateReview,
       LiveProofreading.configure({ getPersonalWords: settings.getPersonalWords ?? (() => []), onStatus: settings.onProofStatus }),
