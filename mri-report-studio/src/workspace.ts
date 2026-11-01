@@ -10,7 +10,6 @@ import { exportDocx, importOwnDocx } from './docx';
 import { russianProofreadingLicense } from './proofreading';
 import { buildReportFilename, extractFilenameFields } from './report-filename';
 import { initializeReportFooter } from './report-footer';
-import { setAIReviewHighlights, type AIHighlightRange } from './ai-review-highlights';
 import { compactTemplateTables, separateRecommendations, highlightDeletionNotes } from './table-layout';
 import fontLicense from './assets/fonts/LICENSE.txt?raw';
 import allianceLogo from './assets/logo.png?url';
@@ -22,11 +21,6 @@ import boldItalicFont from './assets/fonts/DejaVuSans-BoldOblique.ttf?url';
 declare global { interface Window { desktop?: {
   exportPDF:(name:string)=>Promise<{canceled:boolean;path?:string}>;
   copyReport:(html:string,text:string)=>Promise<void>;
-  aiModelStatus:()=>Promise<{ready:boolean;modelId:string;size?:number;partialSize?:number}>;
-  downloadAIModel:()=>Promise<{ready:boolean;modelId:string;size:number}>;
-  onAIModelProgress:(callback:(progress:{loaded:number;total:number})=>void)=>()=>void;
-  reviewAIReport:(blocks:{id:string;text:string}[])=>Promise<{blockId:string;quote:string;start:number;end:number;category:'grammar'|'style'|'meaning';severity:'low'|'medium'|'high';explanation:string;suggestion:string}[]>;
-  onAIReviewProgress:(callback:(progress:{phase:'loading'|'loaded'|'review'|'diagnosing';completed?:number;total?:number})=>void)=>()=>void;
 } } }
 const $ = <T extends HTMLElement = HTMLElement>(s:string) => document.querySelector<T>(s)!;
 const esc = (v:unknown) => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
@@ -82,7 +76,7 @@ $('#app').innerHTML=`<div class="shell">
   <div class="side-bottom"><button id="settings">⚙ Врач и настройки</button><small>Локальная работа · версия 0.3</small></div>
  </aside>
  <main class="main">
-  <header class="topbar"><div class="document-heading"><span class="eyebrow">Редактор описаний</span><strong id="document-name">Новое описание</strong><small id="save-state">Сохранено на компьютере</small></div><div class="top-actions"><button id="toggle-sidebar" class="btn icon-button" title="Показать меню">☰</button><button id="toggle-theme" class="btn" type="button" aria-pressed="false">☾ Тёмная тема</button><button id="ai-review" class="btn" type="button">ИИ проверка</button><button id="new-report" class="btn">Новое</button><button id="open-report" class="btn">Открыть</button><button id="copy-report" class="btn">Копировать</button><button id="save-docx" class="btn primary">Сохранить Word</button><button id="export-pdf" class="btn">PDF</button></div></header>
+  <header class="topbar"><div class="document-heading"><span class="eyebrow">Редактор описаний</span><strong id="document-name">Новое описание</strong><small id="save-state">Сохранено на компьютере</small></div><div class="top-actions"><button id="toggle-sidebar" class="btn icon-button" title="Показать меню">☰</button><button id="toggle-theme" class="btn" type="button" aria-pressed="false">☾ Тёмная тема</button><button id="new-report" class="btn">Новое</button><button id="open-report" class="btn">Открыть</button><button id="copy-report" class="btn">Копировать</button><button id="save-docx" class="btn primary">Сохранить Word</button><button id="export-pdf" class="btn">PDF</button></div></header>
   <div class="ribbon" role="toolbar" aria-label="Форматирование описания"><div class="tool-group"><button data-command="undo" title="Отменить (Ctrl+Z)">↶</button><button data-command="redo" title="Повторить (Ctrl+Y)">↷</button></div><div class="tool-group"><select id="font-family" aria-label="Шрифт"><option>DejaVu Sans</option><option selected>Arial</option><option>Times New Roman</option><option>Calibri</option></select><select id="font-size" aria-label="Размер шрифта">${[8,9,10,11,12,14,16,18,21,24].map(s=>`<option value="${s}" ${s===12?'selected':''}>${s}</option>`).join('')}</select></div><div class="tool-group"><button data-command="bold" title="Полужирный"><b>Ж</b></button><button data-command="italic" title="Курсив"><i>К</i></button><button data-command="underline" title="Подчёркнутый"><u>Ч</u></button><button data-command="strike" title="Зачёркнутый"><s>А</s></button><input type="color" id="text-color" title="Цвет текста" value="#172c40"><button id="highlight-yellow" title="Жёлтая заливка: добавить или убрать" aria-label="Жёлтая заливка текста">🖍</button></div><div class="tool-group"><button data-align="left" title="По левому краю">≡</button><button data-align="center" title="По центру">≡</button><button data-align="right" title="По правому краю">≡</button><button data-align="justify" title="По ширине">☰</button><button data-command="bulletList" title="Маркированный список">• ☰</button><button data-command="orderedList" title="Нумерованный список">1. ☰</button><button id="table-tools" title="Вставить или изменить таблицу">▦</button></div><div class="tool-group"><select id="line-height" aria-label="Межстрочный интервал"><option value="1.05">1,05</option><option value="1">1</option><option value="1.15">1,15</option><option value="1.5">1,5</option><option value="2">2</option></select><button id="insert-field" title="Вставить редактируемое поле">＋ Поле</button></div></div>
   <div id="template-banner" class="template-banner hidden"><div><strong>Редактирование шаблона</strong><small>Правки будут применяться к новым описаниям. Текущий документ сохранён.</small></div><div><button id="reset-template" class="btn">Исходный шаблон</button><button id="cancel-template" class="btn">Отмена</button><button id="save-template" class="btn primary">Сохранить шаблон</button></div></div>
   <div class="document-tools"><div><button id="next-field" class="chip">Следующее поле <span id="empty-count"></span></button><button id="review-unchanged" class="chip" aria-pressed="false" title="Показать поля и фрагменты, оставшиеся как в шаблоне">Подсветить неизменённое</button></div><div><button id="proof-toggle" class="chip active" aria-pressed="true">✓ Проверка текста</button><button id="check-now" class="chip" title="Повторить проверку (F7)">Проверить сейчас</button><select id="zoom" aria-label="Масштаб"><option value="0.9">90%</option><option value="1" selected>100%</option><option value="1.1">110%</option><option value="1.25">125%</option></select></div></div>
@@ -104,10 +98,10 @@ const editor=makeEditor($('#editor'),initial,{getPersonalWords:()=>personalWords
 setLiveProofreading(editor,settings.liveProof);
 let savedSelection=editor.state.selection;
 editor.on('selectionUpdate',()=>{ savedSelection=editor.state.selection; updateRibbon(); });
-editor.on('update',()=>{if(!suppress){setAIReviewHighlights(editor,[]);changedSinceOpen=true;clearTimeout(timer);if(!templateMode){$('#save-state').textContent='Сохраняется…';timer=setTimeout(saveLocal,450);}else $('#save-state').textContent='Шаблон изменён';renderCounts();}});
+editor.on('update',()=>{if(!suppress){changedSinceOpen=true;clearTimeout(timer);if(!templateMode){$('#save-state').textContent='Сохраняется…';timer=setTimeout(saveLocal,450);}else $('#save-state').textContent='Шаблон изменён';renderCounts();}});
 editor.on('transaction',updateRibbon);
 const json=()=>editor.getJSON() as RichNode;
-function restore(doc:RichNode) { setAIReviewHighlights(editor,[]);suppress=true;try {editor.commands.setContent(prepareInlineDocument(highlightDeletionNotes(separateRecommendations(compactTemplateTables(doc)))));editor.view.updateState(EditorState.create({schema:editor.schema,doc:editor.state.doc,plugins:editor.state.plugins}));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
+function restore(doc:RichNode) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(highlightDeletionNotes(separateRecommendations(compactTemplateTables(doc)))));editor.view.updateState(EditorState.create({schema:editor.schema,doc:editor.state.doc,plugins:editor.state.plugins}));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
 function toast(message:string,error=false) { $('.toast')?.remove();const t=document.createElement('div');t.className=`toast${error?' error':''}`;t.role=error?'alert':'status';t.textContent=message;document.body.append(t);setTimeout(()=>t.remove(),5000); }
 function saveLocal() { if(templateMode)return;try{localStorage.setItem(KEYS.draft,JSON.stringify({format:'mri-report-studio',version:draftVersion,profile:profileForTemplate(),templateId:activeTemplateId,doc:json(),customModules:[]}));$('#save-state').textContent='Сохранено на компьютере';}catch{ $('#save-state').textContent='Не сохранено';toast('Не удалось сохранить локальный черновик. Сохраните документ Word.',true); } }
 function profileForTemplate() { const area=reportTemplates.find(t=>t.id===activeTemplateId)?.areaId;return area==='head'?'brain':'custom'; }
@@ -164,79 +158,6 @@ function persistSettings(){try{localStorage.setItem(KEYS.settings,JSON.stringify
 function settingsDialog(){const d=dialog('Врач и настройки',`<label>ФИО врача по умолчанию<input type="text" id="doctor-name" maxlength="200" value="${esc(settings.doctor)}" placeholder="Фамилия Имя Отчество" list="saved-doctors"><datalist id="saved-doctors">${settings.doctors.map(name=>`<option value="${esc(name)}">`).join('')}</datalist></label><p>Сохранённые врачи появятся в подсказках; можно добавлять несколько ФИО и выбирать нужное для текущей смены. Имя подставится в новые описания. В каждом документе поле врача можно изменить прямо в тексте.</p><label class="checkbox"><input type="checkbox" id="apply-doctor-now"> Вставить этого врача и в текущее описание</label><div class="settings-logo"><h3>Официальный логотип</h3><div id="logo-preview">${`<img src="${esc(settings.logo||allianceLogo)}" alt="Логотип МРТ Альянс">`}</div><button class="btn" id="upload-logo">Загрузить PNG / JPEG / WebP</button><p>Официальный логотип МРТ Альянс встроен в приложение. При необходимости здесь можно выбрать другой файл; логотип интерфейса не меняет оформление исходного шаблона Word.</p></div><button class="btn" id="dictionary-settings">Личный словарь</button><details><summary>Лицензии словаря</summary><pre class="licenses">${esc(russianProofreadingLicense+"\n\n"+fontLicense)}</pre></details>`,'<button class="btn" data-close>Отмена</button><button class="btn primary" id="save-settings">Сохранить</button>');d.querySelector('#upload-logo')!.addEventListener('click',()=>($('#logo-file') as HTMLInputElement).click());d.querySelector('#dictionary-settings')!.addEventListener('click',dictionaryDialog);d.querySelector('#save-settings')!.addEventListener('click',()=>{settings.doctor=($('#doctor-name') as HTMLInputElement).value.trim();if(settings.doctor&&!settings.doctors.some(name=>name.toLocaleLowerCase('ru')===settings.doctor.toLocaleLowerCase('ru')))settings.doctors.push(settings.doctor);const apply=($('#apply-doctor-now') as HTMLInputElement).checked;persistSettings();if(apply){let range:{from:number;to:number;marks:any[]}|undefined;editor.state.doc.descendants((n,p)=>{const mark=n.marks.find(m=>m.type.name==='templateField'&&m.attrs.id===DOCTOR_FIELD_ID);if(mark&&n.isText){if(!range)range={from:p,to:p+n.nodeSize,marks:n.marks.map(m=>m.type.name==='templateField'?m.type.create({...m.attrs,filled:true}):m)};else range.to=p+n.nodeSize;}});if(range)editor.view.dispatch(editor.state.tr.replaceWith(range.from,range.to,editor.schema.text(settings.doctor||'Ф.И.О.',range.marks)));else toast('Поле врача не найдено в текущем документе. Имя сохранено для новых описаний.');}renderBrand();closeDialog();});}
 $('#settings').onclick=settingsDialog;$('#brand-settings').onclick=settingsDialog;
 $('#toggle-theme').onclick=()=>{settings.theme=settings.theme==='dark'?'light':'dark';persistSettings();applyTheme();};
-$('#ai-review').onclick=()=>{void openAIReviewDialog();};
-type ReviewBlockMap = {id:string;text:string;positions:number[]};
-function collectAIReviewBlocks():ReviewBlockMap[]{
- const result:ReviewBlockMap[]=[];
- editor.state.doc.descendants((block,blockPos)=>{
-  if(!block.isTextblock)return;
-  let text='',positions:number[]=[];
-  block.descendants((node,relativePos)=>{
-   const absolute=blockPos+1+relativePos;
-   if(node.isText){text+=node.text;for(let i=0;i<node.text!.length;i++)positions.push(absolute+i);}
-   else if(node.type.name==='hardBreak'){text+='\n';positions.push(absolute);}
-   else if(node.type.name==='reportField'){
-    const value=String(node.attrs.value??'').trim();
-    if(value){text+=value;for(let i=0;i<value.length;i++)positions.push(absolute);}
-   }
-  });
-  if(text.trim())result.push({id:`b${result.length}`,text,positions});
- });
- return result;
-}
-function aiHighlightRanges(findings:Awaited<ReturnType<NonNullable<Window['desktop']>['reviewAIReport']>>,blocks:ReviewBlockMap[]):AIHighlightRange[]{
- const byId=new Map(blocks.map(block=>[block.id,block]));
- return findings.flatMap((finding,index)=>{const block=byId.get(finding.blockId);if(!block||finding.start<0||finding.end>block.positions.length||finding.start>=finding.end)return[];return[{from:block.positions[finding.start],to:block.positions[finding.end-1]+1,finding:index}];});
-}
-async function openAIReviewDialog(){
- const d=dialog('ИИ проверка',`<p>Qwen 3 8B проверяет язык, профессиональную ясность и возможные внутренние смысловые противоречия. Модель работает локально; текст отчёта не отправляется в сеть. Предложения нужно проверить самостоятельно: медицинский текст автоматически не изменяется.</p><div id="ai-model-state" role="status">Проверяем кэш модели…</div><progress id="ai-model-progress" max="1" value="0" class="hidden" aria-label="Загрузка модели"></progress><small id="ai-model-progress-label" class="hidden"></small><div id="ai-findings" class="ai-findings"></div>`,'<button class="btn" data-close>Закрыть</button><button class="btn primary" id="ai-model-action" disabled>Проверка</button>');
- const state=d.querySelector<HTMLElement>('#ai-model-state')!;
- const action=d.querySelector<HTMLButtonElement>('#ai-model-action')!;
- const progress=d.querySelector<HTMLProgressElement>('#ai-model-progress')!;
- const progressLabel=d.querySelector<HTMLElement>('#ai-model-progress-label')!;
- const findingsBox=d.querySelector<HTMLElement>('#ai-findings')!;
- const formatBytes=(bytes:number)=>bytes>=1024**3?`${(bytes/1024**3).toFixed(1)} ГБ`:`${Math.round(bytes/1024**2)} МБ`;
- if(!window.desktop){state.textContent='Локальная ИИ-проверка доступна в установленном Windows-приложении.';action.classList.add('hidden');return;}
- let modelReady=false;
- try{
-  const status=await window.desktop.aiModelStatus();
-  if(!d.isConnected)return;
-  modelReady=status.ready;
-  if(modelReady){state.textContent=`Qwen 3 8B найдена в кэше (${formatBytes(status.size??0)}). При первом запуске модели загрузка в память займёт некоторое время.`;action.textContent='Проверить описание';}
-  else {state.textContent=status.partialSize?`Найдена незавершённая загрузка (${formatBytes(status.partialSize)}); её можно продолжить.`:'Сначала загрузите модель Qwen 3 8B (около 4,7 ГБ).';action.textContent=status.partialSize?'Продолжить загрузку':'Загрузить Qwen 8B';}
-  action.disabled=false;
- }catch(error){state.textContent=`Не удалось проверить модель: ${(error as Error).message}`;return;}
- action.onclick=async()=>{
-  if(!modelReady){
-   action.disabled=true;action.textContent='Загрузка…';state.textContent='Скачиваем Qwen. При прерывании загрузка продолжится с сохранённого места.';progress.classList.remove('hidden');progressLabel.classList.remove('hidden');
-   const unsubscribe=window.desktop!.onAIModelProgress(({loaded,total})=>{if(!d.isConnected)return;progress.value=total?loaded/total:0;progressLabel.textContent=total?`${formatBytes(loaded)} из ${formatBytes(total)}`:`Загружено ${formatBytes(loaded)}`;});
-   try{const result=await window.desktop!.downloadAIModel();modelReady=true;if(d.isConnected){progress.value=1;state.textContent=`Модель сохранена (${formatBytes(result.size)}). Теперь можно проверить описание.`;progressLabel.textContent='Загрузка завершена';action.textContent='Проверить описание';action.disabled=false;}}
-   catch(error){if(d.isConnected){state.textContent=`Не удалось загрузить модель: ${(error as Error).message}`;action.textContent='Повторить загрузку';action.disabled=false;}}
-   finally{unsubscribe();}
-   return;
-  }
-  const blocks=collectAIReviewBlocks();
-  if(!blocks.length){state.textContent='В описании нет текста для проверки.';return;}
-  action.disabled=true;action.textContent='Проверяем…';findingsBox.replaceChildren();setAIReviewHighlights(editor,[]);progress.value=0;progress.classList.remove('hidden');progressLabel.classList.remove('hidden');state.textContent='Загружаем движок llama.cpp и модель в память компьютера. Первый запуск может занять несколько минут.';
-  const unsubscribe=window.desktop!.onAIReviewProgress(({phase,completed,total})=>{if(!d.isConnected)return;if(phase==='loading')state.textContent='Запускаем локальный движок и загружаем Qwen в память…';else if(phase==='loaded')state.textContent='Модель запущена. Проверяем текст локально…';else if(phase==='diagnosing')state.textContent='Движок не открыл модель. Проверяем целостность кэша Qwen; это может занять некоторое время…';else if(phase==='review'){progress.value=total?completed!/total!:0;progressLabel.textContent=`Проверено частей: ${completed} из ${total}`;}});
-  try{
-   const findings=await window.desktop!.reviewAIReport(blocks.map(({id,text})=>({id,text})));
-   if(!d.isConnected)return;
-   const ranges=aiHighlightRanges(findings,blocks);setAIReviewHighlights(editor,ranges);
-   state.textContent=findings.length?`Проверка завершена. Найдено замечаний: ${findings.length}. Они подсвечены в тексте; изменения не внесены.`:'Проверка завершена. Модель не нашла замечаний по языку или внутренней логике текста.';
-   progress.value=1;progressLabel.textContent='Проверка завершена';
-   const categoryLabels={grammar:'Грамматика',style:'Стиль',meaning:'Смысл'};
-   const severityLabels={low:'проверьте',medium:'рекомендуется исправить',high:'важно проверить'};
-   findingsBox.innerHTML=findings.length?`<h3>Замечания</h3>${findings.map((finding,index)=>{
-    const suggestion=finding.suggestion?`<span><b>Вариант:</b> ${esc(finding.suggestion)}</span>`:'';
-    return `<button class="ai-finding" data-ai-open="${index}"><span class="ai-finding-heading">${esc(categoryLabels[finding.category])} · ${esc(severityLabels[finding.severity])}</span><q>${esc(finding.quote)}</q><span>${esc(finding.explanation)}</span>${suggestion}</button>`;
-   }).join('')}`:'<p class="ai-review-empty">Замечаний не найдено.</p>';
-   findingsBox.querySelectorAll<HTMLButtonElement>('[data-ai-open]').forEach(button=>button.onclick=()=>{const index=Number(button.dataset.aiOpen),range=ranges.find(item=>item.finding===index);if(!range)return;closeDialog();editor.chain().focus().setTextSelection({from:range.from,to:range.to}).run();editor.view.dispatch(editor.state.tr.scrollIntoView());});
-   action.textContent='Проверить ещё раз';action.disabled=false;
-  }catch(error){if(d.isConnected){const message=(error as Error).message,split=message.split('\n\nДиагностика llama.cpp:\n');state.textContent=`Не удалось выполнить ИИ-проверку: ${split[0]}`;if(split[1])findingsBox.innerHTML=`<details class="ai-engine-diagnostics"><summary>Технический вывод llama.cpp</summary><pre>${esc(split[1])}</pre></details>`;try{const status=await window.desktop!.aiModelStatus();if(!status.ready){modelReady=false;action.textContent='Загрузить Qwen заново';}else action.textContent='Повторить проверку';}catch{action.textContent='Повторить проверку';}action.disabled=false;}}
-  finally{unsubscribe();}
- };
-}
 $('#logo-file').onchange=async e=>{const input=e.target as HTMLInputElement,file=input.files?.[0];input.value='';if(!file)return;if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2_000_000){toast('Выберите изображение PNG, JPEG или WebP размером до 2 МБ.',true);return;}const reader=new FileReader();reader.onload=()=>{settings.logo=String(reader.result);persistSettings();renderBrand();const el=document.querySelector('#logo-preview');if(el)el.innerHTML=`<img src="${esc(settings.logo)}" alt="Логотип">`;};reader.readAsDataURL(file);};
 function dictionaryDialog(){const d=dialog('Личный словарь',`<label>Русские и английские слова — по одному слову в строке<textarea id="personal-words" rows="10">${esc(personalWords.join('\n'))}</textarea></label>`,'<button class="btn" data-close>Отмена</button><button class="btn primary" id="save-dictionary">Сохранить</button>');d.querySelector('#save-dictionary')!.addEventListener('click',()=>{const words=[...new Set(($('#personal-words') as HTMLTextAreaElement).value.split(/\s+/).filter(Boolean).map(s=>s.toLocaleLowerCase('ru')))];if(words.length>2000||words.some(w=>!/^[а-яёa-z-]{2,80}$/i.test(w))){toast('Допустимо до 2000 русских или английских слов из букв и дефисов.',true);return;}try{localStorage.setItem(KEYS.dictionary,JSON.stringify(words));personalWords=words;closeDialog();refreshProofreading(editor);}catch{toast('Не удалось сохранить словарь.',true);}});}
 

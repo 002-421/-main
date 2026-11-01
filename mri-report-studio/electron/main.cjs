@@ -1,16 +1,11 @@
 const { app, BrowserWindow, ipcMain, dialog, clipboard, ClipboardItem, session } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
-const os = require('node:os');
-const { modelDirectory, createModelManager } = require('./ai-model.cjs');
-const { createAIReviewer } = require('./ai-review.cjs');
 
 // Keep the existing profile path so the rename preserves drafts and settings.
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
 app.setName('MRI Report Studio');
 let mainWindow;
-const aiModelStore = createModelManager({ root: modelDirectory({ userData: app.getPath('userData') }) });
-const aiReviewer = createAIReviewer();
 
 function requireMain(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Недоступный источник запроса.');
@@ -70,44 +65,6 @@ app.whenReady().then(() => {
     requireMain(event);
     if (typeof html !== 'string' || typeof text !== 'string' || html.length > 5_000_000 || text.length > 2_000_000) throw new Error('Слишком большой документ.');
     await clipboard.write([new ClipboardItem({ 'text/html': html, 'text/plain': text })]);
-  });
-  ipcMain.handle('ai:model-status', async event => {
-    requireMain(event);
-    return aiModelStore.status();
-  });
-  ipcMain.handle('ai:model-download', async event => {
-    requireMain(event);
-    return aiModelStore.ensure(progress => {
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ai:model-progress', progress);
-    });
-  });
-  ipcMain.handle('ai:review', async (event, blocks) => {
-    requireMain(event);
-    if (!(await aiModelStore.status()).ready) throw new Error('Сначала загрузите локальную модель Qwen 3 8B.');
-    const progress = eventData => {
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ai:review-progress', eventData);
-    };
-    try {
-      return await aiReviewer.review(blocks, aiModelStore.modelPath, progress);
-    } catch (error) {
-      if (error.code !== 'AI_MODEL_LOAD_FAILED') throw error;
-      progress({ phase: 'diagnosing' });
-      const engineDetails = (error.engineLogs ?? aiReviewer.getEngineLogs())
-        .slice(-12).map(line => String(line).replaceAll(aiModelStore.modelPath, '[файл Qwen]').replaceAll('\\', '/'))
-        .join('\n').slice(0, 4_000);
-      const integrity = await aiModelStore.verifyIntegrity();
-      if (!integrity.valid) {
-        throw new Error(integrity.reason === 'checksum'
-          ? `Файл Qwen в кэше повреждён (контрольная сумма не совпала). Закройте это окно, снова нажмите «ИИ проверка» и загрузите модель заново.${engineDetails ? `\n\nДиагностика llama.cpp:\n${engineDetails}` : ''}`
-          : `Файл Qwen не прошёл проверку формата GGUF. Закройте это окно, снова нажмите «ИИ проверка» и загрузите модель заново.${engineDetails ? `\n\nДиагностика llama.cpp:\n${engineDetails}` : ''}`);
-      }
-      const totalGb = os.totalmem() / 1024 ** 3;
-      const freeGb = os.freemem() / 1024 ** 3;
-      const memoryAdvice = totalGb < 12 || freeGb < 6
-        ? ` Сейчас доступно ${freeGb.toFixed(1)} ГБ из ${totalGb.toFixed(1)} ГБ ОЗУ; для Qwen 8B желательно иметь не менее 16 ГБ всего и около 6 ГБ свободной памяти.`
-        : ` Доступно ${freeGb.toFixed(1)} ГБ из ${totalGb.toFixed(1)} ГБ ОЗУ.`;
-      throw new Error(`Движок не открыл Qwen, хотя файл прошёл проверку SHA-256.${memoryAdvice} Закройте другие программы и повторите попытку. Если ошибка сохранится, пришлите это сообщение разработчику.${engineDetails ? `\n\nДиагностика llama.cpp:\n${engineDetails}` : ''}`);
-    }
   });
 });
 

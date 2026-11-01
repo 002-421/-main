@@ -30,29 +30,13 @@ function createModelManager({ root, model = QWEN3_8B, fetchImpl = globalThis.fet
       const [stat, metadata] = await Promise.all([
         fs.stat(modelPath), fs.readFile(metadataPath, 'utf8').then(JSON.parse),
       ]);
-      const handle = await fs.open(modelPath, 'r');
-      const magic = Buffer.alloc(4);
-      try { await handle.read(magic, 0, 4, 0); } finally { await handle.close(); }
-      if (magic.toString('ascii') === 'GGUF' && metadata.modelId === model.id && metadata.size === stat.size && metadata.size > 0 && /^[a-f0-9]{64}$/i.test(metadata.sha256 ?? '')) {
+      if (metadata.modelId === model.id && metadata.size === stat.size && metadata.size > 0 && metadata.sha256) {
         return { ready: true, modelId: model.id, size: stat.size, path: modelPath };
       }
     } catch { /* Missing or incomplete cache; the downloader can resume its .part file. */ }
     let partialSize = 0;
     try { partialSize = (await fs.stat(partialPath)).size; } catch { /* Not downloaded yet. */ }
     return { ready: false, modelId: model.id, partialSize, path: modelPath };
-  }
-
-  async function verifyIntegrity() {
-    const cached = await status();
-    if (!cached.ready) return { valid: false, reason: 'missing' };
-    const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
-    const hash = createHash('sha256');
-    for await (const chunk of createReadStream(modelPath)) hash.update(chunk);
-    if (hash.digest('hex') !== metadata.sha256) {
-      await fs.rm(metadataPath, { force: true });
-      return { valid: false, reason: 'checksum', size: cached.size };
-    }
-    return { valid: true, size: cached.size };
   }
 
   async function ensure(onProgress = () => {}) {
@@ -100,7 +84,7 @@ function createModelManager({ root, model = QWEN3_8B, fetchImpl = globalThis.fet
     return { ready: true, modelId: model.id, size: stat.size, path: modelPath };
   }
 
-  return { model, modelPath, status, ensure, verifyIntegrity };
+  return { model, modelPath, status, ensure };
 }
 
 module.exports = { QWEN3_8B, modelDirectory, createModelManager };
