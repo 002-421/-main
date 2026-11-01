@@ -8,7 +8,7 @@ import { areas, reportTemplates, reportBlocks, makeTemplateDocument, DOCTOR_FIEL
 import { builtinModules, moduleNode, compiler, validateDraft, validateTemplate, draftVersion, type RichNode } from './model';
 import { exportDocx, importOwnDocx } from './docx';
 import { russianProofreadingLicense } from './proofreading';
-import { buildReportFilename } from './report-filename';
+import { buildReportFilename, extractFilenameFields } from './report-filename';
 import fontLicense from './assets/fonts/LICENSE.txt?raw';
 import allianceLogo from './assets/logo.png?url';
 import regularFont from './assets/fonts/DejaVuSans.ttf?url';
@@ -169,10 +169,11 @@ document.addEventListener('mousedown',e=>{if(!(e.target as HTMLElement).closest(
 function filename(suffix:string){
  const fields=collectInlineFields(json());
  const usable=(field:ReturnType<typeof collectInlineFields>[number]|undefined)=>field?.filled?field.value.trim():'';
- const number=usable(fields.find(f=>f.id.endsWith('.number')));
- const doctor=usable(fields.find(f=>f.id===DOCTOR_FIELD_ID))||settings.doctor;
- const patient=usable(fields.find(f=>f.id===PATIENT_FIELD_ID||f.id.endsWith('.patient')||f.id==='base.1'));
- const reportDate=usable(fields.find(f=>f.id.endsWith('.reportdate')))||new Date().toLocaleDateString('ru-RU');
+ const parsed=extractFilenameFields(editor.getText({blockSeparator:'\n'}));
+ const number=parsed.number||usable(fields.find(f=>f.id.endsWith('.number')));
+ const doctor=parsed.doctor||usable(fields.find(f=>f.id===DOCTOR_FIELD_ID))||settings.doctor;
+ const patient=parsed.patient||usable(fields.find(f=>f.id===PATIENT_FIELD_ID||f.id.endsWith('.patient')||f.id==='base.1'));
+ const reportDate=parsed.date||usable(fields.find(f=>f.id.endsWith('.reportdate')))||new Date().toLocaleDateString('ru-RU');
  const title=reportTemplates.find(t=>t.id===activeTemplateId)?.title??'МРТ';
  return buildReportFilename({number,doctor,patient,template:title,date:reportDate},suffix as '.docx'|'.pdf',new Date().toLocaleDateString('ru-RU'));
 }

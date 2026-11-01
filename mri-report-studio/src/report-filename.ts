@@ -6,6 +6,21 @@ export type FilenameFields = {
   date?: string;
 };
 
+export function extractFilenameFields(text: string): Pick<FilenameFields, 'number'|'patient'|'doctor'|'date'> {
+  const row = (pattern: RegExp) => text.match(pattern)?.[1]?.trim() ?? '';
+  const number = row(/Протокол\s+МРТ[- ]исследования\s*№\s*([^\r\n]+)/i)
+    .replace(/\s+(?:Ф\.\s*И\.\s*О\.|Дата\s+рождения|Вид\s+исследования)\s*:.*/i,'').trim();
+  const patient = row(/Ф\.\s*И\.\s*О\.?\s*пациент(?:а|ки)\s*:\s*([^\r\n]+)/i)
+    .replace(/\s+(?:Дата\s+рождения|Вид\s+исследования)\s*:.*/i,'').trim();
+  const doctor = row(/Врач\s*:\s*([^\r\n]+)/i).replace(/\s+дата\s*:.*/i,'').trim();
+  const date = row(/дата\s*:\s*(\d{1,2}\.\d{1,2}\.\d{4})/i);
+  return {
+    number: /^номер исследования$/i.test(number) ? '' : number,
+    patient: /^(?:Ф\.\s*И\.\s*О\.?|дд\.мм\.гггг)$/i.test(patient) ? '' : patient,
+    doctor, date,
+  };
+}
+
 export function initials(value = ''): string {
   return value.trim().split(/[\s.]+/).filter(Boolean)
     .map(part => part[0]?.toLocaleUpperCase('ru') ?? '').join('');
