@@ -56,4 +56,8 @@ test('numeric dimensions and indices use Russian decimal commas while dates keep
   assert.match(text, /1,5 Тесла/);
   assert.match(text, /дд\.мм\.гггг/);
   assert.doesNotMatch(text, /22\.6-26\.0|28\.2-29\.4|1\.5 Тесла/);
+  assert.match(text, /размерами - 0,0 см/);
+  const yellowZeros=[];
+  for(const template of reportTemplates)walk(template.doc,node=>{if(node.type==='text'&&node.text==='0,0'&&node.marks?.some(mark=>mark.type==='highlight'&&mark.attrs?.color==='#ffff00'))yellowZeros.push(node);});
+  assert.ok(yellowZeros.length>0);
 });

@@ -203,8 +203,38 @@ def russian_decimal_commas(value):
 def normalize_numeric_punctuation(node):
     if node.get('type') == 'text':
         node['text'] = russian_decimal_commas(node.get('text', ''))
-    for child in node.get('content', []):
-        normalize_numeric_punctuation(child)
+        return [node]
+    content = node.get('content', [])
+    normalized = []
+    for child in content:
+        if child.get('type') != 'text':
+            normalized.extend(normalize_numeric_punctuation(child))
+            continue
+        value = russian_decimal_commas(child.get('text', ''))
+        # Replace empty measurement slots immediately before cm with a visible
+        # 0,0 placeholder. The yellow mark applies only to the inserted value.
+        candidates = []
+        for match in re.finditer(r'(?<![\w\d,.])см(?:²|2)?(?![\w])', value, re.I):
+            prefix = value[max(0, match.start()-50):match.start()]
+            if re.search(r'\d(?:,\d+)?\s*$', prefix):
+                continue
+            if not re.search(r'(?:справа|слева|правая|левая|дол[ияею]|размер\w*|диаметр\w*|ширин\w*|длин\w*|толщин\w*|протяж[её]нност\w*|объ[её]м\w*|\bдо|\bна|=|(?:^|\s)-)\s*(?:[:=–—-]\s*)?(?:до\s*)?(?:_{2,}|…|\.{2,})?\s*$', prefix, re.I):
+                continue
+            blank = re.search(r'(?:_{2,}|…|\.{2,})\s*$', prefix)
+            start = match.start() - (blank.end() - blank.start() if blank else 0)
+            candidates.append((start, match.start(), match.end()))
+        cursor = 0
+        for start, unit_start, unit_end in candidates:
+            if start > cursor:
+                normalized.append({'type':'text','text':value[cursor:start], **({'marks':deepcopy(child.get('marks',[]))} if child.get('marks') else {})})
+            source_marks = [mark for mark in deepcopy(child.get('marks', [])) if mark.get('type') != 'highlight']
+            normalized.append({'type':'text','text':'0,0','marks':source_marks+[deepcopy(YELLOW_MARK)]})
+            normalized.append({'type':'text','text':' '+value[unit_start:unit_end], **({'marks':source_marks} if source_marks else {})})
+            cursor = unit_end
+        if cursor < len(value):
+            normalized.append({'type':'text','text':value[cursor:], **({'marks':deepcopy(child.get('marks',[]))} if child.get('marks') else {})})
+    node['content'] = normalized
+    return [node]
 
 
 def split_range(nodes, start, end, mark):
@@ -286,12 +316,6 @@ def transform_paragraph(node, template_id, counter):
                     or (match.end() < len(text) and text[match.end()] == '/')):
                 continue
             node['content'] = split_range(node['content'], match.start(), match.end(), YELLOW_MARK)
-    # Empty measurements are genuinely missing report data and must stand out.
-    for match in list(re.finditer(r'(?i)(?:размер(?:ами|ом)?|диаметр(?:ом)?)\s*(?:[-:=]\s*)?(?:см|мм)(?![\w])', text))[::-1]:
-        start = match.start()
-        if text[match.start():match.end()].strip().lower() in ('см','мм'):
-            start = match.start()
-        node['content'] = split_range(node['content'], start, match.end(), YELLOW_MARK)
     # Give each header row the same one-blank-line rhythm shown in the source
     # protocol; keep descriptive body paragraphs at the source spacing.
     if re.match(r'^(?:Протокол\s+МРТ[- ]исследования\s+№|Ф\.\s*И\.\s*О\.?\s*пациент|Дата\s+рождения|Вид\s+исследования)\s*:', clean, re.I) or re.match(r'^Протокол\s+МРТ[- ]исследования\s+№', clean, re.I):
