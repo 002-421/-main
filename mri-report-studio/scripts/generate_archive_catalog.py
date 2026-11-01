@@ -157,7 +157,28 @@ def style_attrs(paragraph):
 
 
 def make_paragraph(element):
-    return {'type': 'paragraph', 'attrs': {'fontFamily': 'DejaVu Sans', 'fontSizePt': 10, **style_attrs(element)}, 'content': inline_nodes(element)}
+    content = inline_nodes(element)
+    # The legacy converter adds <br> at the beginning/end of almost every run,
+    # and between bold labels and their values. Paragraphs already provide the
+    # real line structure, so keep inline content on the same line and collapse
+    # converter-only breaks to spaces.
+    compact = []
+    for node in content:
+        if node['type'] == 'hardBreak':
+            if compact and compact[-1]['type'] == 'text':
+                compact[-1]['text'] = compact[-1]['text'].rstrip() + ' '
+            continue
+        if compact and compact[-1]['type'] == 'text' and node['type'] == 'text' and compact[-1].get('marks', []) == node.get('marks', []):
+            compact[-1]['text'] += node['text']
+        else:
+            compact.append(node)
+    for node in compact:
+        if node['type'] == 'text':
+            node['text'] = re.sub(r' {2,}', ' ', node['text'])
+    if compact and compact[0]['type'] == 'text': compact[0]['text'] = compact[0]['text'].lstrip()
+    if compact and compact[-1]['type'] == 'text': compact[-1]['text'] = compact[-1]['text'].rstrip()
+    compact = [node for node in compact if node['type'] != 'text' or node['text']]
+    return {'type': 'paragraph', 'attrs': {'fontFamily': 'DejaVu Sans', 'fontSizePt': 10, **style_attrs(element)}, 'content': compact}
 
 
 def plain(node):
