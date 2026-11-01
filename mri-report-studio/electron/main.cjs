@@ -1,11 +1,13 @@
 const { app, BrowserWindow, ipcMain, dialog, clipboard, ClipboardItem, session } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const { modelDirectory, createModelManager } = require('./ai-model.cjs');
 
 // Keep the existing profile path so the rename preserves drafts and settings.
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
 app.setName('MRI Report Studio');
 let mainWindow;
+const aiModelStore = createModelManager({ root: modelDirectory({ userData: app.getPath('userData') }) });
 
 function requireMain(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Недоступный источник запроса.');
@@ -65,6 +67,16 @@ app.whenReady().then(() => {
     requireMain(event);
     if (typeof html !== 'string' || typeof text !== 'string' || html.length > 5_000_000 || text.length > 2_000_000) throw new Error('Слишком большой документ.');
     await clipboard.write([new ClipboardItem({ 'text/html': html, 'text/plain': text })]);
+  });
+  ipcMain.handle('ai:model-status', async event => {
+    requireMain(event);
+    return aiModelStore.status();
+  });
+  ipcMain.handle('ai:model-download', async event => {
+    requireMain(event);
+    return aiModelStore.ensure(progress => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ai:model-progress', progress);
+    });
   });
 });
 

@@ -81,7 +81,7 @@ def main():
     shutil.copy2(BUILD, setup / 'app/dist/index.html')
     shutil.copy2(ROOT / 'public/mri-report-studio.ico', setup / 'app/dist/mri-report-studio.ico')
     shutil.copy2(ROOT / 'node_modules/rcedit/bin/rcedit-x64.exe', setup / 'app/dist/rcedit-x64.exe')
-    for filename in ('main.cjs', 'preload.cjs'):
+    for filename in ('main.cjs', 'preload.cjs', 'ai-model.cjs'):
         shutil.copy2(ROOT / 'electron' / filename, setup / 'app/electron' / filename)
     (setup / 'app/package.json').write_text(json.dumps({
         'name': metadata['name'], 'productName': 'MRI Report Studio',

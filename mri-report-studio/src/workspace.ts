@@ -18,7 +18,13 @@ import boldFont from './assets/fonts/DejaVuSans-Bold.ttf?url';
 import italicFont from './assets/fonts/DejaVuSans-Oblique.ttf?url';
 import boldItalicFont from './assets/fonts/DejaVuSans-BoldOblique.ttf?url';
 
-declare global { interface Window { desktop?: { exportPDF:(name:string)=>Promise<{canceled:boolean;path?:string}>;copyReport:(html:string,text:string)=>Promise<void> } } }
+declare global { interface Window { desktop?: {
+  exportPDF:(name:string)=>Promise<{canceled:boolean;path?:string}>;
+  copyReport:(html:string,text:string)=>Promise<void>;
+  aiModelStatus:()=>Promise<{ready:boolean;modelId:string;size?:number;partialSize?:number}>;
+  downloadAIModel:()=>Promise<{ready:boolean;modelId:string;size:number}>;
+  onAIModelProgress:(callback:(progress:{loaded:number;total:number})=>void)=>()=>void;
+} } }
 const $ = <T extends HTMLElement = HTMLElement>(s:string) => document.querySelector<T>(s)!;
 const esc = (v:unknown) => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const KEYS = { draft:'mri-report-studio.draft.v1',templates:'mri-alliance.templates.v4',blocks:'mri-alliance.blocks.v3',settings:'mri-alliance.settings.v3',dictionary:'mri-report-studio.dictionary.v1' };

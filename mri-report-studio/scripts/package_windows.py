@@ -56,7 +56,7 @@ subprocess.run([
 app = destination / 'resources/app'
 (app / 'electron').mkdir(parents=True)
 (app / 'dist').mkdir()
-for filename in ['main.cjs', 'preload.cjs']:
+for filename in ['main.cjs', 'preload.cjs', 'ai-model.cjs']:
     shutil.copy2(ROOT / 'electron' / filename, app / 'electron' / filename)
 shutil.copy2(ROOT / 'dist/index.html', app / 'dist/index.html')
 shutil.copy2(ROOT / 'public/mri-report-studio.ico', app / 'dist/mri-report-studio.ico')
