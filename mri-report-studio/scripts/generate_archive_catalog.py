@@ -186,6 +186,27 @@ def plain(node):
     return ''.join(plain(child) for child in node.get('content', []))
 
 
+def russian_decimal_commas(value):
+    """Use comma for numeric decimals, preserving report dates dd.mm.yyyy."""
+    dates = list(re.finditer(r'(?<!\d)\d{1,2}\.\d{1,2}\.\d{4}(?!\d)', value))
+    protected = [False] * len(value)
+    for match in dates:
+        for index in range(match.start(), match.end()):
+            protected[index] = True
+    chars = list(value)
+    for index, char in enumerate(chars):
+        if char == '.' and index > 0 and index + 1 < len(chars) and value[index-1].isdigit() and value[index+1].isdigit() and not protected[index]:
+            chars[index] = ','
+    return ''.join(chars)
+
+
+def normalize_numeric_punctuation(node):
+    if node.get('type') == 'text':
+        node['text'] = russian_decimal_commas(node.get('text', ''))
+    for child in node.get('content', []):
+        normalize_numeric_punctuation(child)
+
+
 def split_range(nodes, start, end, mark):
     result, cursor = [], 0
     for node in nodes:
@@ -375,6 +396,8 @@ def main():
     if not templates:
         raise RuntimeError('No source templates were read.')
     default = next(t['id'] for t in templates if t['areaId'] == 'head' and t['title'] == 'ГМ')
+    for template in templates:
+        normalize_numeric_punctuation(template['doc'])
     result = {'source': 'Шаблоны МРТ — Кочетов С.В.rar; converted legacy Word templates',
               'defaultTemplateId': default, 'patientFieldId': PATIENT_ID, 'doctorFieldId': DOCTOR_ID,
               'page': deepcopy(PAGE), 'areas': areas, 'templates': templates,

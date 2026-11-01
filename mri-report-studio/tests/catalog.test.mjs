@@ -48,3 +48,12 @@ test('archive slash alternatives are yellow editable report text', () => {
   assert.ok(highlights.length > 0);
   assert.ok(highlights.some(value => value.includes('/')));
 });
+
+test('numeric dimensions and indices use Russian decimal commas while dates keep dots', () => {
+  const text = reportTemplates.map(t => visible(t.doc)).join('\n');
+  assert.match(text, /22,6-26,0/);
+  assert.match(text, /28,2-29,4/);
+  assert.match(text, /1,5 Тесла/);
+  assert.match(text, /дд\.мм\.гггг/);
+  assert.doesNotMatch(text, /22\.6-26\.0|28\.2-29\.4|1\.5 Тесла/);
+});
