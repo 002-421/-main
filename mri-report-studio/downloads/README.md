@@ -5,7 +5,6 @@
 - **[Скачать приложение для Windows](https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/mri-report-studio/downloads/MRI_Alliance_Windows_Setup.zip)**. Распакуйте весь архив и запустите `Install.cmd`. Установщик загрузит официальный Electron с GitHub (около 150 МБ), проверит SHA256 и создаст новую папку приложения на рабочем столе. Интернет нужен для установки; права администратора не требуются.
 - **[Скачать автономную браузерную версию](https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/mri-report-studio/downloads/MRI_Alliance_Browser.zip)**. Распакуйте и откройте `index.html` в Chrome или Edge. Для PDF выберите «Сохранить как PDF» в окне печати.
 - [Самостоятельный HTML-файл](https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/mri-report-studio/downloads/MRI_Alliance.html).
-- [Пример базового шаблона Word](https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/mri-report-studio/downloads/MRI_Alliance_Head_Template.docx).
 - [Посмотреть интерфейс](MRI_Alliance_Preview.png).
 - [Инструкция](../README_RU.txt).
 - [Лицензии компонентов](THIRD_PARTY_LICENSES.txt).

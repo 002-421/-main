@@ -8,7 +8,7 @@
 
 [Браузерная версия](https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/mri-report-studio/downloads/MRI_Alliance_Browser.zip): распакуйте и откройте `index.html` в Chrome или Edge.
 
-[Подробная инструкция на русском](README_RU.txt). [Пример базового шаблона Word](downloads/MRI_Alliance_Head_Template.docx?raw=true).
+[Подробная инструкция на русском](README_RU.txt).
 
 ## Версия 0.3.0
 

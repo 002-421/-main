@@ -58,10 +58,6 @@ shutil.copy2(ROOT / 'public/mri-alliance.ico', app / 'dist/mri-alliance.ico')
 shutil.copy2(ROOT / 'README_RU.txt', destination / 'ПРОЧИТАЙТЕ.txt')
 
 (destination / 'THIRD_PARTY_LICENSES.txt').write_text(collect_licenses(), encoding='utf-8')
-example = ROOT / 'downloads/MRI_Alliance_Head_Template.docx'
-if example.is_file():
-    shutil.copy2(example, destination / example.name)
-
 output = RELEASE / 'MRI_Alliance_Windows_x64.zip'
 with ZipFile(output, 'w', ZIP_DEFLATED, compresslevel=6) as package:
     for file in sorted(destination.rglob('*')):
