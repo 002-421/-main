@@ -234,9 +234,9 @@ test('source template physician and date sit at opposite sides of the signature 
   const doc = initializeReportFooter(makeTemplateDocument('head-gm'), '03.11.2026');
   const { xml } = await exported(doc, { templateId: 'head-gm' });
   const doctorText = xml.indexOf('Врач:');
-  const signature = xml.slice(xml.lastIndexOf('<w:p', doctorText), xml.indexOf('</w:p>', doctorText) + 6);
-  assert.match(signature, /<w:tabs><w:tab w:val="right" w:pos="[0-9]+"\/><\/w:tabs>/);
-  assert.match(signature, /<w:tab\/>/);
+  const signature = xml.slice(xml.lastIndexOf('<w:tbl>', doctorText), xml.indexOf('</w:tbl>', doctorText) + 8);
+  assert.match(signature, /<w:gridCol w:w="[0-9]+"\/><w:gridCol w:w="[0-9]+"\/>/);
+  assert.match(signature, /<w:jc w:val="right"\/>/);
   assert.match(signature, /дата:/);
   assert.match(signature, /03\.11\.2026/);
 });

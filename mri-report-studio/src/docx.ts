@@ -1,7 +1,7 @@
 import {
   AlignmentType, BorderStyle, Document, ExternalHyperlink, Footer, HeadingLevel,
   LevelFormat, LineRuleType, Packer, Paragraph, ShadingType, Table, TableCell,
-  TableLayoutType, TableRow, Tab, TabStopType, TabStopPosition, TextRun, UnderlineType, WidthType, PageNumber,
+  TableLayoutType, TableRow, Tab, TextRun, UnderlineType, WidthType, PageNumber,
   type IParagraphOptions, type IRunOptions, type NumberingDefinition, type ParagraphChild,
 } from 'docx';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
@@ -126,8 +126,6 @@ const ALIGNMENTS: Record<string, (typeof AlignmentType)[keyof typeof AlignmentTy
 
 function paragraph(node: RichNode, context: Context, extra: IParagraphOptions = {}): Paragraph {
   const attrs = node.attrs ?? {};
-  const signatureRow = context.source && node.type === 'paragraph' && /Врач\s*:/i.test((node.content ?? []).map(child => child.text ?? '').join('')) && node.content?.some(child => child.marks?.some(mark => mark.type === 'templateField' && String(mark.attrs?.id ?? '').endsWith('.reportdate')));
-  const paragraphContent = signatureRow ? node.content?.map(child => child.type === 'text' && /дата\s*:/i.test(child.text ?? '') ? { ...child, text: (child.text ?? '').replace(/дата\s*:/i, '\tдата:') } : child) : node.content;
   const level = Math.min(3, Math.max(1, Number(attrs.level) || 2));
   const heading = node.type === 'heading' ? [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3][level - 1] : undefined;
   // Tiptap's TextStyleKit stores the ribbon's line height on inline textStyle marks.
@@ -159,10 +157,9 @@ function paragraph(node: RichNode, context: Context, extra: IParagraphOptions = 
   if (typeof attrs.fontFamily === 'string') inherited.font = attrs.fontFamily;
   if (typeof attrs.fontSizePt === 'number' && attrs.fontSizePt > 0 && attrs.fontSizePt <= 200) inherited.size = Math.round(attrs.fontSizePt * 2);
   return new Paragraph({
-    children: inline(paragraphContent, inherited),
+    children: inline(node.content, inherited),
     ...(style ? { style } : { heading }),
     alignment: ALIGNMENTS[attrs.textAlign],
-    ...(signatureRow ? { tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }] } : {}),
     spacing: { line, lineRule: LineRuleType.AUTO, before: pt(attrs.spaceBeforePt, context.source && sourceStyle !== 'Normal' ? 180 : heading ? (level === 1 ? 0 : 180) : 0), after: pt(attrs.spaceAfterPt, heading ? 100 : Math.round((context.spaceAfterPt ?? 4.25) * 20)) },
     ...(typeof attrs.firstLineIndentPt === 'number' || typeof attrs.leftIndentPt === 'number' || typeof attrs.rightIndentPt === 'number' ? { indent: { ...(typeof attrs.firstLineIndentPt === 'number' ? { firstLine: pt(attrs.firstLineIndentPt, 0) } : {}), ...(typeof attrs.leftIndentPt === 'number' ? { left: pt(attrs.leftIndentPt, 0) } : {}), ...(typeof attrs.rightIndentPt === 'number' ? { right: pt(attrs.rightIndentPt, 0) } : {}) } } : {}),
     widowControl: true,
@@ -272,6 +269,26 @@ function table(node: RichNode, context: Context): Table {
 
 function blocks(nodes: RichNode[], context: Context): (Paragraph | Table)[] {
   return nodes.flatMap((node): (Paragraph | Table)[] => {
+    if (node.type === 'paragraph' && /Врач\s*:/i.test((node.content ?? []).map(child => child.text ?? '').join('')) && node.content?.some(child => child.marks?.some(mark => mark.type === 'templateField' && String(mark.attrs?.id ?? '').endsWith('.reportdate')))) {
+      const left: RichNode[] = [], right: RichNode[] = [];
+      let isDate = false;
+      for (const child of node.content ?? []) {
+        if (child.type === 'text' && /дата\s*:/i.test(child.text ?? '')) {
+          isDate = true;
+          right.push({ ...child, text: (child.text ?? '').replace(/^\s*/, '').replace(/дата\s*:/i, 'дата:') });
+        } else (isDate ? right : left).push(child);
+      }
+      const width = Math.max(300, context.width ?? BODY_WIDTH);
+      const leftWidth = Math.round(width * 0.67), rightWidth = width - leftWidth;
+      const noBorders = { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideVertical: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } };
+      return [new Table({
+        rows: [new TableRow({ cantSplit: true, children: [
+          new TableCell({ width: { size: leftWidth, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [paragraph({ ...node, content: left }, { ...context, width: leftWidth }, { alignment: AlignmentType.LEFT })] }),
+          new TableCell({ width: { size: rightWidth, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [paragraph({ ...node, attrs: { ...node.attrs, textAlign: 'right' }, content: right }, { ...context, width: rightWidth }, { alignment: AlignmentType.RIGHT })] }),
+        ] })],
+        columnWidths: [leftWidth, rightWidth], width: { size: width, type: WidthType.DXA }, layout: TableLayoutType.FIXED, borders: noBorders,
+      })];
+    }
     if (node.type === 'paragraph' || node.type === 'heading') return [paragraph(node, context)];
     if (node.type === 'table') return [table(node, context)];
     if (node.type === 'bulletList' || node.type === 'orderedList') return list(node, context);
