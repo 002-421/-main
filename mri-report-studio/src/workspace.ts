@@ -10,7 +10,7 @@ import { exportDocx, importOwnDocx } from './docx';
 import { russianProofreadingLicense } from './proofreading';
 import { buildReportFilename, extractFilenameFields } from './report-filename';
 import { initializeReportFooter } from './report-footer';
-import { compactTemplateTables, separateRecommendations } from './table-layout';
+import { compactTemplateTables, separateRecommendations, highlightDeletionNotes } from './table-layout';
 import fontLicense from './assets/fonts/LICENSE.txt?raw';
 import allianceLogo from './assets/logo.png?url';
 import regularFont from './assets/fonts/DejaVuSans.ttf?url';
@@ -56,11 +56,11 @@ function defaultDoctor(doc:RichNode):RichNode {
   let applied=false;
   const walk=(n:RichNode)=>{if(n.content)n.content=n.content.filter(child=>{const m=fieldMark(child);if(m?.attrs?.id===DOCTOR_FIELD_ID&&child.type==='text'){if(applied)return false;applied=true;child.text=settings.doctor.trim();m.attrs={...m.attrs,filled:true};}walk(child);return true;});};walk(doc);return doc;
 }
-function newDocument(id:string) { return defaultDoctor(prepareInlineDocument(initializeReportFooter(resetInlineTemplate(separateRecommendations(compactTemplateTables(overrides[id]??makeTemplateDocument(id))))))); }
+function newDocument(id:string) { return defaultDoctor(prepareInlineDocument(initializeReportFooter(resetInlineTemplate(highlightDeletionNotes(separateRecommendations(compactTemplateTables(overrides[id]??makeTemplateDocument(id)))))))); }
 let initial = newDocument(activeTemplateId);
 try {
   const raw=read<any>(KEYS.draft,null);
-  if(raw) { const restored=validateDraft(raw);initial=prepareInlineDocument(separateRecommendations(compactTemplateTables(restored.doc)));if(reportTemplates.some(t=>t.id===raw.templateId)){activeTemplateId=raw.templateId;selectedAreaId=reportTemplates.find(t=>t.id===activeTemplateId)!.areaId;} }
+  if(raw) { const restored=validateDraft(raw);initial=prepareInlineDocument(highlightDeletionNotes(separateRecommendations(compactTemplateTables(restored.doc))));if(reportTemplates.some(t=>t.id===raw.templateId)){activeTemplateId=raw.templateId;selectedAreaId=reportTemplates.find(t=>t.id===activeTemplateId)!.areaId;} }
 } catch { recoveryError=true; }
 
 $('#app').innerHTML=`<div class="shell">
@@ -89,7 +89,7 @@ editor.on('selectionUpdate',()=>{ savedSelection=editor.state.selection; updateR
 editor.on('update',()=>{if(!suppress){changedSinceOpen=true;clearTimeout(timer);if(!templateMode){$('#save-state').textContent='Сохраняется…';timer=setTimeout(saveLocal,450);}else $('#save-state').textContent='Шаблон изменён';renderCounts();}});
 editor.on('transaction',updateRibbon);
 const json=()=>editor.getJSON() as RichNode;
-function restore(doc:RichNode) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(separateRecommendations(compactTemplateTables(doc))));editor.view.updateState(EditorState.create({schema:editor.schema,doc:editor.state.doc,plugins:editor.state.plugins}));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
+function restore(doc:RichNode) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(highlightDeletionNotes(separateRecommendations(compactTemplateTables(doc)))));editor.view.updateState(EditorState.create({schema:editor.schema,doc:editor.state.doc,plugins:editor.state.plugins}));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
 function toast(message:string,error=false) { $('.toast')?.remove();const t=document.createElement('div');t.className=`toast${error?' error':''}`;t.role=error?'alert':'status';t.textContent=message;document.body.append(t);setTimeout(()=>t.remove(),5000); }
 function saveLocal() { if(templateMode)return;try{localStorage.setItem(KEYS.draft,JSON.stringify({format:'mri-report-studio',version:draftVersion,profile:profileForTemplate(),templateId:activeTemplateId,doc:json(),customModules:[]}));$('#save-state').textContent='Сохранено на компьютере';}catch{ $('#save-state').textContent='Не сохранено';toast('Не удалось сохранить локальный черновик. Сохраните документ Word.',true); } }
 function profileForTemplate() { const area=reportTemplates.find(t=>t.id===activeTemplateId)?.areaId;return area==='head'?'brain':'custom'; }
@@ -118,7 +118,7 @@ document.querySelectorAll<HTMLElement>('[data-block-filter]').forEach(b=>b.oncli
 function dialog(title:string,body:string,footer='') {closeDialog();const overlay=document.createElement('div');overlay.className='dialog-overlay';overlay.innerHTML=`<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><header><h2 id="dialog-title">${esc(title)}</h2><button data-close aria-label="Закрыть">×</button></header><div class="dialog-body">${body}</div>${footer?`<footer>${footer}</footer>`:''}</section>`;document.body.append(overlay);overlay.addEventListener('click',e=>{if(e.target===overlay||(e.target as HTMLElement).closest('[data-close]'))closeDialog();});overlay.addEventListener('keydown',e=>{if(e.key==='Tab'){const nodes=[...overlay.querySelectorAll<HTMLElement>('button,input,textarea,select')].filter(n=>!n.hasAttribute('disabled'));if(e.shiftKey&&document.activeElement===nodes[0]){e.preventDefault();nodes.at(-1)?.focus();}else if(!e.shiftKey&&document.activeElement===nodes.at(-1)){e.preventDefault();nodes[0]?.focus();}}});setTimeout(()=>overlay.querySelector<HTMLElement>('input,textarea,button')?.focus(),0);return overlay;}
 function closeDialog(){$('.dialog-overlay')?.remove();}
 function templateChrome(){ $('#template-banner').classList.toggle('hidden',!templateMode);for(const id of ['new-report','open-report','edit-template','area-select'])($(`#${id}`) as HTMLButtonElement).disabled=templateMode;$('.shell').classList.toggle('template-mode',templateMode); }
-$('#edit-template').onclick=()=>{if(templateMode)return;saveLocal();clearTimeout(timer);backup={doc:json(),changed:changedSinceOpen};templateMode=true;restore(resetInlineTemplate(separateRecommendations(compactTemplateTables(overrides[activeTemplateId]??makeTemplateDocument(activeTemplateId)))));templateChrome();$('#canvas').scrollTop=0;};
+$('#edit-template').onclick=()=>{if(templateMode)return;saveLocal();clearTimeout(timer);backup={doc:json(),changed:changedSinceOpen};templateMode=true;restore(resetInlineTemplate(highlightDeletionNotes(separateRecommendations(compactTemplateTables(overrides[activeTemplateId]??makeTemplateDocument(activeTemplateId))))));templateChrome();$('#canvas').scrollTop=0;};
 function finishTemplate(save:boolean){if(!templateMode||!backup)return;if(save){try{const next=validateTemplate(promoteInlineTemplate(json()));const all={...overrides,[activeTemplateId]:next};localStorage.setItem(KEYS.templates,JSON.stringify(all));overrides=all;}catch(e){toast(`Не удалось сохранить шаблон: ${(e as Error).message}`,true);return;}}const previous=backup;backup=null;templateMode=false;restore(previous.doc);changedSinceOpen=previous.changed;templateChrome();renderTemplates();toast(save?'Шаблон сохранён для новых описаний.':'Изменения шаблона отменены.');}
 $('#save-template').onclick=()=>finishTemplate(true);$('#cancel-template').onclick=()=>finishTemplate(false);
 $('#reset-template').onclick=()=>{const d=dialog('Вернуть исходный шаблон?','<p>В режиме редактирования будут восстановлены исходные текст и форматирование. Для применения нажмите «Сохранить шаблон».</p>','<button class="btn" data-close>Отмена</button><button class="btn primary" id="confirm-reset">Восстановить</button>');d.querySelector('#confirm-reset')!.addEventListener('click',()=>{restore(makeTemplateDocument(activeTemplateId));closeDialog();});};
