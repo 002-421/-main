@@ -1,11 +1,12 @@
 import {
   AlignmentType, BorderStyle, Document, ExternalHyperlink, Footer, HeadingLevel,
   LevelFormat, LineRuleType, Packer, Paragraph, ShadingType, Table, TableCell,
-  TableLayoutType, TableRow, Tab, TextRun, UnderlineType, WidthType, PageNumber,
+  TableLayoutType, TableRow, Tab, TextRun, UnderlineType, WidthType, PageNumber, VerticalAlign,
   type IParagraphOptions, type IRunOptions, type NumberingDefinition, type ParagraphChild,
 } from 'docx';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { draftVersion, validateDraft, type Module, type RichNode } from './model.ts';
+import { DISCLAIMER_TEXT, EQUIPMENT_TEXT } from './report-footer.ts';
 
 export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const STATE_PART = 'customXml/mri-report-studio.xml';
@@ -367,7 +368,18 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
         left: marginLeft, right: marginRight,
         ...(source ? { header: 369, footer: 369 } : {}),
       } } },
-      ...(source ? { footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 0, after: 0, line: 240, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: 16, color: '64748B', text: typeof a.footerText === 'string' ? cleanText(a.footerText) : 'Исследование выполнено на магнитно-резонансном томографе Philips Achieva с высокой напряженностью магнитного поля 1.5 Тесла   |   ' }), new TextRun({ font, size: fontSize, color: '000000', children: [PageNumber.CURRENT] })] })] }) } } : {}),
+      ...(source ? { footers: { default: new Footer({ children: [new Table({
+        rows: [new TableRow({ children: [
+          new TableCell({ width: { size: pageWidth - marginLeft - marginRight - 500, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 80 }, children: [
+            new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0, line: 220, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: 16, color: '64748B', text: DISCLAIMER_TEXT })] }),
+            new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0, line: 220, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: 16, color: '64748B', italics: true, text: EQUIPMENT_TEXT })] }),
+          ] }),
+          new TableCell({ width: { size: 500, type: WidthType.DXA }, verticalAlign: VerticalAlign.BOTTOM, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 0, after: 0, line: 220, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: fontSize, color: '000000', children: [PageNumber.CURRENT] })] })] }),
+        ] })],
+        columnWidths: [pageWidth - marginLeft - marginRight - 500, 500],
+        width: { size: pageWidth - marginLeft - marginRight, type: WidthType.DXA }, layout: TableLayoutType.FIXED,
+        borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideVertical: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } },
+      })] }) } } : {}),
       children,
     }],
   });

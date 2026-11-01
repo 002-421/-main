@@ -1,6 +1,8 @@
 import type { RichNode } from './model';
 
 const textOf = (node: RichNode): string => node.type === 'text' ? node.text ?? '' : node.content?.map(textOf).join('') ?? '';
+export const DISCLAIMER_TEXT = 'Данное заключение не является диагнозом и должно быть интерпретировано лечащим врачом на основании клинико-лабораторных данных и других диагностических исследований';
+export const EQUIPMENT_TEXT = 'Исследование выполнено на магнитно-резонансном томографе Philips Achieva с высокой напряженностью магнитного поля 1,5 Тесла';
 
 /** Add visual blank lines to the standard closing block and initialize its date. */
 export function initializeReportFooter(doc: RichNode, date = new Date().toLocaleDateString('ru-RU')): RichNode {
@@ -15,17 +17,10 @@ export function initializeReportFooter(doc: RichNode, date = new Date().toLocale
         mark.attrs = { ...mark.attrs, filled: true };
       }
     }
-    const disclaimer = content.findIndex((node, index) => index > physician && node.type === 'paragraph' && /Данное заключение не является диагнозом/i.test(textOf(node)));
-    const equipment = content.findIndex((node, index) => index > disclaimer && node.type === 'paragraph' && /Исследование выполнено на магнитно-резонансном томографе/i.test(textOf(node)));
-    const insertBefore = (index: number) => {
-      if (index < 0 || content[index - 1]?.type === 'paragraph' && !textOf(content[index - 1])) return;
-      const source = content[index];
-      content.splice(index, 0, { type: 'paragraph', attrs: { ...(source.attrs ?? {}), spaceBeforePt: 0, spaceAfterPt: 0 }, content: [] });
-    };
-    insertBefore(equipment);
-    insertBefore(disclaimer);
-    insertBefore(physician);
+    const source = content[physician];
+    content.splice(physician, 0, { type: 'paragraph', attrs: { ...(source.attrs ?? {}), spaceBeforePt: 0, spaceAfterPt: 0 }, content: [] });
+    next.content = content.filter(node => !/Данное заключение не является диагнозом|Исследование выполнено на магнитно-резонансном томографе/i.test(textOf(node)));
   }
-  next.content = content;
+  if (!next.content) next.content = content;
   return next;
 }
