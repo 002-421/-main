@@ -200,40 +200,69 @@ def russian_decimal_commas(value):
     return ''.join(chars)
 
 
-def normalize_numeric_punctuation(node):
-    if node.get('type') == 'text':
-        node['text'] = russian_decimal_commas(node.get('text', ''))
-        return [node]
-    content = node.get('content', [])
-    normalized = []
-    for child in content:
+def inline_slice(nodes, start, end):
+    result, cursor = [], 0
+    for child in nodes:
         if child.get('type') != 'text':
-            normalized.extend(normalize_numeric_punctuation(child))
+            cursor += 1
             continue
-        value = russian_decimal_commas(child.get('text', ''))
-        # Replace empty measurement slots immediately before cm with a visible
-        # 0,0 placeholder. The yellow mark applies only to the inserted value.
+        value = child.get('text', '')
+        left, right = max(start, cursor), min(end, cursor + len(value))
+        if left < right:
+            result.append({'type':'text','text':value[left-cursor:right-cursor], **({'marks':deepcopy(child.get('marks',[]))} if child.get('marks') else {})})
+        cursor += len(value)
+    return result
+
+
+def normalize_numeric_punctuation(node):
+    if node.get('type') == 'paragraph' and all(c.get('type') == 'text' for c in node.get('content', [])):
+        original = node.get('content', [])
+        text = ''.join(c.get('text', '') for c in original)
+        output = []
+        cursor = 0
+        # The only periods between digits retained in a report are date separators.
+        for match in re.finditer(r'(?<!\d)\d+\.\d+(?!\d)', text):
+            if not re.fullmatch(r'\d{1,2}\.\d{1,2}', match.group(0)):
+                continue
+            # A decimal inside a full dd.mm.yyyy date is protected.
+            if re.search(r'\d{1,2}\.\d{1,2}\.\d{4}', text[max(0,match.start()-3):match.end()+5]):
+                continue
+            node['content'] = inline_slice(original, match.start(), match.end())
+            for run in node['content']:
+                run['text'] = run['text'].replace('.', ',')
+            output.extend(inline_slice(original, cursor, match.start()))
+            output.extend(node['content'])
+            cursor = match.end()
+        output.extend(inline_slice(original, cursor, len(text)))
+        # Find blank centimetre slots across formatting-run boundaries. Existing
+        # numeric dimensions and normative values are left untouched.
+        text = ''.join(c.get('text', '') for c in output)
         candidates = []
-        for match in re.finditer(r'(?<![\w\d,.])см(?:²|2)?(?![\w])', value, re.I):
-            prefix = value[max(0, match.start()-50):match.start()]
-            if re.search(r'\d(?:,\d+)?\s*$', prefix):
+        for match in re.finditer(r'(?<![\w\d,.])см(?:²|2)?(?![\w])', text, re.I):
+            if re.search(r'\d(?:,\d+)?\s*$', text[:match.start()]):
                 continue
-            if not re.search(r'(?:справа|слева|правая|левая|дол[ияею]|размер\w*|диаметр\w*|ширин\w*|длин\w*|толщин\w*|протяж[её]нност\w*|объ[её]м\w*|\bдо|\bна|=|(?:^|\s)-)\s*(?:[:=–—-]\s*)?(?:до\s*)?(?:_{2,}|…|\.{2,})?\s*$', prefix, re.I):
-                continue
+            prefix = text[max(0, match.start()-10):match.start()]
             blank = re.search(r'(?:_{2,}|…|\.{2,})\s*$', prefix)
             start = match.start() - (blank.end() - blank.start() if blank else 0)
             candidates.append((start, match.start(), match.end()))
-        cursor = 0
-        for start, unit_start, unit_end in candidates:
-            if start > cursor:
-                normalized.append({'type':'text','text':value[cursor:start], **({'marks':deepcopy(child.get('marks',[]))} if child.get('marks') else {})})
-            source_marks = [mark for mark in deepcopy(child.get('marks', [])) if mark.get('type') != 'highlight']
-            normalized.append({'type':'text','text':'0,0','marks':source_marks+[deepcopy(YELLOW_MARK)]})
-            normalized.append({'type':'text','text':' '+value[unit_start:unit_end], **({'marks':source_marks} if source_marks else {})})
-            cursor = unit_end
-        if cursor < len(value):
-            normalized.append({'type':'text','text':value[cursor:], **({'marks':deepcopy(child.get('marks',[]))} if child.get('marks') else {})})
-    node['content'] = normalized
+        if candidates:
+            fixed, cursor = [], 0
+            for start, unit_start, unit_end in candidates:
+                fixed.extend(inline_slice(output, cursor, start))
+                exemplar = inline_slice(output, unit_start, unit_start+1)
+                marks = [m for m in deepcopy(exemplar[0].get('marks', [])) if m.get('type') != 'highlight'] if exemplar else []
+                fixed.append({'type':'text','text':'0,0','marks':marks+[deepcopy(YELLOW_MARK)]})
+                fixed.append({'type':'text','text':' ',**({'marks':deepcopy(exemplar[0].get('marks',[]))} if exemplar and exemplar[0].get('marks') else {})})
+                fixed.extend(inline_slice(output, unit_start, unit_end))
+                cursor = unit_end
+            fixed.extend(inline_slice(output, cursor, len(text)))
+            output = fixed
+        node['content'] = output
+        return [node]
+    if node.get('type') == 'text':
+        node['text'] = russian_decimal_commas(node.get('text', ''))
+        return [node]
+    node['content'] = [grandchild for child in node.get('content', []) for grandchild in normalize_numeric_punctuation(child)]
     return [node]
 
 

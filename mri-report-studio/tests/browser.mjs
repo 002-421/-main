@@ -39,6 +39,8 @@ try{
  assert.equal(await page.locator('.report-content').count(),1);
  assert.equal(await page.locator('.inspector,#field-panel,#field-value').count(),0);
  assert.ok(await page.locator('[data-template-field]').count()>=4);
+ assert.match(await page.locator('.report-content').innerText(),/22,1, после 60 лет 22,6-26,0/);
+ assert.match(await page.locator('.report-content').innerText(),/справа 0,0 см, слева 0,0 см/);
  assert.equal(await page.evaluate(()=>typeof window.desktop.exportPDF),'function');
  console.log('PASS: one document editor, no right inspector, source placeholders.');
 

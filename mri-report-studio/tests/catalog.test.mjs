@@ -60,4 +60,10 @@ test('numeric dimensions and indices use Russian decimal commas while dates keep
   const yellowZeros=[];
   for(const template of reportTemplates)walk(template.doc,node=>{if(node.type==='text'&&node.text==='0,0'&&node.marks?.some(mark=>mark.type==='highlight'&&mark.attrs?.color==='#ffff00'))yellowZeros.push(node);});
   assert.ok(yellowZeros.length>0);
+  for(const template of reportTemplates)walk(template.doc,node=>{
+    if(node.type!=='paragraph')return;
+    const paragraph=visible(node);
+    for(const match of paragraph.matchAll(/\bсм(?:²|2)?\b/gi)) assert.match(paragraph.slice(0,match.index),/\d(?:,\d+)?\s*$/,`${template.title}: missing centimetre value in ${paragraph}`);
+    assert.doesNotMatch(paragraph.replace(/\d{1,2}\.\d{1,2}\.\d{4}/g,''),/(?<!\d)\d+\.\d+(?!\d)/,`${template.title}: decimal period remains in ${paragraph}`);
+  });
 });

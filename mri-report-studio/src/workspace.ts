@@ -19,7 +19,7 @@ import boldItalicFont from './assets/fonts/DejaVuSans-BoldOblique.ttf?url';
 declare global { interface Window { desktop?: { exportPDF:(name:string)=>Promise<{canceled:boolean;path?:string}>;copyReport:(html:string,text:string)=>Promise<void> } } }
 const $ = <T extends HTMLElement = HTMLElement>(s:string) => document.querySelector<T>(s)!;
 const esc = (v:unknown) => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
-const KEYS = { draft:'mri-report-studio.draft.v1',templates:'mri-alliance.templates.v3',blocks:'mri-alliance.blocks.v3',settings:'mri-alliance.settings.v3',dictionary:'mri-report-studio.dictionary.v1' };
+const KEYS = { draft:'mri-report-studio.draft.v1',templates:'mri-alliance.templates.v4',blocks:'mri-alliance.blocks.v3',settings:'mri-alliance.settings.v3',dictionary:'mri-report-studio.dictionary.v1' };
 type Block = {id:string;title:string;areaId:string;tags:string;doc:RichNode;custom:boolean};
 type Settings = {doctor:string;doctors:string[];logo:string;liveProof:boolean};
 const read = <T>(key:string,fallback:T):T => { try { return JSON.parse(localStorage.getItem(key) ?? 'null') ?? fallback; } catch { return fallback; } };
