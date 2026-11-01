@@ -1,12 +1,12 @@
-# МРТ Альянс
+# MRI Report Studio
 
 Локальный редактор описаний МРТ. Врач выбирает зону и шаблон, заполняет документ, добавляет нужные блоки и сохраняет результат в Word или PDF. Рабочая область — одно поле редактирования без отдельной правой панели.
 
 ## Скачать приложение
 
-[Комплект для Windows](https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/mri-report-studio/downloads/MRI_Alliance_Windows_Setup.zip): распакуйте весь архив и запустите `Install.cmd`. Он загрузит официальный Electron с GitHub, проверит SHA256 и создаст новую папку приложения на рабочем столе. Интернет нужен для установки; работа с описаниями выполняется локально.
+[Комплект для Windows](https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/mri-report-studio/downloads/MRI_Report_Studio_Windows_Setup.zip): распакуйте весь архив и запустите `Install.cmd`. Он загрузит официальный Electron с GitHub, проверит SHA256 и создаст папку MRI Report Studio на рабочем столе. Интернет нужен для установки; работа с описаниями выполняется локально.
 
-[Браузерная версия](https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/mri-report-studio/downloads/MRI_Alliance_Browser.zip): распакуйте и откройте `index.html` в Chrome или Edge.
+[Браузерная версия](https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/mri-report-studio/downloads/MRI_Report_Studio_Browser.zip): распакуйте и откройте `index.html` в Chrome или Edge.
 
 [Подробная инструкция на русском](README_RU.txt).
 
@@ -62,7 +62,7 @@ npm run build
 python3 scripts/package_setup.py
 ```
 
-В `downloads/` создаются установочный ZIP, браузерный ZIP, самостоятельный HTML и лицензии под именем MRI Alliance. Установщик закрепляет версию Electron и SHA256; права администратора, изменение ExecutionPolicy и настроек защиты не требуются.
+В `downloads/` создаются установочный ZIP, браузерный ZIP, самостоятельный HTML и лицензии под именем MRI Report Studio. Установщик закрепляет версию Electron и SHA256; права администратора, изменение ExecutionPolicy и настроек защиты не требуются.
 
 Полный переносимый архив с Windows EXE:
 

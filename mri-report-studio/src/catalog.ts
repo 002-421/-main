@@ -1,6 +1,6 @@
 import source from './catalog.json' with { type: 'json' };
 import type { RichNode } from './model';
-import { compactTemplateTables } from './table-layout.ts';
+import { compactTemplateTables, separateRecommendations } from './table-layout.ts';
 
 export type ReportTemplate = {
   id: string;
@@ -30,5 +30,5 @@ export const reportBlocks = source.blocks as ReportBlock[];
 export function makeTemplateDocument(templateId = DEFAULT_TEMPLATE_ID): RichNode {
   const template = reportTemplates.find(item => item.id === templateId);
   if (!template) throw new Error('Шаблон исследования не найден.');
-  return compactTemplateTables(template.doc);
+  return separateRecommendations(compactTemplateTables(template.doc));
 }

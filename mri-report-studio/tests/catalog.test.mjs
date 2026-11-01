@@ -66,6 +66,35 @@ test('tables in every template use compact widths, cell text and line breaks', (
   }
 });
 
+test('templates default to Arial 12 and separate conclusion and recommendations', () => {
+  for (const template of reportTemplates) {
+    const doc = makeTemplateDocument(template.id);
+    assert.equal(doc.attrs.fontFamily, 'Arial', template.title);
+    assert.equal(doc.attrs.fontSizePt, 12, template.title);
+    const check = (node, inTable = false) => {
+      const table = inTable || node.type === 'table';
+      if (node.type === 'paragraph' || node.type === 'heading') {
+        assert.equal(node.attrs.fontFamily, 'Arial', template.title);
+        assert.equal(node.attrs.fontSizePt, table ? 9 : 12, template.title);
+      }
+      for (const mark of node.marks ?? []) if (mark.type === 'textStyle') {
+        assert.equal(mark.attrs.fontFamily, 'Arial', template.title);
+        assert.equal(mark.attrs.fontSize, table ? '12px' : '16px', template.title);
+      }
+      node.content?.forEach(child => check(child, table));
+      for (let index = 0; index < (node.content ?? []).length; index++) {
+        const child = node.content[index];
+        const text = plain(child).trim();
+        if (child.type === 'paragraph' && (/^(?:Рекоменд|Рекоменду)/i.test(text) || /^Заключение\s*:?/i.test(text))) {
+          assert.equal(node.content[index - 1]?.type, 'paragraph', `${template.title}: section separator`);
+          assert.equal(plain(node.content[index - 1]), '', `${template.title}: section separator`);
+        }
+      }
+    };
+    check(doc);
+  }
+});
+
 test('default head protocol retains editable patient and doctor fields and omits age and clinical goal', () => {
   const doc = makeTemplateDocument(DEFAULT_TEMPLATE_ID);
   const fields = collectInlineFields(prepareInlineDocument(doc));

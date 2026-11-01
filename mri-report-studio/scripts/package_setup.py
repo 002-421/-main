@@ -66,11 +66,16 @@ def main():
 
     DOWNLOADS.mkdir(exist_ok=True)
     RELEASE.mkdir(exist_ok=True)
+    legacy_release = RELEASE / 'MRI Alliance'
+    if legacy_release.exists(): shutil.rmtree(legacy_release)
+    for old_package in RELEASE.glob('MRI_Alliance*'):
+        if old_package.is_dir(): shutil.rmtree(old_package)
+        else: old_package.unlink()
     stage = RELEASE / 'download-packages'
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir()
-    setup = stage / 'MRI Alliance Setup'
+    setup = stage / 'MRI Report Studio Setup'
     (setup / 'app/dist').mkdir(parents=True)
     (setup / 'app/electron').mkdir()
     shutil.copy2(BUILD, setup / 'app/dist/index.html')
@@ -78,7 +83,7 @@ def main():
     for filename in ('main.cjs', 'preload.cjs'):
         shutil.copy2(ROOT / 'electron' / filename, setup / 'app/electron' / filename)
     (setup / 'app/package.json').write_text(json.dumps({
-        'name': metadata['name'], 'productName': 'MRI Alliance',
+        'name': metadata['name'], 'productName': 'MRI Report Studio',
         'version': metadata['version'], 'main': 'electron/main.cjs', 'private': True,
     }, indent=2) + '\n', encoding='utf-8')
     shutil.copy2(ROOT / 'README_RU.txt', setup / 'README_RU.txt')
@@ -104,11 +109,11 @@ def main():
         raise RuntimeError('The inline installer exceeds the Windows command-line limit.')
     (setup / 'Install.cmd').write_bytes(command.encode('ascii'))
     (setup / 'START_HERE_RU.txt').write_text(
-        f'УСТАНОВКА МРТ АЛЬЯНСА {metadata["version"]}\n\n'
+        f'УСТАНОВКА MRI REPORT STUDIO {metadata["version"]}\n\n'
         '1. Распакуйте весь архив.\n'
         '2. Запустите Install.cmd двойным щелчком.\n'
         '3. Дождитесь загрузки официальной среды запуска (около 150 МБ).\n'
-        '4. Приложение откроется; его папка появится на рабочем столе в MRI Alliance.\n\n'
+        '4. Приложение откроется; его папка появится на рабочем столе в MRI Report Studio.\n\n'
         'Интернет нужен для установки; готовое приложение работает без Интернета. '
         'Права администратора не нужны. Установщик не меняет ExecutionPolicy, настройки защиты, '
         'реестр или системные папки. SHA256 загруженного Electron проверяется; '
@@ -119,25 +124,27 @@ def main():
         encoding='utf-8-sig')
     notices = collect_licenses()
     (setup / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
-    write_zip(setup, DOWNLOADS / 'MRI_Alliance_Windows_Setup.zip')
+    write_zip(setup, DOWNLOADS / 'MRI_Report_Studio_Windows_Setup.zip')
 
-    browser = stage / 'MRI Alliance Browser'
+    browser = stage / 'MRI Report Studio Browser'
     browser.mkdir()
     shutil.copy2(BUILD, browser / 'index.html')
     shutil.copy2(ROOT / 'README_RU.txt', browser / 'README_RU.txt')
     (browser / 'START_HERE_RU.txt').write_text(
-        f'МРТ АЛЬЯНС {metadata["version"]} — БРАУЗЕРНАЯ ВЕРСИЯ\n\n'
+        f'MRI REPORT STUDIO {metadata["version"]} — БРАУЗЕРНАЯ ВЕРСИЯ\n\n'
         'Распакуйте архив целиком. Откройте index.html двойным щелчком в Chrome или Edge.\n'
         'Интернет и установка не нужны. Описания сохраняются кнопкой DOCX. '
         'Для PDF выберите «Сохранить как PDF» в окне печати.\n'
         'Локальный черновик и настройки связаны с этим браузером и адресом файла. '
         'Храните нужные описания отдельными файлами DOCX.\n', encoding='utf-8-sig')
     (browser / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
-    write_zip(browser, DOWNLOADS / 'MRI_Alliance_Browser.zip')
-    shutil.copy2(BUILD, DOWNLOADS / 'MRI_Alliance.html')
+    write_zip(browser, DOWNLOADS / 'MRI_Report_Studio_Browser.zip')
+    shutil.copy2(BUILD, DOWNLOADS / 'MRI_Report_Studio.html')
     (DOWNLOADS / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
-    for duplicate in DOWNLOADS.glob('MRI_Report_Studio*'):
-        duplicate.unlink()
+    old_preview = DOWNLOADS / 'MRI_Alliance_Preview.png'
+    if old_preview.exists(): old_preview.rename(DOWNLOADS / 'MRI_Report_Studio_Preview.png')
+    for old_name in DOWNLOADS.glob('MRI_Alliance*'):
+        old_name.unlink()
     print('Standalone HTML and license notices updated.', flush=True)
 
 

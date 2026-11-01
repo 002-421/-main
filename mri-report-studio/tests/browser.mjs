@@ -81,7 +81,7 @@ try{
  await page.locator('#copy-report').click();
  await page.getByRole('status').filter({hasText:'Описание скопировано с форматированием'}).waitFor();
  const clip=await application.evaluate(async({clipboard})=>{const items=await clipboard.read();return {text:await clipboard.readText(),html:await(await items[0].getType('text/html')).text()};});
- assert.match(clip.text,/Тестовый Пациент/);assert.match(clip.html,/DejaVu Sans/);
+ assert.match(clip.text,/Тестовый Пациент/);assert.match(clip.html,/Arial/);
  const pdfPath=path.join(output,'v3-native.pdf');
  await application.evaluate(({dialog},filePath)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath});},pdfPath);
  await page.locator('#export-pdf').click();if(await page.locator('#confirm-pdf').count())await page.locator('#confirm-pdf').click();

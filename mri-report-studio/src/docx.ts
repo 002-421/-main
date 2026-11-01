@@ -354,8 +354,8 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
   const pageHeight = source ? millimetres(a.pageHeightMm, PAGE_HEIGHT, 100) : PAGE_HEIGHT;
   const marginLeft = source ? millimetres(a.marginLeftMm, 1020, 0, 80) : PAGE_MARGIN;
   const marginRight = source ? millimetres(a.marginRightMm, 1020, 0, 80) : PAGE_MARGIN;
-  const font = source && typeof a.fontFamily === 'string' ? a.fontFamily : source ? 'DejaVu Sans' : 'Arial';
-  const fontSize = source && typeof a.fontSizePt === 'number' && a.fontSizePt > 0 && a.fontSizePt <= 200 ? a.fontSizePt * 2 : source ? 20 : 21;
+  const font = source && typeof a.fontFamily === 'string' ? a.fontFamily : 'Arial';
+  const fontSize = source && typeof a.fontSizePt === 'number' && a.fontSizePt > 0 && a.fontSizePt <= 200 ? a.fontSizePt * 2 : 24;
   const context: Context = {
     numbering: [], depth: 0, source, width: pageWidth - marginLeft - marginRight,
     ...(source ? { inherited: { font, size: fontSize, color: '000000' }, lineHeight: Number(a.lineHeight) || 1.05, spaceAfterPt: Number(a.spaceAfterPt) || 5 } : {}),

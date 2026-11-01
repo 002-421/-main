@@ -49,5 +49,42 @@ export function compactTemplateTables(input: RichNode): RichNode {
     } else node.content?.forEach(visit);
   };
   visit(doc);
+  const setTypography = (node: RichNode, inTable = false) => {
+    const tableContent = inTable || node.type === 'table';
+    if (node.type === 'paragraph' || node.type === 'heading') node.attrs = {
+      ...node.attrs, fontFamily: 'Arial', fontSizePt: tableContent ? 9 : 12,
+    };
+    if (node.type === 'text' && node.marks) node.marks = node.marks.map(mark => mark.type === 'textStyle'
+      ? { ...mark, attrs: { ...mark.attrs, fontFamily: 'Arial', fontSize: tableContent ? '12px' : '16px' } }
+      : mark);
+    node.content?.forEach(child => setTypography(child, tableContent));
+  };
+  doc.attrs = { ...doc.attrs, fontFamily: 'Arial', fontSizePt: 12 };
+  setTypography(doc);
+  return doc;
+}
+
+const textOf = (node: RichNode): string => node.type === 'text' ? node.text ?? '' : node.content?.map(textOf).join('') ?? '';
+
+export function separateRecommendations(input: RichNode): RichNode {
+  const doc = structuredClone(input);
+  const walk = (node: RichNode) => {
+    if (!node.content) return;
+    const separated: RichNode[] = [];
+    for (const child of node.content) {
+      const text = textOf(child).trim();
+      const isSectionStart = child.type === 'paragraph' && (/^\s*(?:Рекоменд|Рекоменду)/i.test(text) || /^заключение\s*:?$/i.test(text) || /^заключение\s*:/i.test(text));
+      if (isSectionStart) {
+        const previous = separated.at(-1);
+        if (previous?.type !== 'paragraph' || textOf(previous).trim()) {
+          separated.push({ type: 'paragraph', attrs: { ...(child.attrs ?? {}), fontFamily: 'Arial', fontSizePt: 12, spaceBeforePt: 0, spaceAfterPt: 0 }, content: [] });
+        }
+      }
+      walk(child);
+      separated.push(child);
+    }
+    node.content = separated;
+  };
+  walk(doc);
   return doc;
 }
