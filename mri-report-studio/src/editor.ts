@@ -9,6 +9,7 @@ import { TableKit } from '@tiptap/extension-table';
 import type { RichNode } from './model';
 import { TemplateField, InlineFieldEditing, TemplateReview, SourceFormat, prepareInlineDocument } from './inline-fields';
 import { LiveProofreading, type ProofStatus } from './live-proofreading';
+import { AIReviewHighlights } from './ai-review-highlights';
 
 export const ReportSection = Node.create({
   name: 'reportSection',
@@ -78,6 +79,7 @@ export function makeEditor(element: HTMLElement, content: RichNode, options: Rep
       TableKit.configure({ table: { resizable: true, allowTableNodeSelection: true } }),
       ReportSection, ReportField, ModuleReference, SourceFormat, TemplateField, InlineFieldEditing, TemplateReview,
       LiveProofreading.configure({ getPersonalWords: settings.getPersonalWords ?? (() => []), onStatus: settings.onProofStatus }),
+      AIReviewHighlights,
     ],
     content: prepareInlineDocument(content),
     editorProps: {

@@ -1,13 +1,14 @@
-"""Build the small Windows installer and offline browser downloads from dist/.
+"""Build Windows installation files and offline browser downloads from dist/.
 
-Run `npm run build` first. No runtime is downloaded by this packaging script;
-Install.cmd downloads and verifies the official pinned Electron on Windows.
+Run `npm run build` first. The Windows package includes the pinned CPU llama.cpp
+runtime; Install.cmd downloads and verifies the official pinned Electron on Windows.
 """
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED, ZipInfo
 import json
 import re
 import shutil
+from ai_runtime import VERSION as AI_RUNTIME_VERSION, prepare_ai_runtime
 
 ROOT = Path(__file__).resolve().parents[1]
 DOWNLOADS = ROOT / 'downloads'
@@ -15,20 +16,22 @@ RELEASE = ROOT / 'release'
 BUILD = ROOT / 'dist/index.html'
 
 
-def collect_licenses():
+def collect_licenses(extra_roots=()):
     notices = []
     names = {'license', 'license.md', 'license.txt', 'licence', 'licence.md',
              'licence.txt', 'copying', 'copying.txt', 'copyright'}
-    for manifest in sorted((ROOT / 'node_modules').glob('**/package.json')):
-        try:
-            metadata = json.loads(manifest.read_text(encoding='utf-8'))
-            files = sorted(p for p in manifest.parent.iterdir()
-                           if p.is_file() and p.name.lower() in names)
-        except (ValueError, OSError):
-            continue
-        for notice in files:
-            notices.append(f"\n{'=' * 60}\n{metadata.get('name')} {metadata.get('version')}\n"
-                           f"{notice.read_text(encoding='utf-8', errors='replace')}\n")
+    for node_modules in (ROOT / 'node_modules', *extra_roots):
+        for manifest in sorted(node_modules.glob('**/package.json')):
+            try:
+                metadata = json.loads(manifest.read_text(encoding='utf-8'))
+                files = sorted(p for p in manifest.parent.iterdir()
+                               if p.is_file() and p.name.lower() in names)
+            except (ValueError, OSError):
+                continue
+            for notice in files:
+                text = notice.read_text(encoding='utf-8', errors='replace')
+                text = '\n'.join(line.rstrip() for line in text.splitlines()).rstrip()
+                notices.append(f"\n{'=' * 60}\n{metadata.get('name')} {metadata.get('version')}\n{text}\n")
     if not notices:
         raise RuntimeError('Dependency license notices are missing. Run npm ci first.')
     font_notice = ROOT / 'src/assets/fonts/LICENSE.txt'
@@ -81,11 +84,14 @@ def main():
     shutil.copy2(BUILD, setup / 'app/dist/index.html')
     shutil.copy2(ROOT / 'public/mri-report-studio.ico', setup / 'app/dist/mri-report-studio.ico')
     shutil.copy2(ROOT / 'node_modules/rcedit/bin/rcedit-x64.exe', setup / 'app/dist/rcedit-x64.exe')
-    for filename in ('main.cjs', 'preload.cjs', 'ai-model.cjs'):
+    for filename in ('main.cjs', 'preload.cjs', 'ai-model.cjs', 'ai-review.cjs'):
         shutil.copy2(ROOT / 'electron' / filename, setup / 'app/electron' / filename)
+    ai_runtime = prepare_ai_runtime()
+    shutil.copytree(ai_runtime, setup / 'app/node_modules', dirs_exist_ok=True)
     (setup / 'app/package.json').write_text(json.dumps({
         'name': metadata['name'], 'productName': 'MRI Report Studio',
         'version': metadata['version'], 'main': 'electron/main.cjs', 'private': True,
+        'dependencies': {'node-llama-cpp': AI_RUNTIME_VERSION, '@node-llama-cpp/win-x64': AI_RUNTIME_VERSION},
     }, indent=2) + '\n', encoding='utf-8')
     shutil.copy2(ROOT / 'README_RU.txt', setup / 'README_RU.txt')
     (setup / 'Install.ps1').write_text(installer, encoding='utf-8-sig')
@@ -119,11 +125,12 @@ def main():
         'Права администратора не нужны. Установщик не меняет ExecutionPolicy, настройки защиты, '
         'реестр или системные папки. SHA256 загруженного Electron проверяется; '
         'несовпадение прерывает установку. Существующие файлы не перезаписываются.\n\n'
+        'CPU-движок llama.cpp включён в приложение. Файл модели Qwen 3 8B загружается отдельно при первом использовании и затем сохраняется в локальном кэше Windows. '
         'При обновлении закройте старое приложение и запускайте новый EXE из новой папки App_… . '
         'Локальный рабочий черновик и настройки шаблонов сохраняются в профиле приложения.\n\n'
         'Install.ps1 — читаемый исходник команды. Папку app нужно оставить рядом с Install.cmd.\n',
         encoding='utf-8-sig')
-    notices = collect_licenses()
+    notices = collect_licenses([ai_runtime])
     (setup / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
     write_zip(setup, DOWNLOADS / 'MRI_Report_Studio_Windows_Setup.zip')
 

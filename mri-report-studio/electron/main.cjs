@@ -2,12 +2,14 @@ const { app, BrowserWindow, ipcMain, dialog, clipboard, ClipboardItem, session }
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const { modelDirectory, createModelManager } = require('./ai-model.cjs');
+const { createAIReviewer } = require('./ai-review.cjs');
 
 // Keep the existing profile path so the rename preserves drafts and settings.
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
 app.setName('MRI Report Studio');
 let mainWindow;
 const aiModelStore = createModelManager({ root: modelDirectory({ userData: app.getPath('userData') }) });
+const aiReviewer = createAIReviewer();
 
 function requireMain(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Недоступный источник запроса.');
@@ -76,6 +78,13 @@ app.whenReady().then(() => {
     requireMain(event);
     return aiModelStore.ensure(progress => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ai:model-progress', progress);
+    });
+  });
+  ipcMain.handle('ai:review', async (event, blocks) => {
+    requireMain(event);
+    if (!(await aiModelStore.status()).ready) throw new Error('Сначала загрузите локальную модель Qwen 3 8B.');
+    return aiReviewer.review(blocks, aiModelStore.modelPath, progress => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ai:review-progress', progress);
     });
   });
 });

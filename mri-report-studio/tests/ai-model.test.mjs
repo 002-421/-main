@@ -20,6 +20,14 @@ test('Qwen model cache path stays stable across app versions and build directori
   assert.match(first, /MRI Report Studio[\\/]ai-models$/);
 });
 
+test('a new computer without a model cache is detected and can enter the download flow', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'mri-qwen-empty-'));
+  const manager = createModelManager({ root, model: { id: 'qwen-empty-v1', filename: 'qwen.gguf', url: 'http://127.0.0.1/model.gguf', maxBytes: fixture.length } });
+  try {
+    assert.deepEqual(await manager.status(), { ready: false, modelId: 'qwen-empty-v1', partialSize: 0, path: path.join(root, 'qwen.gguf') });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('a completed Qwen model is reused on later app iterations without another download', async () => {
   let requests = 0;
   const { server, url } = await serverFor((_request, response) => {

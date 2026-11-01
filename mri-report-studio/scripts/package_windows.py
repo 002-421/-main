@@ -7,6 +7,7 @@ import json
 import shutil
 import subprocess
 from package_setup import collect_licenses
+from ai_runtime import VERSION as AI_RUNTIME_VERSION, prepare_ai_runtime
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / '.runtime-cache'
@@ -56,17 +57,20 @@ subprocess.run([
 app = destination / 'resources/app'
 (app / 'electron').mkdir(parents=True)
 (app / 'dist').mkdir()
-for filename in ['main.cjs', 'preload.cjs', 'ai-model.cjs']:
+for filename in ['main.cjs', 'preload.cjs', 'ai-model.cjs', 'ai-review.cjs']:
     shutil.copy2(ROOT / 'electron' / filename, app / 'electron' / filename)
+ai_runtime = prepare_ai_runtime()
+shutil.copytree(ai_runtime, app / 'node_modules', dirs_exist_ok=True)
 shutil.copy2(ROOT / 'dist/index.html', app / 'dist/index.html')
 shutil.copy2(ROOT / 'public/mri-report-studio.ico', app / 'dist/mri-report-studio.ico')
 (app / 'package.json').write_text(json.dumps({
     'name': 'mri-report-studio', 'productName': 'MRI Report Studio',
     'version': json.loads((ROOT / 'package.json').read_text())['version'], 'main': 'electron/main.cjs', 'private': True,
+    'dependencies': {'node-llama-cpp': AI_RUNTIME_VERSION, '@node-llama-cpp/win-x64': AI_RUNTIME_VERSION},
 }, indent=2))
 shutil.copy2(ROOT / 'README_RU.txt', destination / 'ПРОЧИТАЙТЕ.txt')
 
-(destination / 'THIRD_PARTY_LICENSES.txt').write_text(collect_licenses(), encoding='utf-8')
+(destination / 'THIRD_PARTY_LICENSES.txt').write_text(collect_licenses([ai_runtime]), encoding='utf-8')
 output = RELEASE / 'MRI_Report_Studio_Windows_x64.zip'
 with ZipFile(output, 'w', ZIP_DEFLATED, compresslevel=6) as package:
     for file in sorted(destination.rglob('*')):
