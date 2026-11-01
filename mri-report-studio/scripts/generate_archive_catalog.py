@@ -271,6 +271,10 @@ def transform_paragraph(node, template_id, counter):
         if text[match.start():match.end()].strip().lower() in ('см','мм'):
             start = match.start()
         node['content'] = split_range(node['content'], start, match.end(), YELLOW_MARK)
+    # Give each header row the same one-blank-line rhythm shown in the source
+    # protocol; keep descriptive body paragraphs at the source spacing.
+    if re.match(r'^(?:Протокол\s+МРТ[- ]исследования\s+№|Ф\.\s*И\.\s*О\.?\s*пациент|Дата\s+рождения|Вид\s+исследования)\s*:', clean, re.I) or re.match(r'^Протокол\s+МРТ[- ]исследования\s+№', clean, re.I):
+        node.setdefault('attrs', {})['spaceAfterPt'] = 12
     return node
 
 

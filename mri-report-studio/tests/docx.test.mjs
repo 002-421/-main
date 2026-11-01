@@ -201,7 +201,7 @@ test('source template profile retains exact page geometry, title styles, spacing
   assert.match(styles, /<w:sz w:val="42"\/>/);
   const footer = Object.entries(zip).find(([name]) => /^word\/footer\d+\.xml$/.test(name));
   assert.ok(footer);
-  assert.match(strFromU8(footer[1]), /МРТ головы • v1.0/);
+  assert.match(strFromU8(footer[1]), /Исследование выполнено на магнитно-резонансном томографе Philips Achieva с высокой напряженностью магнитного поля 1\.5 Тесла/);
   assert.match(strFromU8(footer[1]), /PAGE/);
   assert.match(strFromU8(footer[1]), /<w:spacing(?=[^>]*w:after="0")(?=[^>]*w:line="240")/);
   assert.deepEqual((await importOwnDocx(blob)).doc, doc);

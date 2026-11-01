@@ -367,7 +367,7 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
         left: marginLeft, right: marginRight,
         ...(source ? { header: 369, footer: 369 } : {}),
       } } },
-      ...(source ? { footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 0, after: 0, line: 240, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: 16, color: '64748B', text: typeof a.footerText === 'string' ? cleanText(a.footerText) : 'МРТ головы • v1.0   |   ' }), new TextRun({ font, size: fontSize, color: '000000', children: [PageNumber.CURRENT] })] })] }) } } : {}),
+      ...(source ? { footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 0, after: 0, line: 240, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: 16, color: '64748B', text: typeof a.footerText === 'string' ? cleanText(a.footerText) : 'Исследование выполнено на магнитно-резонансном томографе Philips Achieva с высокой напряженностью магнитного поля 1.5 Тесла   |   ' }), new TextRun({ font, size: fontSize, color: '000000', children: [PageNumber.CURRENT] })] })] }) } } : {}),
       children,
     }],
   });

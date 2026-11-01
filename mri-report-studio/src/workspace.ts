@@ -8,6 +8,7 @@ import { areas, reportTemplates, reportBlocks, makeTemplateDocument, DOCTOR_FIEL
 import { builtinModules, moduleNode, compiler, validateDraft, validateTemplate, draftVersion, type RichNode } from './model';
 import { exportDocx, importOwnDocx } from './docx';
 import { russianProofreadingLicense } from './proofreading';
+import { buildReportFilename } from './report-filename';
 import fontLicense from './assets/fonts/LICENSE.txt?raw';
 import allianceLogo from './assets/logo.png?url';
 import regularFont from './assets/fonts/DejaVuSans.ttf?url';
@@ -165,7 +166,16 @@ function proofPopup(event:MouseEvent){const target=(event.target as HTMLElement)
 editor.view.dom.addEventListener('click',proofPopup);editor.view.dom.addEventListener('contextmenu',proofPopup);
 document.addEventListener('mousedown',e=>{if(!(e.target as HTMLElement).closest('.proof-popup,[data-proof-id]'))clearProofPopup();});
 
-function filename(suffix:string){const patient=collectInlineFields(json()).find(f=>f.id===PATIENT_FIELD_ID||f.id.endsWith('.patient')||f.id==='base.1');const name=templateMode?'МРТ_шаблон':patient?.filled?patient.value:'МРТ_описание';return `${name.replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').slice(0,90)}_${new Date().toLocaleDateString('ru-RU').replaceAll('.','-')}${suffix}`;}
+function filename(suffix:string){
+ const fields=collectInlineFields(json());
+ const usable=(field:ReturnType<typeof collectInlineFields>[number]|undefined)=>field?.filled?field.value.trim():'';
+ const number=usable(fields.find(f=>f.id.endsWith('.number')));
+ const doctor=usable(fields.find(f=>f.id===DOCTOR_FIELD_ID))||settings.doctor;
+ const patient=usable(fields.find(f=>f.id===PATIENT_FIELD_ID||f.id.endsWith('.patient')||f.id==='base.1'));
+ const reportDate=usable(fields.find(f=>f.id.endsWith('.reportdate')))||new Date().toLocaleDateString('ru-RU');
+ const title=reportTemplates.find(t=>t.id===activeTemplateId)?.title??'МРТ';
+ return buildReportFilename({number,doctor,patient,template:title,date:reportDate},suffix as '.docx'|'.pdf',new Date().toLocaleDateString('ru-RU'));
+}
 function download(blob:Blob,name:string){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}
 async function saveWord(){const button=$('#save-docx') as HTMLButtonElement;if(button.disabled)return;button.disabled=true;try{if(!templateMode)saveLocal();const doc=templateMode?promoteInlineTemplate(json()):json(),name=filename('.docx');const fonts=await embeddedFonts();const blob=await exportDocx(doc,{profile:profileForTemplate(),templateId:activeTemplateId,fonts,kind:templateMode?'template':'report'});download(blob,name);toast('Документ Word подготовлен для сохранения.');}catch(e){toast(`Не удалось сохранить Word: ${(e as Error).message}`,true);}finally{button.disabled=false;}}
 $('#save-docx').onclick=()=>void saveWord();$('#open-report').onclick=()=>($('#report-file') as HTMLInputElement).click();
