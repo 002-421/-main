@@ -173,6 +173,23 @@ test('patient-specific dimensions are highlighted while reference norms are left
   assert.ok(norm.every(node => !node.marks?.some(mark => mark.type === 'highlight' && mark.attrs?.color === '#ffff00')));
 });
 
+test('female pelvis templates add an editable cycle-day zero and keep the standard Omniscan dose unhighlighted', () => {
+  for (const id of ['pelvis-omt-zh', 'pelvis-omt-zh-ku']) {
+    const doc = makeTemplateDocument(id);
+    const cycle = doc.content.find(node => node.type === 'paragraph' && plain(node).includes('День цикла:'));
+    assert.ok(cycle, id);
+    const field = cycle.content.find(node => node.type === 'reportField');
+    assert.equal(field.attrs.hint, '0');
+    assert.match(visible(cycle), /^День цикла: ⟦0⟧ день$/);
+    if (id.endsWith('-ku')) {
+      const dose = [];
+      walk(doc, node => { if (node.type === 'text' && /0,2/.test(node.text ?? '')) dose.push(node); });
+      assert.ok(dose.length > 0, id);
+      assert.ok(!dose.some(node => node.marks?.some(mark => mark.type === 'highlight' && mark.attrs?.color === '#ffff00')), id);
+    }
+  }
+});
+
 test('male pelvis protocols include the restored PI-RADS reference image', () => {
   for (const id of ['pelvis-omt-m', 'pelvis-omt-m-ku']) {
     const doc = makeTemplateDocument(id);

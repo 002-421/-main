@@ -1,4 +1,5 @@
 import { Extension, Mark, mergeAttributes, type Editor } from '@tiptap/core';
+import { Mapping } from '@tiptap/pm/transform';
 import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import { Fragment, Slice } from '@tiptap/pm/model';
@@ -186,8 +187,28 @@ export const InlineFieldEditing = Extension.create({
       },
       // Input methods and formatted paste can bypass handleTextInput. A changed
       // prompt is still marked as filled, in the same undo event as the input.
-      appendTransaction(transactions, _old, state) {
+      appendTransaction(transactions, oldState, state) {
         if (!transactions.some(t => t.docChanged) || transactions.some(t => t.getMeta('inline-field-fix'))) return null;
+        const mapping = new Mapping();
+        for (const transaction of transactions) mapping.appendMapping(transaction.mapping);
+        const yellowRanges: Array<{ from: number; to: number; text: string; mark: PMMark }> = [];
+        oldState.doc.descendants((node, pos) => {
+          if (!node.isText) return;
+          const mark = node.marks.find(m => m.type.name === 'highlight' && String(m.attrs.color ?? '').toLowerCase() === '#ffff00');
+          if (!mark) return;
+          const prior = yellowRanges.at(-1);
+          if (prior && prior.to === pos && prior.mark.eq(mark)) { prior.to += node.nodeSize; prior.text += node.text; }
+          else yellowRanges.push({ from: pos, to: pos + node.nodeSize, text: node.text ?? '', mark });
+        });
+        let tr: Transaction | undefined;
+        for (const range of yellowRanges) {
+          const from = mapping.map(range.from, -1), to = mapping.map(range.to, 1);
+          if (to <= from || state.doc.textBetween(from, to) === range.text) continue;
+          const mark = state.schema.marks.highlight?.create(range.mark.attrs);
+          if (!mark) continue;
+          tr ??= state.tr;
+          tr.removeMark(from, to, mark);
+        }
         const groups = new Map<string, { text: string; nodes: { pos: number; size: number; mark: PMMark }[] }>();
         state.doc.descendants((node, pos) => {
           const mark = node.marks.find(m => m.type.name === 'templateField' && m.attrs.filled === false);
@@ -195,7 +216,6 @@ export const InlineFieldEditing = Extension.create({
           const group = groups.get(mark.attrs.id) ?? { text: '', nodes: [] };
           group.text += node.text; group.nodes.push({ pos, size: node.nodeSize, mark }); groups.set(mark.attrs.id, group);
         });
-        let tr: Transaction | undefined;
         for (const group of groups.values()) if (group.text !== group.nodes[0].mark.attrs.hint) {
           tr ??= state.tr;
           for (const n of group.nodes) tr.removeMark(n.pos, n.pos + n.size, n.mark).addMark(n.pos, n.pos + n.size, n.mark.type.create({ ...n.mark.attrs, filled: true }));

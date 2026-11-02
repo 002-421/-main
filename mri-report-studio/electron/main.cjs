@@ -6,6 +6,50 @@ const fs = require('node:fs/promises');
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
 app.setName('MRI Report Studio');
 let mainWindow;
+const sharedDictionaryDir = process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR
+  ? path.resolve(process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR)
+  : path.join(process.env.PUBLIC || path.dirname(app.getPath('appData')), 'Documents', 'MRI Report Studio');
+const sharedDictionaryFile = path.join(sharedDictionaryDir, 'dictionary.json');
+const personalDictionaryFile = path.join(app.getPath('userData'), 'dictionary.json');
+let dictionaryQueue = Promise.resolve();
+
+function validDictionaryWords(value) {
+  return [...new Set((Array.isArray(value) ? value : []).filter(word => typeof word === 'string')
+    .map(word => word.trim().toLocaleLowerCase('ru-RU'))
+    .filter(word => /^[а-яёa-z-]{2,80}$/i.test(word)))].slice(0, 20000);
+}
+async function readDictionaryFile(filename) {
+  try { return validDictionaryWords(JSON.parse(await fs.readFile(filename, 'utf8'))); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+}
+async function dictionaryPath() {
+  try { await fs.mkdir(sharedDictionaryDir, { recursive: true }); await fs.access(sharedDictionaryDir, require('node:fs').constants.W_OK); return sharedDictionaryFile; }
+  catch { await fs.mkdir(path.dirname(personalDictionaryFile), { recursive: true }); return personalDictionaryFile; }
+}
+async function updateDictionary(words) {
+  const filename = await dictionaryPath();
+  const lockFile = `${filename}.lock`;
+  let lock;
+  for (let attempt = 0; attempt < 80 && !lock; attempt++) {
+    try { lock = await fs.open(lockFile, 'wx'); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      try { if (Date.now() - (await fs.stat(lockFile)).mtimeMs > 120000) await fs.unlink(lockFile); } catch {}
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+  if (!lock) throw new Error('Не удалось получить доступ к общему словарю. Повторите сохранение.');
+  try {
+    const merged = validDictionaryWords([...(await readDictionaryFile(filename)), ...validDictionaryWords(words)]);
+    const temp = `${filename}.${process.pid}.tmp`;
+    await fs.writeFile(temp, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+    await fs.rename(temp, filename);
+    return { words: merged, shared: filename === sharedDictionaryFile };
+  } finally {
+    await lock.close();
+    await fs.unlink(lockFile).catch(() => {});
+  }
+}
 
 function requireMain(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Недоступный источник запроса.');
@@ -65,6 +109,18 @@ app.whenReady().then(() => {
     requireMain(event);
     if (typeof html !== 'string' || typeof text !== 'string' || html.length > 5_000_000 || text.length > 2_000_000) throw new Error('Слишком большой документ.');
     await clipboard.write([new ClipboardItem({ 'text/html': html, 'text/plain': text })]);
+  });
+  ipcMain.handle('dictionary:load', async event => {
+    requireMain(event);
+    const filename = await dictionaryPath();
+    return { words: await readDictionaryFile(filename), shared: filename === sharedDictionaryFile };
+  });
+  ipcMain.handle('dictionary:merge-save', async (event, words) => {
+    requireMain(event);
+    if (!Array.isArray(words) || words.length > 20000) throw new Error('Некорректный список слов.');
+    const operation = dictionaryQueue.then(() => updateDictionary(words));
+    dictionaryQueue = operation.catch(() => {});
+    return operation;
   });
 });
 

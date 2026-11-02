@@ -375,6 +375,12 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
     ...(source ? { inherited: { font, size: fontSize, color: '000000' }, lineHeight: Number(a.lineHeight) || 1.05, spaceAfterPt: Number(a.spaceAfterPt) || 5 } : {}),
   };
   const children = blocks(doc.content ?? [], context);
+  // The first page is printed on the clinic's preprinted letterhead. Keep the
+  // following pages at the template's normal top margin.
+  if (options.kind !== 'template') children.unshift(new Paragraph({
+    spacing: { before: 3600, after: 0, line: 20, lineRule: LineRuleType.EXACT },
+    children: [new TextRun({ text: ' ', size: 2 })],
+  }));
   if (!children.length) children.push(new Paragraph({}));
   const file = new Document({
     creator: 'МРТ Альянс', title: cleanText(options.title ?? 'Протокол МРТ-исследования'),

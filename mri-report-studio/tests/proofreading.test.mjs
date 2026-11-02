@@ -27,6 +27,11 @@ test('dictionary recognises normal Russian inflections and radiology terminology
   assert.deepEqual(await check(text), []);
 });
 
+test('dictionary accepts common pelvic, joint and spine terminology', async () => {
+  const text = 'МР-картина аденомиоза и эндометриоза. Эндометрий и миометрий без особенностей. Геморрагическая эндометриома, параовариальная киста. В полости сустава небольшой синовит, энтезопатия и хондромаляция. Спондилолистез и спондилолиз не выявлены. Протрузии и экструзии дисков.';
+  assert.deepEqual(await check(text), []);
+});
+
 test('Latin misspellings are underlined while common MRI abbreviations and English sequence names are accepted', async () => {
   const text = 'Мама мыла раму. safsaf T1 T2 DWI ADC FLAIR STIR diffusion-weighted.';
   const issues = await check(text);

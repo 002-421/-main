@@ -32,6 +32,17 @@ export function makeTemplateDocument(templateId = DEFAULT_TEMPLATE_ID): RichNode
   const template = reportTemplates.find(item => item.id === templateId);
   if (!template) throw new Error('Шаблон исследования не найден.');
   const document = structuredClone(template.doc);
+  if (templateId === 'pelvis-omt-zh' || templateId === 'pelvis-omt-zh-ku') {
+    const content = document.content ??= [];
+    if (!content.some(node => node.type === 'paragraph' && /День цикла\s*:/i.test((node.content ?? []).map(child => child.text ?? '').join('')))) {
+      const birthDate = content.findIndex(node => node.type === 'paragraph' && /Дата рождения\s*:/i.test((node.content ?? []).map(child => child.text ?? '').join('')));
+      content.splice(birthDate >= 0 ? birthDate + 1 : 2, 0, { type: 'paragraph', content: [
+        { type: 'text', text: 'День цикла: ' },
+        { type: 'reportField', attrs: { id: `${templateId}.cycle-day`, hint: '0', value: '' } },
+        { type: 'text', text: ' день' },
+      ] });
+    }
+  }
   if (templateId === 'pelvis-omt-m' || templateId === 'pelvis-omt-m-ku') {
     const content = document.content ??= [];
     const plain = (node: RichNode): string => node.type === 'text' ? node.text ?? '' : node.content?.map(plain).join('') ?? '';

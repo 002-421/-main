@@ -157,6 +157,9 @@ export function highlightDeletionNotes(input: RichNode): RichNode {
     const dimension = new RegExp(`${number}(?:\\s*[xх×]\\s*${number})?\\s*(?:см|мм|мл|м)(?:²|2)?(?![а-яё])`, 'gi');
     const reference = /(?:норм(?:а|ы|альный|альные|атив)|референсн\w*)[^.!?;\n]*/gi;
     const exclusions = [...fullText.matchAll(reference)].map(match => ({ start: match.index!, end: match.index! + match[0].length }));
+    // The Omniscan dose is a fixed part of the standard contrast protocol, not a patient measurement.
+    const standardContrastDose = /Омнискан\s+в\s+дозе\s+\d+(?:[,.]\d+)?\s*мл\s+на\s+кг\s+массы\s+тела/gi;
+    exclusions.push(...[...fullText.matchAll(standardContrastDose)].map(match => ({ start: match.index!, end: match.index! + match[0].length })));
     const ranges = [...fullText.matchAll(dimension)].map(match => ({ start: match.index!, end: match.index! + match[0].length }))
       .filter(range => !exclusions.some(excluded => range.start >= excluded.start && range.start < excluded.end));
     highlightRanges(paragraph, ranges, node => {
