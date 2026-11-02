@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRussianChecker, MAX_PROOF_ISSUES } from '../src/proofreading-core.ts';
+import { TEMPLATE_PERSONAL_WORDS } from '../src/template-personal-words.ts';
 
 // Exercise the actual bundled Russian dictionary, not a mock word list.
 const aff = await readFile(new URL('../node_modules/dictionary-ru/index.aff', import.meta.url), 'utf8');
@@ -30,6 +31,13 @@ test('dictionary recognises normal Russian inflections and radiology terminology
 test('dictionary accepts common pelvic, joint and spine terminology', async () => {
   const text = 'МР-картина аденомиоза и эндометриоза. Эндометрий и миометрий без особенностей. Геморрагическая эндометриома, параовариальная киста. В полости сустава небольшой синовит, энтезопатия и хондромаляция. Спондилолистез и спондилолиз не выявлены. Протрузии и экструзии дисков.';
   assert.deepEqual(await check(text), []);
+});
+
+test('template vocabulary missed by Hunspell is preloaded in the personal dictionary', async () => {
+  assert.ok(TEMPLATE_PERSONAL_WORDS.length > 300);
+  for (const word of ['нерезко', 'нормометрии', 'дорзальных', 'медианно-парамедианная', 'жироподавлением', 'узураций']) assert.ok(TEMPLATE_PERSONAL_WORDS.includes(word), word);
+  assert.ok(!TEMPLATE_PERSONAL_WORDS.includes('остеослероз'), 'do not whitelist an obvious template typo');
+  assert.deepEqual(await check('Нерезко выражены дорзальные изменения при нормометрии.', [...TEMPLATE_PERSONAL_WORDS]), []);
 });
 
 test('Latin misspellings are underlined while common MRI abbreviations and English sequence names are accepted', async () => {
