@@ -112,7 +112,8 @@ function saveLocal() { if(templateMode)return;try{localStorage.setItem(KEYS.draf
 function profileForTemplate() { const area=reportTemplates.find(t=>t.id===activeTemplateId)?.areaId;return area==='head'?'brain':'custom'; }
 function renderCounts() {
  const fields=collectInlineFields(json()),empty=fields.filter(f=>!f.filled);$('#empty-count').textContent=String(empty.length);
- const patient=fields.find(f=>f.id===PATIENT_FIELD_ID||f.id.endsWith('.patient')||f.id==='base.1');$('#document-name').textContent=templateMode?'Редактирование шаблона':patient?.filled?patient.value:'Новое описание';
+ const templateTitle=reportTemplates.find(t=>t.id===activeTemplateId)?.title??'Исследование';
+ $('#document-name').textContent=templateTitle;
  $('#template-name').textContent=reportTemplates.find(t=>t.id===activeTemplateId)?.title??'Открытое описание';
  $('#word-count').textContent=`${editor.state.doc.textContent.split(/\s+/).filter(Boolean).length} слов`;
  $('#review-unchanged').textContent=review?`Неизменённых частей: ${countUnchangedParts(json())}`:'Подсветить неизменённое';
