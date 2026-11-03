@@ -37,7 +37,7 @@ test('Word export is an OPC ZIP with A4 pages, report content and resolvable cus
   assert.deepEqual([...bytes.subarray(0, 4)], [0x50, 0x4b, 0x03, 0x04]);
   for (const required of ['[Content_Types].xml', '_rels/.rels', 'word/document.xml', 'word/styles.xml', 'word/numbering.xml', 'docProps/core.xml', STATE_PART]) assert.ok(zip[required], required);
   assert.match(xml, /<w:pgSz\b[^>]*w:w="11906"[^>]*w:h="16838"/);
-  assert.match(xml, /<w:body><w:p><w:pPr><w:spacing\b[^>]*w:before="3600"[^>]*w:lineRule="exact"/);
+  assert.match(xml, /<w:body><w:p><w:pPr><w:spacing\b[^>]*w:before="1500"[^>]*w:lineRule="exact"/);
   assert.match(xml, /МРТ орбит/);
   assert.match(xml, /Методика/);
   assert.match(xml, /Заключение/);
