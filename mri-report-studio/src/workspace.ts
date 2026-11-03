@@ -1,5 +1,5 @@
 import './style.css';
-import { EditorState, TextSelection } from '@tiptap/pm/state';
+import { TextSelection } from '@tiptap/pm/state';
 import DOMPurify from 'dompurify';
 import { makeEditor } from './editor';
 import { prepareInlineDocument, initializeTemplateTracking, promoteInlineTemplate, resetInlineTemplate, collectInlineFields, countUnchangedParts, setReviewHighlights } from './inline-fields';
@@ -108,7 +108,7 @@ editor.on('selectionUpdate',()=>{ savedSelection=editor.state.selection; updateR
 editor.on('update',()=>{if(!suppress){changedSinceOpen=true;clearTimeout(timer);if(!templateMode){$('#save-state').textContent='Сохраняется…';timer=setTimeout(saveLocal,450);}else $('#save-state').textContent='Шаблон изменён';renderCounts();}});
 editor.on('transaction',updateRibbon);
 const json=()=>editor.getJSON() as RichNode;
-function restore(doc:RichNode) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(highlightDeletionNotes(separateRecommendations(compactTemplateTables(doc)))));editor.view.updateState(EditorState.create({schema:editor.schema,doc:editor.state.doc,plugins:editor.state.plugins}));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
+function restore(doc:RichNode) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(highlightDeletionNotes(separateRecommendations(compactTemplateTables(doc)))));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
 function toast(message:string,error=false) { $('.toast')?.remove();const t=document.createElement('div');t.className=`toast${error?' error':''}`;t.role=error?'alert':'status';t.textContent=message;document.body.append(t);setTimeout(()=>t.remove(),5000); }
 function saveLocal() { if(templateMode)return;try{localStorage.setItem(KEYS.draft,JSON.stringify({format:'mri-report-studio',version:draftVersion,profile:profileForTemplate(),templateId:activeTemplateId,doc:json(),customModules:[]}));$('#save-state').textContent='Сохранено на компьютере';}catch{ $('#save-state').textContent='Не сохранено';toast('Не удалось сохранить локальный черновик. Сохраните документ Word.',true); } }
 function profileForTemplate() { const area=reportTemplates.find(t=>t.id===activeTemplateId)?.areaId;return area==='head'?'brain':'custom'; }

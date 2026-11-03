@@ -140,6 +140,7 @@ try{
 
  await page.locator('#area-select').selectOption('spine');const pit=page.locator('[data-template]').first();const pitId=await pit.getAttribute('data-template');await pit.click();if(await page.locator('#confirm-new').count())await page.locator('#confirm-new').click();
  assert.ok(await page.locator('#template-name').innerText());
+ assert.ok(await page.locator('.report-content mark[data-color="#ffff00"]').count()>0,`yellow template highlights render immediately after first selection (${pitId})`);
  await page.locator('#report-file').setInputFiles(saved.filePath);if(await page.locator('#confirm-open').count())await page.locator('#confirm-open').click();
  await field(patientId).waitFor();assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
  assert.equal(await page.locator('#area-select').inputValue(),'head');
