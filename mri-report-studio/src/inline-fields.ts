@@ -192,7 +192,12 @@ export const InlineFieldEditing = Extension.create({
         const mapping = new Mapping();
         for (const transaction of transactions) mapping.appendMapping(transaction.mapping);
         const yellowRanges: Array<{ from: number; to: number; text: string; mark: PMMark }> = [];
-        oldState.doc.descendants((node, pos) => {
+        // setContent replaces the whole template in one transaction. Old ranges
+        // then map to the document edges, where this cleanup could strip yellow
+        // marks from unrelated text in the newly inserted template.
+        const replacesWholeDocument = transactions.some(transaction => transaction.steps.some(step =>
+          'from' in step && 'to' in step && step.from === 0 && step.to === oldState.doc.content.size));
+        if (!replacesWholeDocument) oldState.doc.descendants((node, pos) => {
           if (!node.isText) return;
           const mark = node.marks.find(m => m.type.name === 'highlight' && String(m.attrs.color ?? '').toLowerCase() === '#ffff00');
           if (!mark) return;
