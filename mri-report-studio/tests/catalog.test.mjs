@@ -180,6 +180,7 @@ test('female pelvis templates add an editable cycle-day zero and keep the standa
     assert.ok(cycle, id);
     const field = cycle.content.find(node => node.type === 'reportField');
     assert.equal(field.attrs.hint, '0');
+    assert.ok(cycle.content.every(node => node.marks?.some(mark => mark.type === 'bold')), 'entire cycle-day line is bold');
     assert.match(visible(cycle), /^День цикла: ⟦0⟧ день$/);
     if (id.endsWith('-ku')) {
       const dose = [];

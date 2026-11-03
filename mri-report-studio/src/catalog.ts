@@ -37,9 +37,9 @@ export function makeTemplateDocument(templateId = DEFAULT_TEMPLATE_ID): RichNode
     if (!content.some(node => node.type === 'paragraph' && /День цикла\s*:/i.test((node.content ?? []).map(child => child.text ?? '').join('')))) {
       const birthDate = content.findIndex(node => node.type === 'paragraph' && /Дата рождения\s*:/i.test((node.content ?? []).map(child => child.text ?? '').join('')));
       content.splice(birthDate >= 0 ? birthDate + 1 : 2, 0, { type: 'paragraph', content: [
-        { type: 'text', text: 'День цикла: ' },
-        { type: 'reportField', attrs: { id: `${templateId}.cycle-day`, hint: '0', value: '' } },
-        { type: 'text', text: ' день' },
+        { type: 'text', text: 'День цикла: ', marks: [{ type: 'bold' }] },
+        { type: 'reportField', attrs: { id: `${templateId}.cycle-day`, hint: '0', value: '' }, marks: [{ type: 'bold' }] },
+        { type: 'text', text: ' день', marks: [{ type: 'bold' }] },
       ] });
     }
   }
