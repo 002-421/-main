@@ -256,6 +256,28 @@ test('archive slash alternatives are yellow editable report text', () => {
   assert.ok(highlights.some(value => value.includes('/')));
 });
 
+test('clinical variants that require a radiologist choice are highlighted without highlighting fixed MRI sequences', () => {
+  const expected = 'прямолинейный ход/S-образный ход/ С-образно изогнута вправо/влево';
+  const docs = reportTemplates.map(template => makeTemplateDocument(template.id));
+  let foundChoice = false, foundFixedSequence = false;
+  for (const doc of docs) walk(doc, node => {
+    if (node.type !== 'paragraph') return;
+    let text = '', yellow = [];
+    for (const child of node.content ?? []) {
+      if (child.type !== 'text') continue;
+      const content = child.text ?? '';
+      text += content;
+      yellow.push(...[...content].map(() => child.marks?.some(mark => mark.type === 'highlight' && mark.attrs?.color === '#ffff00')));
+    }
+    const at = text.indexOf(expected);
+    if (at >= 0) { foundChoice = true; assert.ok(yellow.slice(at, at + expected.length).every(Boolean), 'all artery-shape choices should be highlighted'); }
+    const sequenceAt = text.indexOf('жироподавлением /Т2-STIR/');
+    if (sequenceAt >= 0) { foundFixedSequence = true; assert.ok(!yellow.slice(sequenceAt, sequenceAt + 'жироподавлением /Т2-STIR/'.length).some(Boolean), 'fixed MRI sequence notation stays unhighlighted'); }
+  });
+  assert.ok(foundChoice, 'the source catalog includes the artery-shape choice');
+  assert.ok(foundFixedSequence, 'the source catalog includes a fixed sequence label');
+});
+
 test('numeric dimensions and indices use Russian decimal commas while dates keep dots', () => {
   const text = reportTemplates.map(t => visible(t.doc)).join('\n');
   assert.match(text, /22,6-26,0/);

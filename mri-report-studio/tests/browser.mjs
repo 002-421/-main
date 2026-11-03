@@ -93,6 +93,7 @@ try{
  await page.locator('#settings').click();assert.equal(await page.locator('#dictionary-settings').textContent(),'Личный словарь');await page.locator('#dictionary-settings').click();assert.equal(await page.locator('[role="dialog"] h2').textContent(),'Личный словарь');assert.match(await page.locator('#personal-words').inputValue(),/нормометрии/);assert.match(await page.locator('#personal-words').inputValue(),/дорзальных/);await page.locator('[role="dialog"] [data-close]').first().click();
  await page.locator('#settings').click();await page.locator('#doctor-name').fill('Иванова Мария Петровна');await page.locator('#apply-doctor-now').check();await page.locator('#save-settings').click();
  assert.equal(await field(doctorId).innerText(),'Иванова Мария Петровна');
+ await page.locator('#settings').click();await page.locator('#saved-doctor-choice').selectOption({label:'Иванова Мария Петровна'});assert.equal(await page.locator('#doctor-name').inputValue(),'Иванова Мария Петровна');await page.locator('.dialog-overlay footer [data-close]').click();
  await field(doctorId).evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.insertText('Петров Алексей Иванович');
  assert.match(await page.locator('.report-content').innerText(),/Петров Алексей Иванович/);
  assert.doesNotMatch(await page.locator('.report-content').innerText(),/Иванова Мария Петровна/);

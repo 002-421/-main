@@ -92,6 +92,33 @@ export function separateRecommendations(input: RichNode): RichNode {
 const DELETION_HIGHLIGHT = { type: 'highlight', attrs: { color: '#ffff00' } };
 const ITALIC_MARK = { type: 'italic' };
 
+/** Mark alternatives that the radiologist must choose from before signing. */
+function choiceRanges(text: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  const add = (pattern: RegExp) => {
+    for (const match of text.matchAll(pattern)) ranges.push({ start: match.index!, end: match.index! + match[0].length });
+  };
+  // Bracketed lists are explicit choices or instructions in the imported protocols.
+  add(/\[[^\]]*(?:\/|\bили\b|\bлибо\b)[^\]]*\]/giu);
+  // Laterality and the common three-way right/left/bilateral variants.
+  const side = String.raw`(?:прав(?:ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми)|лев(?:ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми)|обеих|двустороннего)`;
+  add(new RegExp(String.raw`${side}(?:\s*\/\s*${side}){1,2}`, 'giu'));
+  // Common clinical choices: shape, alignment, degree, number and location.
+  add(/(?:прямолинейный\s+ход\s*\/\s*S-образный\s+ход\s*\/\s*С-образно\s+изогнута\s+вправо\s*\/\s*влево)/giu);
+  add(/(?:сохранен\w*|выпрямлен\w*|сглажен\w*|усилен\w*)(?:\s*\.?\s*\/\s*(?:сохранен\w*|выпрямлен\w*|сглажен\w*|усилен\w*)){1,3}/giu);
+  add(/(?:нерезко\s*\/\s*умеренно(?:\s+выраженн\w*)?|нерезко\s+выраженн\w*\s*\/\s*умеренн\w*(?:\s+выраженн\w*)?|незначительн\w*\s*\/\s*умерен\w*|единичн\w*\s*\/\s*единичн\w*)/giu);
+  add(/(?:латеральн\w*|медиальн\w*|центральн\w*|базальн\w*|апикальн\w*|сагиттальн\w*|фронтальн\w*|вертикальн\w*)\s*\/\s*(?:латеральн\w*|медиальн\w*|центральн\w*|базальн\w*|апикальн\w*|сагиттальн\w*|фронтальн\w*|вертикальн\w*)(?:\s*\/\s*(?:латеральн\w*|медиальн\w*|центральн\w*|базальн\w*|апикальн\w*|сагиттальн\w*|фронтальн\w*|вертикальн\w*)){0,2}/giu);
+  add(/(?:абсолютный\s*\/\s*относительный\s+стеноз|Fazekas\s+\d(?:\s*\/\s*\d){1,2}|MTA-score\s+\d(?:\s*\/\s*\d){1,2}|(?:гонартроз|артроз[^\n.!?]{0,50}|хондромаляция[^\n.!?]{0,50})\s*\(?\s*(?:I{1,3}|IV|\d)(?:\s*\/\s*(?:I{1,3}|IV|\d)){1,3})/giu);
+  // A slash denotes a fixed MRI sequence, reference range, or named standard in these cases.
+  return ranges.filter(range => {
+    const selected = text.slice(range.start, range.end);
+    const before = text.slice(Math.max(0, range.start - 32), range.start);
+    return !/(?:Т\s*[12]|T\s*[12]|DWI|STIR|EPI|норм(?:а|ы)|ASAS|OMERACT|ОКМ|ОСМ)\s*$/iu.test(before)
+      && !/^(?:Т\s*[12]|T\s*[12]|DWI|STIR|EPI|норма|ASAS|OMERACT|ОКМ|остеит)/iu.test(selected)
+      && !/^\[?\s*\d+\s*\/\s*\d+\s*\/\s*\d+\s*\/\s*\d+\s*\]?$/.test(selected);
+  });
+}
+
 /** Make text explicitly marked for later removal stand out in editing and Word. */
 export function highlightDeletionNotes(input: RichNode): RichNode {
   const doc = structuredClone(input);
@@ -162,6 +189,7 @@ export function highlightDeletionNotes(input: RichNode): RichNode {
     exclusions.push(...[...fullText.matchAll(standardContrastDose)].map(match => ({ start: match.index!, end: match.index! + match[0].length })));
     const ranges = [...fullText.matchAll(dimension)].map(match => ({ start: match.index!, end: match.index! + match[0].length }))
       .filter(range => !exclusions.some(excluded => range.start >= excluded.start && range.start < excluded.end));
+    ranges.push(...choiceRanges(fullText));
     highlightRanges(paragraph, ranges, node => {
       const marks = [...(node.marks ?? [])];
       if (!marks.some(mark => mark.type === 'highlight')) marks.push(DELETION_HIGHLIGHT);
