@@ -173,6 +173,40 @@ test('patient-specific dimensions are highlighted while reference norms are left
   assert.ok(norm.every(node => !node.marks?.some(mark => mark.type === 'highlight' && mark.attrs?.color === '#ffff00')));
 });
 
+test('every source template highlights patient dimensions but leaves reference ranges and the standard contrast dose unhighlighted', () => {
+  const number = String.raw`\d+(?:[,.]\d+)?`;
+  const dimension = new RegExp(`${number}(?:\\s*[xх×]\\s*${number})?\\s*(?:см|мм|мл|м)(?:²|2)?(?![а-яё])`, 'gi');
+  const excludedPatterns = [
+    /(?:норм(?:а|ы|альный|альные|атив)|референсн\w*)[^.!?;\n]*/gi,
+    /Омнискан\s+в\s+дозе\s+\d+(?:[,.]\d+)?\s*мл\s+на\s+кг\s+массы\s+тела/gi,
+  ];
+  let dimensions = 0;
+  for (const template of reportTemplates) {
+    const visit = node => {
+      if (node.type === 'paragraph' && node.content) {
+        const pieces = []; let offset = 0;
+        for (const child of node.content) {
+          const text = child.type === 'text' ? child.text ?? '' : child.type === 'hardBreak' ? '\n' : '';
+          if (text) pieces.push({ start: offset, end: offset + text.length, marks: child.marks ?? [] });
+          offset += text.length;
+        }
+        const text = node.content.map(child => child.type === 'text' ? child.text ?? '' : child.type === 'hardBreak' ? '\n' : '').join('');
+        const excluded = excludedPatterns.flatMap(pattern => [...text.matchAll(pattern)].map(match => [match.index, match.index + match[0].length]));
+        for (const match of text.matchAll(dimension)) {
+          const start = match.index, end = start + match[0].length;
+          if (excluded.some(([from, to]) => start < to && end > from)) continue;
+          dimensions++;
+          const covered = pieces.filter(piece => piece.start < end && piece.end > start);
+          assert.ok(covered.length && covered.every(piece => piece.marks.some(mark => mark.type === 'highlight' && mark.attrs?.color === '#ffff00')), `${template.title}: ${match[0]}`);
+        }
+      }
+      node.content?.forEach(visit);
+    };
+    visit(makeTemplateDocument(template.id));
+  }
+  assert.ok(dimensions > 600, `audited ${dimensions} dimensions`);
+});
+
 test('female pelvis templates add an editable cycle-day zero and keep the standard Omniscan dose unhighlighted', () => {
   for (const id of ['pelvis-omt-zh', 'pelvis-omt-zh-ku']) {
     const doc = makeTemplateDocument(id);
@@ -181,6 +215,10 @@ test('female pelvis templates add an editable cycle-day zero and keep the standa
     const field = cycle.content.find(node => node.type === 'reportField');
     assert.equal(field.attrs.hint, '0');
     assert.ok(cycle.content.every(node => node.marks?.some(mark => mark.type === 'bold')), 'entire cycle-day line is bold');
+    const inline = prepareInlineDocument(doc);
+    let emptyCycle = false;
+    walk(inline, node => { if (node.type === 'text' && node.text === '0' && node.marks?.some(mark => mark.type === 'templateField' && mark.attrs?.id === `${id}.cycle-day` && mark.attrs?.filled === false)) emptyCycle = true; });
+    assert.ok(emptyCycle, 'cycle-day zero stays an empty highlighted entry field');
     assert.match(visible(cycle), /^День цикла: ⟦0⟧ день$/);
     if (id.endsWith('-ku')) {
       const dose = [];
