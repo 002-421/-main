@@ -29,7 +29,11 @@ export function initials(value = ''): string {
 export function shortPatientName(value = ''): string {
   const parts = value.trim().split(/\s+/).filter(Boolean);
   if (parts.length < 2) return parts[0] ?? '';
-  return `${parts[0]} ${parts.slice(1, 3).map(part => `${part[0]?.toLocaleUpperCase('ru') ?? ''}.`).join('')}`.trim();
+  const initials = parts.slice(1, 3).flatMap(part => {
+    if (/^(?:[А-ЯЁA-Z]\.\s*){1,3}$/iu.test(part)) return [...part.matchAll(/[А-ЯЁA-Z]/giu)].map(match => match[0].toLocaleUpperCase('ru'));
+    return [part[0]?.toLocaleUpperCase('ru') ?? ''];
+  });
+  return `${parts[0]} ${initials.map(initial => `${initial}.`).join('')}`.trim();
 }
 
 export function buildReportFilename(fields: FilenameFields, suffix: '.docx' | '.pdf', fallbackDate: string): string {

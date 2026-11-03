@@ -28,6 +28,8 @@ async function saveWord(name){
  const filePath=path.join(output,name);await rm(filePath,{force:true});
  await application.evaluate(({session},dest)=>session.defaultSession.once('will-download',(_event,item)=>item.setSavePath(dest)),filePath);
  await page.locator('#save-docx').click();
+ assert.ok(await page.locator('.export-preview-paper').count(),'preview opens before Word export');
+ await page.locator('#preview-save-word').click();
  for(let i=0;i<200;i++){
   try{if((await stat(filePath)).size>0){const bytes=await readFile(filePath);const imported=await importOwnDocx(bytes);if(imported)return {filePath,bytes,imported};}}catch{}
   await new Promise(r=>setTimeout(r,50));
@@ -117,7 +119,7 @@ try{
  assert.match(clip.text,/Тестовый Пациент/);assert.match(clip.html,/Arial/);
  const pdfPath=path.join(output,'v3-native.pdf');
  await application.evaluate(({dialog},filePath)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath});},pdfPath);
- await page.locator('#export-pdf').click();if(await page.locator('#confirm-pdf').count())await page.locator('#confirm-pdf').click();
+ await page.locator('#export-pdf').click();await page.locator('#preview-save-pdf').click();if(await page.locator('#confirm-pdf').count())await page.locator('#confirm-pdf').click();
  await page.getByRole('status').filter({hasText:'PDF сохранён'}).waitFor({timeout:30000});
  assert.equal((await readFile(pdfPath)).subarray(0,5).toString(),'%PDF-');
  console.log('PASS: formatted clipboard and actual desktop PDF export.');
@@ -186,8 +188,14 @@ try{
  await page.locator('#block-search').fill('Сохранённый формат');await page.locator('[data-preview-block]').click();
  assert.match(await page.locator('.block-preview strong').allTextContents().then(t=>t.join(' ')),/Исследование/);
  await page.locator('.dialog footer [data-close]').click();
+ const firstTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
+ await page.locator('#zoom').evaluate(el=>{el.value='145';el.dispatchEvent(new Event('input',{bubbles:true}));});assert.equal(await page.locator('#zoom-value').innerText(),'145%');assert.equal(await page.locator('.paper').evaluate(el=>el.style.zoom),'1.45');
+ await page.locator('#new-report').click();const secondTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');assert.notEqual(secondTab,firstTab);await fillField(patientId,'Второе заключение');
+ await page.locator(`[data-report-select="${firstTab}"]`).click();assert.match(await page.locator('.report-content').innerText(),/Исследование\. Очаг не выявлен\./);
+ await page.locator(`[data-report-select="${secondTab}"]`).click();assert.equal(await field(patientId).innerText(),'Второе заключение');await page.locator(`[data-report-close="${secondTab}"]`).click();
  await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await page.reload();await page.locator('.report-content').waitFor();
  assert.match(await page.locator('.report-content').innerText(),/Исследование\. Очаг не выявлен\./);
+ await page.locator('#new-report').click();const persistedTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');await fillField(patientId,'Сохранённое второе заключение');await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await page.reload();await page.locator('.report-content').waitFor();assert.equal(await page.locator('.report-tab').count(),2);assert.equal(await field(patientId).innerText(),'Сохранённое второе заключение');assert.equal(await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select'),persistedTab);
  assert.deepEqual(errors,[]);
  await page.screenshot({path:path.join(output,'v3-desktop.png')});
  console.log('PASS: rich selection library save and local report persistence.');

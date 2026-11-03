@@ -5,6 +5,7 @@ import { buildReportFilename, extractFilenameFields, initials, shortPatientName 
 test('report filenames use protocol, doctor initials, patient surname and initials, template, and report date', () => {
   assert.equal(initials('Кочетов Сергей Владимирович'), 'КСВ');
   assert.equal(shortPatientName('Пигарева Елена Александровна'), 'Пигарева Е.А.');
+  assert.equal(shortPatientName('Русакова Г.Г.'), 'Русакова Г.Г.');
   assert.equal(buildReportFilename({ number: '4018', doctor: 'Кочетов Сергей Владимирович', patient: 'Пигарева Елена Александровна', template: 'ШОП', date: '21.10.2026' }, '.docx', '01.11.2026'), '4018 КСВ Пигарева Е.А. ШОП 21.10.2026.docx');
 });
 
