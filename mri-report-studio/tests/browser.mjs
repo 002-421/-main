@@ -45,6 +45,10 @@ try{
  assert.equal(await page.evaluate(()=>typeof window.desktop.exportPDF),'function');
  console.log('PASS: one document editor, no right inspector, source placeholders.');
 
+ const reportBeforeCalculator=await page.locator('.report-content').innerText();await page.locator('#calculator').click();assert.equal(await page.locator('[role="dialog"] h2').textContent(),'Калькулятор');await page.keyboard.type('12,5+2,5=');assert.equal(await page.locator('#calculator-display').textContent(),'15');await page.keyboard.press('Escape');assert.equal(await page.locator('[role="dialog"]').count(),0);assert.equal(await page.locator('.report-content').innerText(),reportBeforeCalculator);
+ await page.locator('#calculator').click();await page.keyboard.type('1/0=');assert.equal(await page.locator('#calculator-display').textContent(),'Ошибка');await page.keyboard.press('Escape');
+ console.log('PASS: calculator handles decimal input, keyboard operations and division by zero without changing the report.');
+
  await page.evaluate(()=>{const target='0,0 см';const walker=document.createTreeWalker(document.querySelector('.report-content'),NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){const offset=node.textContent.indexOf(target);if(offset<0)continue;const range=document.createRange();range.setStart(node,offset);range.setEnd(node,offset+target.length);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);node.parentElement.closest('[contenteditable]').focus();return;}throw new Error('Highlighted measurement not found');});
  await page.keyboard.insertText('0,25 см');
  const editedMeasurement=page.getByText('0,25 см',{exact:true}).first();await editedMeasurement.waitFor();
