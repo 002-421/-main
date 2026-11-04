@@ -5,6 +5,7 @@ const https = require('node:https');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
+const { waitForUpdaterStatus } = require('./update-status.cjs');
 const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/mri-report-studio/downloads/latest.json';
 
 // Keep the existing profile path so the rename preserves drafts and settings.
@@ -104,7 +105,7 @@ async function getUpdateManifest() {
       || typeof manifest.url !== 'string' || typeof manifest.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(manifest.sha256)) throw new Error('Файл обновлений содержит некорректные данные.');
   const artifact=new URL(manifest.url);
   if (artifact.protocol!=='https:' || !['raw.githubusercontent.com','github.com'].includes(artifact.hostname) || !artifact.pathname.endsWith('/downloads/MRI_Report_Studio_Windows_Setup.zip')) throw new Error('Недопустимая ссылка на установочный файл.');
-  return { version: manifest.version, url: manifest.url, sha256: manifest.sha256.toLowerCase(), available: compareVersions(manifest.version, app.getVersion()) > 0 };
+  return { version: manifest.version, currentVersion: app.getVersion(), url: manifest.url, sha256: manifest.sha256.toLowerCase(), available: compareVersions(manifest.version, app.getVersion()) > 0 };
 }
 
 app.whenReady().then(() => {
@@ -176,14 +177,7 @@ app.whenReady().then(() => {
     child.once('exit',code=>{childExitCode=code;});
     await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});
     child.unref();
-    const deadline=Date.now()+10*60*1000;
-    let status='';
-    while(Date.now()<deadline){
-      try{const observed=(await fs.readFile(statusFile,'utf8')).trim();if(observed==='ready'||observed.startsWith('error:')){status=observed;break;}}catch(error){if(error.code!=='ENOENT')throw error;}
-      if(childExitCode!==null)throw new Error(`Установщик завершился без подтверждения запуска новой версии (код ${childExitCode}).`);
-      await new Promise(resolve=>setTimeout(resolve,250));
-    }
-    if(!status)throw new Error('Установщик не подтвердил запуск новой версии. Повторите проверку или используйте установочный пакет вручную.');
+    const status=await waitForUpdaterStatus({readStatus:()=>fs.readFile(statusFile,'utf8'),getExitCode:()=>childExitCode});
     if(status.startsWith('error:'))throw new Error(status.slice(6)||'Установщик не смог запустить новую версию.');
     if(status!=='ready')throw new Error('Установщик вернул неизвестный статус.');
     updateInstalling=true;

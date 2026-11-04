@@ -35,6 +35,7 @@ try {
     [IO.File]::WriteAllText($StatusFile, 'ready')
 } catch {
     try { [IO.File]::WriteAllText($StatusFile, ('error:' + $_.Exception.Message)) } catch {}
+    exit 1
 } finally {
     if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $Archive) { Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue }
