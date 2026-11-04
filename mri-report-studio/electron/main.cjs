@@ -1,11 +1,10 @@
-const { app, BrowserWindow, ipcMain, dialog, clipboard, ClipboardItem, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, clipboard, ClipboardItem, session, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const https = require('node:https');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { spawn } = require('node:child_process');
-const { buildPowerShellUpdaterArgs, waitForUpdaterStatus } = require('./update-status.cjs');
+const { installUpdateArchive } = require('./update-install.cjs');
 const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/mri-report-studio/downloads/latest.json';
 
 // Keep the existing profile path so the rename preserves drafts and settings.
@@ -75,18 +74,20 @@ async function renderPdf() {
   } finally { mainWindow.setBackgroundColor('#eef1f5'); }
 }
 
-function downloadBuffer(url, limit, redirects = 0) {
+function downloadBuffer(url, limit, redirects = 0, onProgress = () => {}) {
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error('Слишком много перенаправлений при загрузке обновления.'));
     const target = new URL(url);
     if (target.protocol !== 'https:' || !['raw.githubusercontent.com', 'github.com', 'objects.githubusercontent.com'].includes(target.hostname)) return reject(new Error('Недопустимый источник обновления.'));
     const request = https.get(target, { timeout: 30000, headers: { 'User-Agent': 'MRI-Report-Studio-Updater', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } }, response => {
       if ([301,302,303,307,308].includes(response.statusCode) && response.headers.location) {
-        response.resume(); return resolve(downloadBuffer(new URL(response.headers.location, target).toString(), limit, redirects + 1));
+        response.resume(); return resolve(downloadBuffer(new URL(response.headers.location, target).toString(), limit, redirects + 1, onProgress));
       }
       if (response.statusCode !== 200) { response.resume(); return reject(new Error(`Сервер обновлений ответил ${response.statusCode}.`)); }
       const chunks=[]; let total=0;
-      response.on('data', chunk => { total += chunk.length; if (total > limit) { request.destroy(new Error('Файл обновления больше допустимого размера.')); } else chunks.push(chunk); });
+      const expected = Number(response.headers['content-length']) || 0;
+      onProgress({loaded:0,total:expected,percent:expected?0:null});
+      response.on('data', chunk => { total += chunk.length; if (total > limit) { request.destroy(new Error('Файл обновления больше допустимого размера.')); } else { chunks.push(chunk); onProgress({loaded:total,total:expected,percent:expected?Math.min(100,Math.round(total/expected*100)):null}); } });
       response.on('end', () => resolve(Buffer.concat(chunks)));
     });
     request.on('timeout', () => request.destroy(new Error('Время ожидания сервера обновлений истекло.')));
@@ -164,31 +165,31 @@ app.whenReady().then(() => {
     if (typeof force !== 'boolean') throw new Error('Некорректный режим установки обновления.');
     const update=await getUpdateManifest();
     if (!update.available && !force) return { available:false };
-    const archive=await downloadBuffer(update.url, 250_000_000);
+    const sendProgress = progress => { if (!event.sender.isDestroyed()) event.sender.send('updates:progress', progress); };
+    sendProgress({stage:'downloading',loaded:0,total:0,percent:0});
+    const archive=await downloadBuffer(update.url, 250_000_000, 0, progress => sendProgress({stage:'downloading',...progress}));
+    sendProgress({stage:'verifying',loaded:archive.length,total:archive.length,percent:100});
     const checksum=crypto.createHash('sha256').update(archive).digest('hex');
     if(checksum!==update.sha256) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
     const file=path.join(os.tmpdir(),`MRI_Report_Studio_${update.version}_${crypto.randomUUID()}.zip`);
-    const statusFile=`${file}.status`;
     await fs.writeFile(file,archive,{flag:'wx'});
-    const script=path.join(app.getAppPath(),'updater','update_windows.ps1');
-    try{await fs.access(script);}catch{await fs.unlink(file).catch(()=>{});throw new Error(`Не найден скрипт обновления: ${script}`);}
-    await fs.writeFile(statusFile,'launching',{flag:'wx'});
-    // Use PowerShell's native -File parameter binding; spawn passes every path
-    // as a separate argument, so spaces and non-Latin characters remain intact.
-    const args=buildPowerShellUpdaterArgs({script,archive:file,currentRoot:path.dirname(process.execPath),version:update.version,statusFile,parentPid:process.pid});
-    const child=spawn('powershell.exe',args,{windowsHide:true,stdio:['ignore','pipe','pipe'],detached:true});
-    let output='';
-    const capture=chunk=>{output=(output+chunk.toString()).slice(-8000);};
-    child.stdout?.on('data',capture);child.stderr?.on('data',capture);
-    let childExitCode=null;
-    child.once('exit',code=>{childExitCode=code;});
-    await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});
-    child.unref();
-    const status=await waitForUpdaterStatus({readStatus:()=>fs.readFile(statusFile,'utf8'),getExitCode:()=>childExitCode,getFailureDetail:async()=>output});
-    if(status.startsWith('error:'))throw new Error(status.slice(6)||'Установщик не смог запустить новую версию.');
-    if(status!=='installed' && status!=='ready')throw new Error('Установщик вернул неизвестный статус.');
+    sendProgress({stage:'installing',loaded:archive.length,total:archive.length,percent:100});
+    try {
+      await installUpdateArchive({
+        archive: file,
+        currentRoot: path.dirname(process.execPath),
+        version: update.version,
+        writeShortcut: async (target, cwd, icon) => {
+          const shortcut = path.join(app.getPath('desktop'), 'MRI Report Studio.lnk');
+          const options = { target, cwd, icon, description: 'MRI Report Studio' };
+          const written = shell.writeShortcutLink(shortcut, 'replace', options)
+            || shell.writeShortcutLink(shortcut, 'create', options);
+          if (!written) throw new Error('Не удалось обновить ярлык приложения на рабочем столе.');
+        },
+      });
+    } finally { await fs.unlink(file).catch(() => {}); }
     updateInstalling=true;
-    await fs.unlink(statusFile).catch(()=>{});
+    sendProgress({stage:'installed',loaded:archive.length,total:archive.length,percent:100});
     setTimeout(()=>app.quit(),300);
     return { available:true, installing:true, version:update.version };
   });

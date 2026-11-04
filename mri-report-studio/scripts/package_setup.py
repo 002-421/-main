@@ -80,13 +80,11 @@ def main():
     setup = stage / 'MRI Report Studio Setup'
     (setup / 'app/dist').mkdir(parents=True)
     (setup / 'app/electron').mkdir()
-    (setup / 'app/updater').mkdir()
     shutil.copy2(BUILD, setup / 'app/dist/index.html')
     shutil.copy2(ROOT / 'public/mri-report-studio.ico', setup / 'app/dist/mri-report-studio.ico')
     shutil.copy2(ROOT / 'node_modules/rcedit/bin/rcedit-x64.exe', setup / 'app/dist/rcedit-x64.exe')
-    for filename in ('main.cjs', 'preload.cjs', 'update-status.cjs'):
+    for filename in ('main.cjs', 'preload.cjs', 'update-install.cjs'):
         shutil.copy2(ROOT / 'electron' / filename, setup / 'app/electron' / filename)
-    shutil.copy2(ROOT / 'electron/update_windows.ps1', setup / 'app/updater/update_windows.ps1')
     (setup / 'app/package.json').write_text(json.dumps({
         'name': metadata['name'], 'productName': 'MRI Report Studio',
         'version': metadata['version'], 'main': 'electron/main.cjs', 'private': True,
@@ -123,7 +121,7 @@ def main():
         'Права администратора не нужны. Установщик не меняет ExecutionPolicy, настройки защиты, '
         'реестр или системные папки. SHA256 загруженного Electron проверяется; '
         'несовпадение прерывает установку. Существующие файлы не перезаписываются.\n\n'
-        'При обновлении закройте старое приложение и запускайте новый EXE из новой папки App_… . '
+        'После обновления приложение закроется; запустите новую версию ярлыком на рабочем столе. '
         'Локальный рабочий черновик и настройки шаблонов сохраняются в профиле приложения.\n\n'
         'Install.ps1 — читаемый исходник команды. Папку app нужно оставить рядом с Install.cmd.\n',
         encoding='utf-8-sig')

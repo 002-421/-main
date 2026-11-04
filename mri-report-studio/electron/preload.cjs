@@ -5,5 +5,10 @@ contextBridge.exposeInMainWorld('desktop', {
   previewPDF: () => ipcRenderer.invoke('report:preview-pdf'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   installUpdate: force => ipcRenderer.invoke('updates:install', force === true),
+  onUpdateProgress: callback => {
+    ipcRenderer.removeAllListeners('updates:progress');
+    ipcRenderer.on('updates:progress', (_event, progress) => callback(progress));
+  },
+  clearUpdateProgress: () => ipcRenderer.removeAllListeners('updates:progress'),
   copyReport: (html, text) => ipcRenderer.invoke('report:copy', html, text),
 });
