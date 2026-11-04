@@ -1,7 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 
 function run(command, args) {
@@ -16,20 +15,6 @@ function run(command, args) {
 
 async function extractWithTar(archive, destination, tarCommand = 'tar.exe') {
   await run(tarCommand, ['-xf', archive, '-C', destination]);
-}
-
-function launchUpdatedApp(executable, { spawnImpl = spawn, processId = process.pid, onError = () => {} } = {}) {
-  const psQuote = value => `'${String(value).replace(/'/g, "''")}'`;
-  const script = `$old = Get-Process -Id ${Number(processId)} -ErrorAction SilentlyContinue; if ($old) { $null = $old.WaitForExit(60000) }; Start-Process -FilePath ${psQuote(executable)} -WorkingDirectory ${psQuote(path.win32.dirname(executable))}`;
-  const encodedScript = Buffer.from(script, 'utf16le').toString('base64');
-  const child = spawnImpl('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encodedScript], {
-    detached: true,
-    windowsHide: true,
-    stdio: 'ignore',
-  });
-  child.once('error', onError);
-  child.unref();
-  return child;
 }
 
 /** Install app files beside the running copy and redirect the desktop shortcut. */
@@ -91,4 +76,4 @@ async function installUpdateArchive({ archive, currentRoot, version, writeShortc
   }
 }
 
-module.exports = { extractWithTar, installUpdateArchive, launchUpdatedApp };
+module.exports = { extractWithTar, installUpdateArchive };

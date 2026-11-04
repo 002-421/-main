@@ -83,7 +83,7 @@ def main():
     shutil.copy2(BUILD, setup / 'app/dist/index.html')
     shutil.copy2(ROOT / 'public/x-ray-report-studio.ico', setup / 'app/dist/x-ray-report-studio.ico')
     shutil.copy2(ROOT / 'node_modules/rcedit/bin/rcedit-x64.exe', setup / 'app/dist/rcedit-x64.exe')
-    for filename in ('main.cjs', 'preload.cjs', 'update-install.cjs', 'startup-diagnostics.cjs'):
+    for filename in ('main.cjs', 'preload.cjs', 'update-install.cjs', 'live-update.cjs', 'startup-diagnostics.cjs'):
         shutil.copy2(ROOT / 'electron' / filename, setup / 'app/electron' / filename)
     (setup / 'app/package.json').write_text(json.dumps({
         'name': metadata['name'], 'productName': 'X-ray Report Studio',
@@ -112,7 +112,7 @@ def main():
         raise RuntimeError('The inline installer exceeds the Windows command-line limit.')
     (setup / 'Install.cmd').write_bytes(command.encode('ascii'))
     (setup / 'START_HERE_RU.txt').write_text(
-        f'УСТАНОВКА MRI REPORT STUDIO {metadata["version"]}\n\n'
+        f'УСТАНОВКА X-RAY REPORT STUDIO {metadata["version"]}\n\n'
         '1. Распакуйте весь архив.\n'
         '2. Запустите Install.cmd двойным щелчком.\n'
         '3. Дождитесь загрузки официальной среды запуска (около 150 МБ).\n'
@@ -121,7 +121,8 @@ def main():
         'Права администратора не нужны. Установщик не меняет ExecutionPolicy, настройки защиты, '
         'реестр или системные папки. SHA256 загруженного Electron проверяется; '
         'несовпадение прерывает установку. Существующие файлы не перезаписываются.\n\n'
-        'После обновления приложение автоматически откроет новую версию. '
+        'При обновлении интерфейс сменится в открытом окне без перезапуска приложения. '
+        'Изменения системной части вступят в силу при следующем запуске. '
         'Локальный рабочий черновик и настройки шаблонов сохраняются в профиле приложения.\n\n'
         'Install.ps1 — читаемый исходник команды. Папку app нужно оставить рядом с Install.cmd.\n',
         encoding='utf-8-sig')

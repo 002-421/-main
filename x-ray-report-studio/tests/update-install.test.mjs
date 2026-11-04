@@ -4,10 +4,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { EventEmitter } from 'node:events';
 
 const require = createRequire(import.meta.url);
-const { installUpdateArchive, launchUpdatedApp } = require('../electron/update-install.cjs');
+const { installUpdateArchive } = require('../electron/update-install.cjs');
+const { activateRendererUpdate, isUsableRenderer } = require('../electron/live-update.cjs');
 
 async function fixture() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'mri-update-test-'));
@@ -70,24 +70,42 @@ test('invalid update package leaves the current installation untouched', async t
   assert.equal(await fs.readFile(path.join(f.currentRoot, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'old app');
 });
 
-test('updated app launcher waits for the old process to exit before opening the new copy', () => {
-  const child = new EventEmitter();
-  let unreferenced = false;
-  child.unref = () => { unreferenced = true; };
-  let launch;
-  launchUpdatedApp('C:\\apps\\App_0.4.20\\X-ray Report Studio.exe', {
-    processId: 4321,
-    spawnImpl: (...args) => { launch = args; return child; },
+test('live update keeps the current window and resolves when the new renderer reports ready', async () => {
+  let ready;
+  const loaded = [];
+  const operation = activateRendererUpdate({
+    installedIndex: 'new/index.html', previousIndex: 'old/index.html',
+    loadFile: async filename => { loaded.push(filename); ready(); },
+    waitForReady: () => new Promise(resolve => { ready = resolve; }),
   });
-  assert.deepEqual(launch, [
-    'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', launch[1][5]],
-    { detached: true, windowsHide: true, stdio: 'ignore' },
-  ]);
-  const script = Buffer.from(launch[1][5], 'base64').toString('utf16le');
-  assert.match(script, /Get-Process -Id 4321/);
-  assert.match(script, /WaitForExit\(60000\)/);
-  assert.match(script, /Start-Process -FilePath 'C:\\apps\\App_0\.4\.20\\X-ray Report Studio\.exe' -WorkingDirectory 'C:\\apps\\App_0\.4\.20'/);
-  assert.equal(unreferenced, true);
+  assert.deepEqual(await operation, { activated: true });
+  assert.deepEqual(loaded, ['new/index.html']);
+});
+
+test('live update restores the previous renderer if loading the new one fails', async () => {
+  let ready;
+  const loaded = [];
+  const operation = activateRendererUpdate({
+    installedIndex: 'new/index.html', previousIndex: 'old/index.html',
+    loadFile: async filename => {
+      loaded.push(filename);
+      if (filename.startsWith('new')) ready(new Error('new renderer failed'));
+      else ready();
+    },
+    waitForReady: () => new Promise((resolve, reject) => { ready = error => error ? reject(error) : resolve(); }),
+  });
+  await assert.rejects(operation, /new renderer failed/);
+  assert.deepEqual(loaded, ['new/index.html', 'old/index.html']);
+});
+
+test('live update rejects a blank renderer even when the document reported ready', () => {
+  const details = {
+    appRoot: true, templateCount: 113, textLength: 1500,
+    viewport: { width: 1500, height: 1000 },
+    shell: { width: 1500, height: 1000, display: 'flex', visibility: 'visible', opacity: '1' },
+  };
+  assert.equal(isUsableRenderer(details, { distinctSampleColors: 40 }), true);
+  assert.equal(isUsableRenderer(details, { distinctSampleColors: 1 }), false);
+  assert.equal(isUsableRenderer({ ...details, textLength: 0 }, { distinctSampleColors: 40 }), false);
 });
 

@@ -4,7 +4,8 @@ const fs = require('node:fs/promises');
 const https = require('node:https');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { installUpdateArchive, launchUpdatedApp } = require('./update-install.cjs');
+const { installUpdateArchive } = require('./update-install.cjs');
+const { activateRendererUpdate, isUsableRenderer } = require('./live-update.cjs');
 const { summarizeFrame } = require('./startup-diagnostics.cjs');
 const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json';
 
@@ -32,8 +33,22 @@ const personalDictionaryFile = path.join(app.getPath('userData'), 'dictionary.js
 let dictionaryQueue = Promise.resolve();
 let updateInstalling = false;
 let latestUpdateLogPath = '';
-let updatedExecutableToLaunch = '';
-let updateLogForLaunch = () => Promise.resolve();
+let activeApplicationVersion = app.getVersion();
+let pendingRendererReady;
+let liveUpdateInProgress = false;
+
+function waitForRendererReady(timeoutMs = 20000) {
+  rendererReady = false;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (pendingRendererReady?.resolve === onReady) pendingRendererReady = undefined;
+      reject(new Error(`Интерфейс не подтвердил запуск за ${timeoutMs / 1000} секунд.`));
+    }, timeoutMs);
+    const onReady = () => { clearTimeout(timer); resolve(); };
+    const onFailure = error => { clearTimeout(timer); reject(error); };
+    pendingRendererReady = { resolve: onReady, reject: onFailure };
+  });
+}
 
 function logStartup(event) {
   if (!startupLogFile) return startupLogQueue;
@@ -177,7 +192,7 @@ async function getUpdateManifest() {
       || typeof manifest.url !== 'string' || typeof manifest.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(manifest.sha256)) throw new Error('Файл обновлений содержит некорректные данные.');
   const artifact=new URL(manifest.url);
   if (artifact.protocol!=='https:' || !['raw.githubusercontent.com','github.com'].includes(artifact.hostname) || !artifact.pathname.endsWith('/downloads/X-ray_Report_Studio_Windows_Setup.zip')) throw new Error('Недопустимая ссылка на установочный файл.');
-  return { version: manifest.version, currentVersion: app.getVersion(), url: manifest.url, sha256: manifest.sha256.toLowerCase(), available: compareVersions(manifest.version, app.getVersion()) > 0 };
+  return { version: manifest.version, currentVersion: activeApplicationVersion, url: manifest.url, sha256: manifest.sha256.toLowerCase(), available: compareVersions(manifest.version, activeApplicationVersion) > 0 };
 }
 
 app.whenReady().then(() => {
@@ -188,6 +203,26 @@ app.whenReady().then(() => {
     rendererReady = true;
     clearTimeout(startupWatchdog);
     void logStartup({ event: 'renderer-ready', details });
+    if (liveUpdateInProgress && pendingRendererReady) {
+      void (async () => {
+        try {
+          await new Promise(resolve => setTimeout(resolve, 700));
+          const frame = await mainWindow.webContents.capturePage();
+          const summary = summarizeFrame(frame);
+          await logStartup({ event: 'live-update-renderer-frame', summary });
+          if (!isUsableRenderer(details, summary)) throw new Error('Интерфейс сообщил о запуске, но его область отображения пуста или не готова.');
+          pendingRendererReady?.resolve();
+          pendingRendererReady = undefined;
+        } catch (error) {
+          await logStartup({ event: 'live-update-renderer-validation-failed', message: error.message });
+          pendingRendererReady?.reject(error);
+          pendingRendererReady = undefined;
+        }
+      })();
+    } else {
+      pendingRendererReady?.resolve();
+      pendingRendererReady = undefined;
+    }
     setTimeout(async () => {
       if (!mainWindow || mainWindow.isDestroyed()) return;
       try {
@@ -225,14 +260,14 @@ app.whenReady().then(() => {
   mainWindow.webContents.on('did-finish-load', () => { void logStartup({ event: 'page-finished-loading', url: mainWindow.webContents.getURL() }); });
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     void logStartup({ event: 'page-load-failed', errorCode, errorDescription, validatedURL, isMainFrame });
-    if (isMainFrame && errorCode !== -3) void showStartupFailure(`Не удалось загрузить интерфейс приложения (${errorCode}).`);
+    if (isMainFrame && errorCode !== -3 && !liveUpdateInProgress) void showStartupFailure(`Не удалось загрузить интерфейс приложения (${errorCode}).`);
   });
   mainWindow.webContents.on('console-message', (_event, details) => {
     if (details?.level >= 2) void logStartup({ event: 'renderer-console-error', level: details.level, message: details.message, line: details.lineNumber, source: details.sourceId });
   });
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     void logStartup({ event: 'renderer-process-gone', details });
-    if (!rendererReady) void showStartupFailure('Процесс интерфейса приложения завершился при запуске.');
+    if (!rendererReady && !liveUpdateInProgress) void showStartupFailure('Процесс интерфейса приложения завершился при запуске.');
   });
   mainWindow.webContents.on('will-prevent-unload', event => event.preventDefault());
   mainWindow.webContents.on('unresponsive', () => {
@@ -271,6 +306,10 @@ app.whenReady().then(() => {
   ipcMain.handle('updates:check', async event => {
     requireMain(event);
     return getUpdateManifest();
+  });
+  ipcMain.handle('app:version', async event => {
+    requireMain(event);
+    return activeApplicationVersion;
   });
   ipcMain.handle('updates:open-log', async event => {
     requireMain(event);
@@ -323,18 +362,43 @@ app.whenReady().then(() => {
           await fs.unlink(path.join(app.getPath('desktop'), 'MRI Report Studio.lnk')).catch(() => {});
         },
       });
-      updatedExecutableToLaunch = installed.executable;
-      updateLogForLaunch = log;
-      await log({ event: 'update-complete', targetVersion: update.version });
+      await log({ event: 'update-files-ready', root: installed.root, targetVersion: update.version });
+      rendererReady = false;
+      liveUpdateInProgress = true;
+      const previousIndex = path.join(__dirname, '..', 'dist', 'index.html');
+      const installedIndex = path.join(installed.root, 'resources', 'app', 'dist', 'index.html');
+      try {
+        await activateRendererUpdate({
+          loadFile: filename => mainWindow.loadFile(filename),
+          installedIndex,
+          previousIndex,
+          waitForReady: waitForRendererReady,
+        });
+      } catch (activationError) {
+        liveUpdateInProgress = false;
+        const oldExecutable = process.execPath;
+        const oldRoot = path.dirname(oldExecutable);
+        const oldIcon = path.join(oldRoot, 'resources', 'app', 'dist', 'x-ray-report-studio.ico');
+        const oldShortcut = path.join(app.getPath('desktop'), 'X-ray Report Studio.lnk');
+        const oldShortcutOptions = { target: oldExecutable, cwd: oldRoot, icon: oldIcon, description: 'X-ray Report Studio' };
+        const shortcutRestored = shell.writeShortcutLink(oldShortcut, 'replace', oldShortcutOptions)
+          || shell.writeShortcutLink(oldShortcut, 'create', oldShortcutOptions);
+        await log({ event: 'live-renderer-update-failed', message: activationError.message, rollbackError: activationError.rollbackError?.message });
+        await log({ event: 'shortcut-rollback', restored: shortcutRestored, target: oldExecutable });
+        if (!rendererReady) void showStartupFailure('Не удалось загрузить новую и предыдущую версии интерфейса.');
+        throw new Error(`Файлы установлены, но новый интерфейс не запустился. Открыта предыдущая версия. ${activationError.message}`);
+      }
+      liveUpdateInProgress = false;
+      activeApplicationVersion = update.version;
+      await log({ event: 'live-renderer-update-complete', targetVersion: update.version });
     } catch (error) {
       await log({ event: 'update-error', message: error.message, stack: error.stack, logFile });
       sendProgress({stage:'error',loaded:0,total:0,percent:0,message:error.message,logFile});
       throw new Error(`${error.message} Журнал обновления: ${logFile}`);
     } finally { if (file) await fs.unlink(file).catch(() => {}); }
-    updateInstalling=true;
+    updateInstalling=false;
     sendProgress({stage:'installed',loaded:archiveBytes,total:archiveBytes,percent:100});
-    setTimeout(()=>app.quit(),300);
-    return { available:true, installing:true, version:update.version };
+    return { available:true, installing:false, version:update.version };
   });
   ipcMain.handle('report:copy', async (event, html, text) => {
     requireMain(event);
@@ -356,15 +420,3 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => app.quit());
-app.on('will-quit', () => {
-  if (!updatedExecutableToLaunch) return;
-  const executable = updatedExecutableToLaunch;
-  void updateLogForLaunch({ event: 'relaunch-start', executable });
-  try {
-    launchUpdatedApp(executable, {
-      onError: error => { void updateLogForLaunch({ event: 'relaunch-error', message: error.message, stack: error.stack }); },
-    });
-  } catch (error) {
-    void updateLogForLaunch({ event: 'relaunch-error', message: error.message, stack: error.stack });
-  }
-});
