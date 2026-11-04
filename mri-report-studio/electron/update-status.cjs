@@ -1,4 +1,4 @@
-async function waitForUpdaterStatus({ readStatus, getExitCode, timeoutMs = 10 * 60 * 1000, exitGraceMs = 5000, pollMs = 250, now = Date.now, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
+async function waitForUpdaterStatus({ readStatus, getExitCode, getFailureDetail = async () => '', timeoutMs = 10 * 60 * 1000, exitGraceMs = 5000, pollMs = 250, now = Date.now, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
   const deadline = now() + timeoutMs;
   let exitedAt = null;
   let observed = '';
@@ -10,7 +10,8 @@ async function waitForUpdaterStatus({ readStatus, getExitCode, timeoutMs = 10 * 
     if (exitCode !== null) {
       exitedAt ??= now();
       if (now() - exitedAt >= exitGraceMs) {
-        throw new Error(`Установщик завершился без подтверждения запуска новой версии (код ${exitCode}; статус: ${observed || 'не записан'}).`);
+        const detail = String(await getFailureDetail()).trim().slice(-1800).replace(/\s+/g, ' ');
+        throw new Error(`Установщик завершился без подтверждения запуска новой версии (код ${exitCode}; статус: ${observed || 'не записан'}).${detail ? ` Вывод установщика: ${detail}` : ''}`);
       }
     }
     await wait(pollMs);
@@ -18,4 +19,10 @@ async function waitForUpdaterStatus({ readStatus, getExitCode, timeoutMs = 10 * 
   throw new Error('Установщик не подтвердил запуск новой версии. Повторите проверку или используйте установочный пакет вручную.');
 }
 
-module.exports = { waitForUpdaterStatus };
+function buildPowerShellUpdaterArgs({ script, archive, currentRoot, version, statusFile }) {
+  const quote = value => `'${String(value).replaceAll("'", "''")}'`;
+  const command = `& ${quote(script)} -Archive ${quote(archive)} -CurrentRoot ${quote(currentRoot)} -Version ${quote(version)} -StatusFile ${quote(statusFile)}`;
+  return ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')];
+}
+
+module.exports = { buildPowerShellUpdaterArgs, waitForUpdaterStatus };
