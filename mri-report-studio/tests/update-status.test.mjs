@@ -35,16 +35,16 @@ test('updater reads a PowerShell error written just after process exit', async (
   assert.equal(result, 'error: launch failed');
 });
 
-test('updater reports a stable started status only after a grace period', async () => {
+test('updater waits for installation completion before the app exits', async () => {
   const timer = clock();
-  await assert.rejects(waitForUpdaterStatus({
-    readStatus: async () => 'started',
-    getExitCode: () => 0,
+  const result = await waitForUpdaterStatus({
+    readStatus: async () => timer.now() < 1000 ? 'started' : 'installed',
+    getExitCode: () => null,
     now: timer.now,
     wait: timer.wait,
     pollMs: 250,
-    exitGraceMs: 1000,
-  }), /код 0; статус: started/);
+  });
+  assert.equal(result, 'installed');
   assert.equal(timer.now(), 1000);
 });
 
@@ -68,12 +68,13 @@ test('PowerShell updater receives native -File named parameters with full Unicod
     currentRoot: "C:\\Users\\Имя О'Connor\\Desktop\\App_0.4.7",
     version: '0.4.8',
     statusFile: "C:\\Users\\Имя О'Connor\\Temp\\update.zip.status",
+    parentPid: 1234,
   });
   assert.deepEqual(args, [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
     "C:\\Users\\Имя О'Connor\\resources\\app\\updater\\update_windows.ps1",
     '-Archive', "C:\\Users\\Имя О'Connor\\Temp\\update.zip",
     '-CurrentRoot', "C:\\Users\\Имя О'Connor\\Desktop\\App_0.4.7",
-    '-Version', '0.4.8', '-StatusFile', "C:\\Users\\Имя О'Connor\\Temp\\update.zip.status",
+    '-Version', '0.4.8', '-StatusFile', "C:\\Users\\Имя О'Connor\\Temp\\update.zip.status", '-ParentPid', '1234',
   ]);
 });

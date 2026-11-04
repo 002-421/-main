@@ -157,12 +157,13 @@ app.whenReady().then(() => {
     requireMain(event);
     return getUpdateManifest();
   });
-  ipcMain.handle('updates:install', async event => {
+  ipcMain.handle('updates:install', async (event, force = false) => {
     requireMain(event);
     if (updateInstalling) throw new Error('Установка обновления уже запущена.');
     if (process.platform !== 'win32') throw new Error('Автообновление установщика поддерживается в Windows-версии приложения.');
+    if (typeof force !== 'boolean') throw new Error('Некорректный режим установки обновления.');
     const update=await getUpdateManifest();
-    if (!update.available) return { available:false };
+    if (!update.available && !force) return { available:false };
     const archive=await downloadBuffer(update.url, 250_000_000);
     const checksum=crypto.createHash('sha256').update(archive).digest('hex');
     if(checksum!==update.sha256) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
@@ -174,7 +175,7 @@ app.whenReady().then(() => {
     await fs.writeFile(statusFile,'launching',{flag:'wx'});
     // Use PowerShell's native -File parameter binding; spawn passes every path
     // as a separate argument, so spaces and non-Latin characters remain intact.
-    const args=buildPowerShellUpdaterArgs({script,archive:file,currentRoot:path.dirname(process.execPath),version:update.version,statusFile});
+    const args=buildPowerShellUpdaterArgs({script,archive:file,currentRoot:path.dirname(process.execPath),version:update.version,statusFile,parentPid:process.pid});
     const child=spawn('powershell.exe',args,{windowsHide:true,stdio:['ignore','pipe','pipe'],detached:true});
     let output='';
     const capture=chunk=>{output=(output+chunk.toString()).slice(-8000);};
@@ -185,7 +186,7 @@ app.whenReady().then(() => {
     child.unref();
     const status=await waitForUpdaterStatus({readStatus:()=>fs.readFile(statusFile,'utf8'),getExitCode:()=>childExitCode,getFailureDetail:async()=>output});
     if(status.startsWith('error:'))throw new Error(status.slice(6)||'Установщик не смог запустить новую версию.');
-    if(status!=='ready')throw new Error('Установщик вернул неизвестный статус.');
+    if(status!=='installed' && status!=='ready')throw new Error('Установщик вернул неизвестный статус.');
     updateInstalling=true;
     await fs.unlink(statusFile).catch(()=>{});
     setTimeout(()=>app.quit(),300);

@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory=$true)][string]$Archive,
     [Parameter(Mandatory=$true)][string]$CurrentRoot,
     [Parameter(Mandatory=$true)][string]$Version,
-    [Parameter(Mandatory=$true)][string]$StatusFile
+    [Parameter(Mandatory=$true)][string]$StatusFile,
+    [Parameter(Mandatory=$true)][int]$ParentPid
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -29,10 +30,11 @@ try {
     $shortcut.WorkingDirectory = $newRoot
     $shortcut.IconLocation = Join-Path $newRoot 'resources\app\dist\mri-report-studio.ico'
     $shortcut.Save()
-    $process = Start-Process -PassThru -FilePath (Join-Path $newRoot 'MRI Report Studio.exe')
-    Start-Sleep -Seconds 2
-    if ($process.HasExited) { throw 'Обновлённое приложение завершилось сразу после запуска.' }
-    [IO.File]::WriteAllText($StatusFile, 'ready')
+    # Tell the old app that installation is complete so it can exit. Launching
+    # the replacement before that point races the still-running Electron process.
+    [IO.File]::WriteAllText($StatusFile, 'installed')
+    while (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 250 }
+    Start-Process -FilePath (Join-Path $newRoot 'MRI Report Studio.exe')
 } catch {
     try { [IO.File]::WriteAllText($StatusFile, ('error:' + $_.Exception.Message)) } catch {}
     exit 1

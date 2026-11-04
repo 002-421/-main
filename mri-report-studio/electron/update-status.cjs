@@ -5,7 +5,7 @@ async function waitForUpdaterStatus({ readStatus, getExitCode, getFailureDetail 
   while (now() < deadline) {
     try { observed = String(await readStatus()).trim(); }
     catch (error) { if (error.code !== 'ENOENT') throw error; observed = ''; }
-    if (observed === 'ready' || observed.startsWith('error:')) return observed;
+    if (observed === 'installed' || observed === 'ready' || observed.startsWith('error:')) return observed;
     const exitCode = getExitCode();
     if (exitCode !== null) {
       exitedAt ??= now();
@@ -19,9 +19,9 @@ async function waitForUpdaterStatus({ readStatus, getExitCode, getFailureDetail 
   throw new Error('Установщик не подтвердил запуск новой версии. Повторите проверку или используйте установочный пакет вручную.');
 }
 
-function buildPowerShellUpdaterArgs({ script, archive, currentRoot, version, statusFile }) {
+function buildPowerShellUpdaterArgs({ script, archive, currentRoot, version, statusFile, parentPid }) {
   return ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script,
-    '-Archive', archive, '-CurrentRoot', currentRoot, '-Version', version, '-StatusFile', statusFile];
+    '-Archive', archive, '-CurrentRoot', currentRoot, '-Version', version, '-StatusFile', statusFile, '-ParentPid', String(parentPid)];
 }
 
 module.exports = { buildPowerShellUpdaterArgs, waitForUpdaterStatus };
