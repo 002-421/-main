@@ -5,7 +5,7 @@ const https = require('node:https');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
-const UPDATE_MANIFEST = 'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/mri-report-studio/downloads/latest.json';
+const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/mri-report-studio/downloads/latest.json';
 
 // Keep the existing profile path so the rename preserves drafts and settings.
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
@@ -79,7 +79,7 @@ function downloadBuffer(url, limit, redirects = 0) {
     if (redirects > 5) return reject(new Error('Слишком много перенаправлений при загрузке обновления.'));
     const target = new URL(url);
     if (target.protocol !== 'https:' || !['raw.githubusercontent.com', 'github.com', 'objects.githubusercontent.com'].includes(target.hostname)) return reject(new Error('Недопустимый источник обновления.'));
-    const request = https.get(target, { timeout: 30000, headers: { 'User-Agent': 'MRI-Report-Studio-Updater' } }, response => {
+    const request = https.get(target, { timeout: 30000, headers: { 'User-Agent': 'MRI-Report-Studio-Updater', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } }, response => {
       if ([301,302,303,307,308].includes(response.statusCode) && response.headers.location) {
         response.resume(); return resolve(downloadBuffer(new URL(response.headers.location, target).toString(), limit, redirects + 1));
       }
