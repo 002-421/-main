@@ -20,9 +20,8 @@ async function waitForUpdaterStatus({ readStatus, getExitCode, getFailureDetail 
 }
 
 function buildPowerShellUpdaterArgs({ script, archive, currentRoot, version, statusFile }) {
-  const quote = value => `'${String(value).replaceAll("'", "''")}'`;
-  const command = `& ${quote(script)} -Archive ${quote(archive)} -CurrentRoot ${quote(currentRoot)} -Version ${quote(version)} -StatusFile ${quote(statusFile)}`;
-  return ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')];
+  return ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script,
+    '-Archive', archive, '-CurrentRoot', currentRoot, '-Version', version, '-StatusFile', statusFile];
 }
 
 module.exports = { buildPowerShellUpdaterArgs, waitForUpdaterStatus };

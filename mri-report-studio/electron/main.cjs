@@ -168,27 +168,26 @@ app.whenReady().then(() => {
     if(checksum!==update.sha256) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
     const file=path.join(os.tmpdir(),`MRI_Report_Studio_${update.version}_${crypto.randomUUID()}.zip`);
     const statusFile=`${file}.status`;
-    const logFile=`${file}.log`;
     await fs.writeFile(file,archive,{flag:'wx'});
     const script=path.join(app.getAppPath(),'updater','update_windows.ps1');
     try{await fs.access(script);}catch{await fs.unlink(file).catch(()=>{});throw new Error(`Не найден скрипт обновления: ${script}`);}
     await fs.writeFile(statusFile,'launching',{flag:'wx'});
-    const log=await fs.open(logFile,'w');
-    // An encoded command safely invokes the updater with named PowerShell parameters,
-    // including paths containing spaces, apostrophes, or non-Latin characters.
+    // Use PowerShell's native -File parameter binding; spawn passes every path
+    // as a separate argument, so spaces and non-Latin characters remain intact.
     const args=buildPowerShellUpdaterArgs({script,archive:file,currentRoot:path.dirname(process.execPath),version:update.version,statusFile});
-    const child=spawn('powershell.exe',args,{windowsHide:true,stdio:['ignore',log.fd,log.fd],detached:true});
+    const child=spawn('powershell.exe',args,{windowsHide:true,stdio:['ignore','pipe','pipe'],detached:true});
+    let output='';
+    const capture=chunk=>{output=(output+chunk.toString()).slice(-8000);};
+    child.stdout?.on('data',capture);child.stderr?.on('data',capture);
     let childExitCode=null;
     child.once('exit',code=>{childExitCode=code;});
-    child.once('close',()=>{void log.close().catch(()=>{});});
-    await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',error=>{void log.close().catch(()=>{});reject(error);});});
+    await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});
     child.unref();
-    const status=await waitForUpdaterStatus({readStatus:()=>fs.readFile(statusFile,'utf8'),getExitCode:()=>childExitCode,getFailureDetail:async()=>fs.readFile(logFile,'utf8').catch(()=> '')});
+    const status=await waitForUpdaterStatus({readStatus:()=>fs.readFile(statusFile,'utf8'),getExitCode:()=>childExitCode,getFailureDetail:async()=>output});
     if(status.startsWith('error:'))throw new Error(status.slice(6)||'Установщик не смог запустить новую версию.');
     if(status!=='ready')throw new Error('Установщик вернул неизвестный статус.');
     updateInstalling=true;
     await fs.unlink(statusFile).catch(()=>{});
-    await fs.unlink(logFile).catch(()=>{});
     setTimeout(()=>app.quit(),300);
     return { available:true, installing:true, version:update.version };
   });

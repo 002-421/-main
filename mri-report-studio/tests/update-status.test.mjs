@@ -61,7 +61,7 @@ test('updater includes captured PowerShell output when no status is written', as
   }), /Вывод установщика: Cannot find script file\./);
 });
 
-test('PowerShell updater receives safely quoted named paths through encoded UTF-16', () => {
+test('PowerShell updater receives native -File named parameters with full Unicode paths', () => {
   const args = buildPowerShellUpdaterArgs({
     script: "C:\\Users\\Имя О'Connor\\resources\\app\\updater\\update_windows.ps1",
     archive: "C:\\Users\\Имя О'Connor\\Temp\\update.zip",
@@ -69,10 +69,11 @@ test('PowerShell updater receives safely quoted named paths through encoded UTF-
     version: '0.4.8',
     statusFile: "C:\\Users\\Имя О'Connor\\Temp\\update.zip.status",
   });
-  assert.deepEqual(args.slice(0, 5), ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass']);
-  assert.equal(args[5], '-EncodedCommand');
-  const command = Buffer.from(args[6], 'base64').toString('utf16le');
-  assert.match(command, /-Archive 'C:\\Users\\Имя О''Connor\\Temp\\update\.zip'/);
-  assert.match(command, /-CurrentRoot 'C:\\Users\\Имя О''Connor\\Desktop\\App_0\.4\.7'/);
-  assert.match(command, /-Version '0\.4\.8'/);
+  assert.deepEqual(args, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+    "C:\\Users\\Имя О'Connor\\resources\\app\\updater\\update_windows.ps1",
+    '-Archive', "C:\\Users\\Имя О'Connor\\Temp\\update.zip",
+    '-CurrentRoot', "C:\\Users\\Имя О'Connor\\Desktop\\App_0.4.7",
+    '-Version', '0.4.8', '-StatusFile', "C:\\Users\\Имя О'Connor\\Temp\\update.zip.status",
+  ]);
 });
