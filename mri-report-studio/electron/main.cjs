@@ -166,12 +166,32 @@ app.whenReady().then(() => {
     const checksum=crypto.createHash('sha256').update(archive).digest('hex');
     if(checksum!==update.sha256) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
     const file=path.join(os.tmpdir(),`MRI_Report_Studio_${update.version}_${crypto.randomUUID()}.zip`);
+    const statusFile=`${file}.status`;
     await fs.writeFile(file,archive,{flag:'wx'});
     const script=path.join(app.getAppPath(),'updater','update_windows.ps1');
-    const child=spawn('powershell.exe',['-NoLogo','-NoProfile','-File',script,file,path.dirname(process.execPath),update.version],{windowsHide:true,stdio:'ignore',detached:true});
+    const scriptText=await fs.readFile(script,'utf8');
+    const quote=value=>`'${String(value).replaceAll("'","''")}'`;
+    // Run the bundled updater as a command block so Windows execution policy
+    // does not reject a script copied from an installation ZIP.
+    const command=`& { ${scriptText}\n} ${quote(file)} ${quote(path.dirname(process.execPath))} ${quote(update.version)} ${quote(statusFile)}`;
+    const child=spawn('powershell.exe',['-NoLogo','-NoProfile','-Command',command],{windowsHide:true,stdio:'ignore',detached:true});
+    let childExitCode=null;
+    child.once('exit',code=>{childExitCode=code;});
     await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});
-    child.unref();updateInstalling=true;
-    setTimeout(()=>app.quit(),500);
+    child.unref();
+    const deadline=Date.now()+10*60*1000;
+    let status='';
+    while(Date.now()<deadline){
+      try{status=(await fs.readFile(statusFile,'utf8')).trim();if(status)break;}catch(error){if(error.code!=='ENOENT')throw error;}
+      if(childExitCode!==null)throw new Error(`Установщик завершился без подтверждения запуска новой версии (код ${childExitCode}).`);
+      await new Promise(resolve=>setTimeout(resolve,250));
+    }
+    if(!status)throw new Error('Установщик не подтвердил запуск новой версии. Повторите проверку или используйте установочный пакет вручную.');
+    if(status.startsWith('error:'))throw new Error(status.slice(6)||'Установщик не смог запустить новую версию.');
+    if(status!=='ready')throw new Error('Установщик вернул неизвестный статус.');
+    updateInstalling=true;
+    await fs.unlink(statusFile).catch(()=>{});
+    setTimeout(()=>app.quit(),300);
     return { available:true, installing:true, version:update.version };
   });
   ipcMain.handle('report:copy', async (event, html, text) => {

@@ -61,6 +61,8 @@ try{
  await page.locator('#toggle-theme').click();
  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
  assert.equal(await page.locator('#toggle-theme').getAttribute('aria-pressed'),'true');
+ assert.equal(await page.locator('#modality-select').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(34, 46, 59)');
+ assert.equal(await page.locator('#modality-select option').first().evaluate(el=>getComputedStyle(el).color),'rgb(228, 234, 242)');
  assert.equal(await page.locator('.paper').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)');
  await page.locator('#toggle-theme').click();
  assert.equal(await page.locator('html').getAttribute('data-theme'),'light');

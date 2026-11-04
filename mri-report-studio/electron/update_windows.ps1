@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$Archive,
     [Parameter(Mandatory=$true)][string]$CurrentRoot,
-    [Parameter(Mandatory=$true)][string]$Version
+    [Parameter(Mandatory=$true)][string]$Version,
+    [Parameter(Mandatory=$true)][string]$StatusFile
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -27,10 +28,12 @@ try {
     $shortcut.WorkingDirectory = $newRoot
     $shortcut.IconLocation = Join-Path $newRoot 'resources\app\dist\mri-report-studio.ico'
     $shortcut.Save()
-    Start-Process -FilePath (Join-Path $newRoot 'MRI Report Studio.exe')
+    $process = Start-Process -PassThru -FilePath (Join-Path $newRoot 'MRI Report Studio.exe')
+    Start-Sleep -Seconds 2
+    if ($process.HasExited) { throw 'Обновлённое приложение завершилось сразу после запуска.' }
+    [IO.File]::WriteAllText($StatusFile, 'ready')
 } catch {
-    Add-Type -AssemblyName PresentationFramework
-    [System.Windows.MessageBox]::Show(('Не удалось установить обновление: ' + $_.Exception.Message), 'MRI Report Studio') | Out-Null
+    try { [IO.File]::WriteAllText($StatusFile, ('error:' + $_.Exception.Message)) } catch {}
 } finally {
     if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $Archive) { Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue }

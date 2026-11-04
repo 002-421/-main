@@ -12,7 +12,7 @@
 @media print{.report-tabs{display:none!important}}
 .report-tabs{color:#24394a}html[data-theme="dark"] .report-tabs{background:#18222d;border-color:#34414f}html[data-theme="dark"] .report-tab{background:#202c39;border-color:#34414f}html[data-theme="dark"] .report-tab.active{background:#263744;border-color:#39717a}html[data-theme="dark"] .report-tab-select,html[data-theme="dark"] .zoom-control output{color:#e4eaf2}
 .movable-calculator>header{user-select:none;cursor:move!important}.movable-calculator>header:active{cursor:grabbing!important}
-.report-tabs{display:flex;align-items:stretch;gap:4px;min-height:38px;padding:3px 12px 0;background:#eef3f6;border-bottom:1px solid #dce5eb;overflow-x:auto;flex-shrink:0}.report-tab{display:flex;align-items:center;max-width:280px;border:1px solid #dce5eb;border-bottom:0;border-radius:6px 6px 0 0;background:#f7fafb}.report-tab.active{background:#fff;border-color:#b8d6d7}.report-tab-select{padding:8px 9px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.report-tab-close{padding:3px 8px;color:#8597a2}.report-tab-close:hover{color:#a33}.zoom-control{display:flex;align-items:center;gap:6px;font-size:10px;color:#69818d;white-space:nowrap}.zoom-control input[type=range]{width:100px;padding:0;margin:0;accent-color:#168d91}.zoom-control output{min-width:34px;color:#263e50;font-weight:650}.wide-preview{width:min(1100px,96vw)}.wide-preview .dialog-body{padding:0;background:#e8edf1}.export-preview-scroll{height:min(72dvh,800px);overflow:auto;padding:20px}.export-preview-paper{width:210mm;min-height:297mm;margin:0 auto;background:#fff;box-shadow:0 2px 18px #20394a33;padding:16mm 18mm 24mm}.export-preview-spacer{height:27mm}.export-preview-paper .report-content{padding:0!important;min-height:0!important;overflow:visible!important;font-size:10pt;line-height:1.05;color:#000}.export-preview-paper .template-field.is-empty,.export-preview-paper .report-field.is-empty{background:#ffff00}.export-preview-paper mark[data-color="#ffff00"]{background:#ffff00}
+.report-tabs{display:flex;align-items:stretch;gap:4px;min-height:38px;padding:3px 12px 0;background:#eef3f6;border-bottom:1px solid #dce5eb;overflow-x:auto;flex-shrink:0}.report-tab{display:flex;align-items:center;max-width:280px;border:1px solid #dce5eb;border-bottom:0;border-radius:6px 6px 0 0;background:#f7fafb}.report-tab.active{background:#fff;border-color:#b8d6d7}.report-tab-select{padding:8px 9px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.report-tab-close{padding:3px 8px;color:#8597a2}.report-tab-close:hover{color:#a33}.zoom-control{display:flex;align-items:center;gap:6px;font-size:10px;color:#69818d;white-space:nowrap}.zoom-control input[type=range]{width:100px;padding:0;margin:0;accent-color:#168d91}.zoom-control output{min-width:34px;color:#263e50;font-weight:650}.wide-preview{width:min(1100px,96vw)}.wide-preview .dialog-body{padding:0;background:#fff}.export-preview-scroll{height:min(72dvh,800px);overflow:auto;padding:20px;background:#fff}.export-preview-paper{width:210mm;min-height:297mm;margin:0 auto;background:#fff;border:1px solid #d8d8d8;box-shadow:none;padding:16mm 18mm 24mm}.export-preview-spacer{height:27mm}.export-preview-paper .report-content{padding:0!important;min-height:0!important;overflow:visible!important;font-size:10pt;line-height:1.05;color:#000}.export-preview-paper .template-field.is-empty,.export-preview-paper .report-field.is-empty{background:#ffff00}.export-preview-paper mark[data-color="#ffff00"]{background:#ffff00}
 #highlight-yellow{position:relative;font-size:16px!important;padding-bottom:7px!important}#highlight-yellow:after{content:"";position:absolute;left:4px;right:4px;bottom:2px;height:3px;border-radius:2px;background:#ffff00}
 
 /* The report paper stays white so its on-screen layout matches Word/PDF output. */
@@ -24,6 +24,8 @@ html[data-theme="dark"] .document-tools{background:#18222d;border-color:#34414f}
 html[data-theme="dark"] .sidebar,html[data-theme="dark"] .topbar,html[data-theme="dark"] .ribbon,html[data-theme="dark"] .statusbar{border-color:#34414f}
 html[data-theme="dark"] input,html[data-theme="dark"] textarea,html[data-theme="dark"] select,html[data-theme="dark"] .btn,html[data-theme="dark"] .chip,html[data-theme="dark"] .block-card{background:#222e3b;color:#e4eaf2;border-color:#3a4857}
 html[data-theme="dark"] #area-select{background:#222e3b;color:#e4eaf2}
+html[data-theme="dark"] #modality-select{background:#222e3b;color:#e4eaf2;border-color:#3a4857;color-scheme:dark}
+html[data-theme="dark"] #modality-select option,html[data-theme="dark"] #area-select option{background:#222e3b;color:#e4eaf2}
 html[data-theme="dark"] .side-tabs button{color:#a3b1bf}
 html[data-theme="dark"] .side-tabs button.active{color:#9de1d8}
 html[data-theme="dark"] .btn.primary{background:#176a78;border-color:#176a78;color:white}
@@ -53,17 +55,18 @@ html[data-theme="dark"] .dialog-overlay{background:#0009}
 .report-tab-add{flex:0 0 40px;min-height:34px;border:1px solid #dce5eb;border-radius:5px 5px 0 0;background:#fff;color:#3f8790;font-size:23px;line-height:1}
 .report-tab-add:hover{background:#e9f7f4;border-color:#a4d7cf}
 html[data-theme="dark"] .report-tab-add{background:#202c39;border-color:#34414f;color:#9de1d8}
-.wide-preview .dialog-body:has(.paged-preview-frame){padding:0 0 12px;background:#e8edf1}
-.paged-preview-frame{height:min(72dvh,850px);min-height:400px;background:#48515b}
+.wide-preview .dialog-body:has(.paged-preview-frame){padding:0 0 12px;background:#fff}
+.paged-preview-frame{height:min(72dvh,850px);min-height:400px;background:#fff;color-scheme:light}
 .paged-preview-frame iframe{width:100%;height:100%;border:0}
 .preview-note{padding:10px 20px 0!important;margin:0!important;font-size:11px!important}
 #stamp-preview{display:flex;align-items:center;justify-content:flex-start;min-height:58px;margin:8px 0 12px;padding:6px;border:1px dashed var(--border);border-radius:6px;color:#8499a4;font-size:11px}
 #stamp-preview img{max-width:140px;max-height:55px;object-fit:contain}
 .doctor-stamp-print{text-align:center;break-inside:avoid;page-break-inside:avoid;margin:2pt 0!important;min-height:0!important}
 .doctor-stamp-print img{width:auto!important;height:auto!important;max-width:140px!important;max-height:55px!important;display:inline-block!important;object-fit:contain;vertical-align:middle}
-.paginated-browser-preview{height:min(72dvh,850px);overflow:auto;padding:20px;background:#48515b}
+.report-content img[alt="Подпись и печать врача"]{display:block;max-width:140px;max-height:55px;width:auto;height:auto;object-fit:contain;margin:2pt auto;break-inside:avoid;page-break-inside:avoid}
+.paginated-browser-preview{height:min(72dvh,850px);overflow:auto;padding:20px;background:#fff}
 .preview-page{position:relative;width:210mm;margin:0 auto 18px}
-.preview-page-number{position:absolute;top:-17px;right:0;color:#dce4e8;font-size:10px}
+.preview-page-number{position:absolute;top:-17px;right:0;color:#637381;font-size:10px}
 .preview-page .export-preview-paper{margin:0}
 .preview-measure{position:fixed!important;left:-10000px!important;top:0!important;visibility:hidden!important;display:block!important;width:210mm!important;min-height:0!important}
 .preview-measure .report-content{padding:0!important;min-height:0!important;width:174mm!important;font-size:10pt!important;line-height:1.05!important}
