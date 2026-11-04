@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const https = require('node:https');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { installUpdateArchive } = require('./update-install.cjs');
+const { installUpdateArchive, launchUpdatedApp } = require('./update-install.cjs');
 const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json';
 
 // Keep the existing profile path so the rename preserves drafts and settings.
@@ -19,6 +19,8 @@ const personalDictionaryFile = path.join(app.getPath('userData'), 'dictionary.js
 let dictionaryQueue = Promise.resolve();
 let updateInstalling = false;
 let latestUpdateLogPath = '';
+let updatedExecutableToLaunch = '';
+let updateLogForLaunch = () => Promise.resolve();
 
 function validDictionaryWords(value) {
   return [...new Set((Array.isArray(value) ? value : []).filter(word => typeof word === 'string')
@@ -226,7 +228,7 @@ app.whenReady().then(() => {
       file=path.join(os.tmpdir(),`X-ray_Report_Studio_${update.version}_${crypto.randomUUID()}.zip`);
       await fs.writeFile(file,archive,{flag:'wx'});
       sendProgress({stage:'installing',loaded:archive.length,total:archive.length,percent:100});
-      await installUpdateArchive({
+      const installed = await installUpdateArchive({
         archive: file,
         currentRoot: path.dirname(process.execPath),
         version: update.version,
@@ -240,6 +242,8 @@ app.whenReady().then(() => {
           await fs.unlink(path.join(app.getPath('desktop'), 'MRI Report Studio.lnk')).catch(() => {});
         },
       });
+      updatedExecutableToLaunch = installed.executable;
+      updateLogForLaunch = log;
       await log({ event: 'update-complete', targetVersion: update.version });
     } catch (error) {
       await log({ event: 'update-error', message: error.message, stack: error.stack, logFile });
@@ -271,3 +275,15 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => app.quit());
+app.on('will-quit', () => {
+  if (!updatedExecutableToLaunch) return;
+  const executable = updatedExecutableToLaunch;
+  void updateLogForLaunch({ event: 'relaunch-start', executable });
+  try {
+    launchUpdatedApp(executable, {
+      onError: error => { void updateLogForLaunch({ event: 'relaunch-error', message: error.message, stack: error.stack }); },
+    });
+  } catch (error) {
+    void updateLogForLaunch({ event: 'relaunch-error', message: error.message, stack: error.stack });
+  }
+});

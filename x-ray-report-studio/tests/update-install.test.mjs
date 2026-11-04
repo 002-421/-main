@@ -4,9 +4,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { EventEmitter } from 'node:events';
 
 const require = createRequire(import.meta.url);
-const { installUpdateArchive } = require('../electron/update-install.cjs');
+const { installUpdateArchive, launchUpdatedApp } = require('../electron/update-install.cjs');
 
 async function fixture() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'mri-update-test-'));
@@ -67,5 +68,21 @@ test('invalid update package leaves the current installation untouched', async t
     writeShortcut: async () => assert.fail('shortcut must not change'),
   }), /отсутствуют файлы приложения/);
   assert.equal(await fs.readFile(path.join(f.currentRoot, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'old app');
+});
+
+test('updated app launches detached from its new installation folder', () => {
+  const child = new EventEmitter();
+  let unreferenced = false;
+  child.unref = () => { unreferenced = true; };
+  let launch;
+  launchUpdatedApp('/apps/App_0.4.17/X-ray Report Studio.exe', {
+    spawnImpl: (...args) => { launch = args; return child; },
+  });
+  assert.deepEqual(launch, [
+    '/apps/App_0.4.17/X-ray Report Studio.exe',
+    [],
+    { cwd: '/apps/App_0.4.17', detached: true, windowsHide: true, stdio: 'ignore' },
+  ]);
+  assert.equal(unreferenced, true);
 });
 

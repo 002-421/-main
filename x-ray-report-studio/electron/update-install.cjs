@@ -18,6 +18,18 @@ async function extractWithTar(archive, destination, tarCommand = 'tar.exe') {
   await run(tarCommand, ['-xf', archive, '-C', destination]);
 }
 
+function launchUpdatedApp(executable, { spawnImpl = spawn, onError = () => {} } = {}) {
+  const child = spawnImpl(executable, [], {
+    cwd: path.dirname(executable),
+    detached: true,
+    windowsHide: true,
+    stdio: 'ignore',
+  });
+  child.once('error', onError);
+  child.unref();
+  return child;
+}
+
 /** Install app files beside the running copy and redirect the desktop shortcut. */
 async function installUpdateArchive({ archive, currentRoot, version, writeShortcut, extractArchive = extractWithTar, log = () => {} }) {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'XRayReportStudio_Update_'));
@@ -77,4 +89,4 @@ async function installUpdateArchive({ archive, currentRoot, version, writeShortc
   }
 }
 
-module.exports = { extractWithTar, installUpdateArchive };
+module.exports = { extractWithTar, installUpdateArchive, launchUpdatedApp };
