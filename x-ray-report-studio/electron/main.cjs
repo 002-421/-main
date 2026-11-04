@@ -7,6 +7,10 @@ const crypto = require('node:crypto');
 const { installUpdateArchive, launchUpdatedApp } = require('./update-install.cjs');
 const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json';
 
+// Some Windows display drivers show a blank Electron surface despite the page
+// loading successfully. This text editor is small enough to render in software.
+app.disableHardwareAcceleration();
+
 // Keep the existing profile path so the rename preserves drafts and settings.
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
 app.setName('X-ray Report Studio');
@@ -175,7 +179,7 @@ async function getUpdateManifest() {
 
 app.whenReady().then(() => {
   startupLogFile = path.join(app.getPath('userData'), 'logs', `startup-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
-  void fs.mkdir(path.dirname(startupLogFile), { recursive: true }).then(() => logStartup({ event: 'app-start', version: app.getVersion(), platform: process.platform, executable: process.execPath, resources: process.resourcesPath }));
+  void fs.mkdir(path.dirname(startupLogFile), { recursive: true }).then(() => logStartup({ event: 'app-start', version: app.getVersion(), platform: process.platform, hardwareAcceleration: false, executable: process.execPath, resources: process.resourcesPath }));
   ipcMain.on('app:ready', (event, details) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) return;
     rendererReady = true;
