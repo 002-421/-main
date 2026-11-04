@@ -169,12 +169,9 @@ app.whenReady().then(() => {
     const statusFile=`${file}.status`;
     await fs.writeFile(file,archive,{flag:'wx'});
     const script=path.join(app.getAppPath(),'updater','update_windows.ps1');
-    const scriptText=await fs.readFile(script,'utf8');
-    const quote=value=>`'${String(value).replaceAll("'","''")}'`;
-    // Run the bundled updater as a command block so Windows execution policy
-    // does not reject a script copied from an installation ZIP.
-    const command=`& { ${scriptText}\n} ${quote(file)} ${quote(path.dirname(process.execPath))} ${quote(update.version)} ${quote(statusFile)}`;
-    const child=spawn('powershell.exe',['-NoLogo','-NoProfile','-Command',command],{windowsHide:true,stdio:'ignore',detached:true});
+    // -ExecutionPolicy applies only to this PowerShell process. -File ensures
+    // the updater's param() block receives each argument through normal binding.
+    const child=spawn('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',script,file,path.dirname(process.execPath),update.version,statusFile],{windowsHide:true,stdio:'ignore',detached:true});
     let childExitCode=null;
     child.once('exit',code=>{childExitCode=code;});
     await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});
@@ -182,7 +179,7 @@ app.whenReady().then(() => {
     const deadline=Date.now()+10*60*1000;
     let status='';
     while(Date.now()<deadline){
-      try{status=(await fs.readFile(statusFile,'utf8')).trim();if(status)break;}catch(error){if(error.code!=='ENOENT')throw error;}
+      try{const observed=(await fs.readFile(statusFile,'utf8')).trim();if(observed==='ready'||observed.startsWith('error:')){status=observed;break;}}catch(error){if(error.code!=='ENOENT')throw error;}
       if(childExitCode!==null)throw new Error(`Установщик завершился без подтверждения запуска новой версии (код ${childExitCode}).`);
       await new Promise(resolve=>setTimeout(resolve,250));
     }

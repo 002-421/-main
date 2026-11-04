@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('MRIReportStudio_Update_' + [guid]::NewGuid().ToString('N'))
 try {
+    [IO.File]::WriteAllText($StatusFile, 'started')
     $package = Join-Path $temporary 'package'
     $stage = Join-Path $temporary 'stage'
     [void][IO.Directory]::CreateDirectory($package)
