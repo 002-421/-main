@@ -382,6 +382,8 @@ app.whenReady().then(() => {
         },
       });
       await log({ event: 'update-files-ready', root: installed.root, targetVersion: update.version });
+      const previousApplicationVersion = activeApplicationVersion;
+      activeApplicationVersion = update.version;
       rendererReady = false;
       liveUpdateInProgress = true;
       const previousIndex = path.join(__dirname, '..', 'dist', 'index.html');
@@ -395,6 +397,7 @@ app.whenReady().then(() => {
         });
       } catch (activationError) {
         liveUpdateInProgress = false;
+        activeApplicationVersion = previousApplicationVersion;
         const oldExecutable = process.execPath;
         const oldRoot = path.dirname(oldExecutable);
         const oldIcon = path.join(oldRoot, 'resources', 'app', 'dist', 'x-ray-report-studio.ico');
@@ -402,13 +405,13 @@ app.whenReady().then(() => {
         const oldShortcutOptions = { target: oldExecutable, cwd: oldRoot, icon: oldIcon, description: 'X-ray Report Studio' };
         const shortcutRestored = shell.writeShortcutLink(oldShortcut, 'replace', oldShortcutOptions)
           || shell.writeShortcutLink(oldShortcut, 'create', oldShortcutOptions);
+        await mainWindow.webContents.executeJavaScript(`(()=>{const label=document.querySelector('#application-version');if(label)label.textContent=${JSON.stringify(activeApplicationVersion)}})()`).catch(() => {});
         await log({ event: 'live-renderer-update-failed', message: activationError.message, rollbackError: activationError.rollbackError?.message });
         await log({ event: 'shortcut-rollback', restored: shortcutRestored, target: oldExecutable });
         if (!rendererReady) void showStartupFailure('Не удалось загрузить новую и предыдущую версии интерфейса.');
         throw new Error(`Файлы установлены, но новый интерфейс не запустился. Открыта предыдущая версия. ${activationError.message}`);
       }
       liveUpdateInProgress = false;
-      activeApplicationVersion = update.version;
       await log({ event: 'live-renderer-update-complete', targetVersion: update.version });
     } catch (error) {
       await log({ event: 'update-error', message: error.message, stack: error.stack, logFile });

@@ -132,7 +132,7 @@ function applyTheme() {
   toggle.title = settings.theme === 'dark' ? 'Переключить на светлую тему' : 'Переключить на тёмную тему';
 }
 applyTheme();
-function renderBrand() { $('#brand-image').innerHTML='<span class="brand-text"><strong>X-ray <em>Report</em> Studio</strong><small>МРТ · КТ</small></span>'; }
+function renderBrand() { $('#brand-image').innerHTML='<span class="brand-text"><strong>X-ray <em>Report</em> Studio</strong></span>'; }
 renderBrand();
 const editor=makeEditor($('#editor'),initial,{getPersonalWords:()=>personalWords,onProofStatus:status=>{const el=document.querySelector('#proof-status');if(el)el.textContent=status.error?`Проверка: ${status.error}`:!status.enabled?'Проверка выключена':status.checking?'Проверка текста…':status.count?`Замечаний: ${status.count} · нажмите подчёркнутый текст`:'Орфография и базовая грамматика: замечаний нет';}});
 async function loadSharedDictionary(){if(!window.desktop)return;try{const stored=await window.desktop.dictionaryLoad();sharedDictionaryAvailable=stored.shared;personalWords=[...new Set([...personalWords,...stored.words])].slice(0,20000);localStorage.setItem(KEYS.dictionary,JSON.stringify(personalWords));if(personalWords.length)await window.desktop.dictionaryMergeSave(personalWords);refreshProofreading(editor);}catch{sharedDictionaryAvailable=false;}}
