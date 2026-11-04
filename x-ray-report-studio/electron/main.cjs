@@ -187,7 +187,9 @@ function compareVersions(left, right) {
   return 0;
 }
 async function getUpdateManifest() {
-  const bytes=await downloadBuffer(UPDATE_MANIFEST, 32_000);
+  const manifestUrl = new URL(UPDATE_MANIFEST);
+  manifestUrl.searchParams.set('check', `${Date.now()}-${crypto.randomUUID()}`);
+  const bytes=await downloadBuffer(manifestUrl.toString(), 32_000);
   let manifest; try { manifest=JSON.parse(bytes.toString('utf8')); } catch { throw new Error('Файл обновлений повреждён.'); }
   if (!manifest || typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.version)
       || typeof manifest.url !== 'string' || typeof manifest.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(manifest.sha256)) throw new Error('Файл обновлений содержит некорректные данные.');
