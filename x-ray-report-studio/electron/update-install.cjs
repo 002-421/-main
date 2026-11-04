@@ -18,9 +18,11 @@ async function extractWithTar(archive, destination, tarCommand = 'tar.exe') {
   await run(tarCommand, ['-xf', archive, '-C', destination]);
 }
 
-function launchUpdatedApp(executable, { spawnImpl = spawn, onError = () => {} } = {}) {
-  const child = spawnImpl(executable, [], {
-    cwd: path.dirname(executable),
+function launchUpdatedApp(executable, { spawnImpl = spawn, processId = process.pid, onError = () => {} } = {}) {
+  const psQuote = value => `'${String(value).replace(/'/g, "''")}'`;
+  const script = `$old = Get-Process -Id ${Number(processId)} -ErrorAction SilentlyContinue; if ($old) { $null = $old.WaitForExit(60000) }; Start-Process -FilePath ${psQuote(executable)} -WorkingDirectory ${psQuote(path.win32.dirname(executable))}`;
+  const encodedScript = Buffer.from(script, 'utf16le').toString('base64');
+  const child = spawnImpl('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encodedScript], {
     detached: true,
     windowsHide: true,
     stdio: 'ignore',

@@ -11,6 +11,7 @@ const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/m
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
 app.setName('X-ray Report Studio');
 let mainWindow;
+let rendererUnresponsive = false;
 const sharedDictionaryDir = process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR
   ? path.resolve(process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR)
   : path.join(process.env.PUBLIC || path.dirname(app.getPath('appData')), 'Documents', 'MRI Report Studio');
@@ -166,6 +167,15 @@ app.whenReady().then(() => {
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  mainWindow.webContents.on('will-prevent-unload', event => event.preventDefault());
+  mainWindow.webContents.on('unresponsive', () => { rendererUnresponsive = true; });
+  mainWindow.webContents.on('responsive', () => { rendererUnresponsive = false; });
+  mainWindow.on('close', event => {
+    if (rendererUnresponsive) {
+      event.preventDefault();
+      mainWindow.destroy();
+    }
+  });
   mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
 
   ipcMain.handle('report:export-pdf', async (event, name) => {

@@ -70,19 +70,24 @@ test('invalid update package leaves the current installation untouched', async t
   assert.equal(await fs.readFile(path.join(f.currentRoot, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'old app');
 });
 
-test('updated app launches detached from its new installation folder', () => {
+test('updated app launcher waits for the old process to exit before opening the new copy', () => {
   const child = new EventEmitter();
   let unreferenced = false;
   child.unref = () => { unreferenced = true; };
   let launch;
-  launchUpdatedApp('/apps/App_0.4.17/X-ray Report Studio.exe', {
+  launchUpdatedApp('C:\\apps\\App_0.4.20\\X-ray Report Studio.exe', {
+    processId: 4321,
     spawnImpl: (...args) => { launch = args; return child; },
   });
   assert.deepEqual(launch, [
-    '/apps/App_0.4.17/X-ray Report Studio.exe',
-    [],
-    { cwd: '/apps/App_0.4.17', detached: true, windowsHide: true, stdio: 'ignore' },
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', launch[1][5]],
+    { detached: true, windowsHide: true, stdio: 'ignore' },
   ]);
+  const script = Buffer.from(launch[1][5], 'base64').toString('utf16le');
+  assert.match(script, /Get-Process -Id 4321/);
+  assert.match(script, /WaitForExit\(60000\)/);
+  assert.match(script, /Start-Process -FilePath 'C:\\apps\\App_0\.4\.20\\X-ray Report Studio\.exe' -WorkingDirectory 'C:\\apps\\App_0\.4\.20'/);
   assert.equal(unreferenced, true);
 });
 
