@@ -42,6 +42,25 @@ test('CT archive templates use the MRI-style editable patient, study and physici
   }
 });
 
+test('CT recommendation paragraphs use black text in every template', () => {
+  const ctTemplates = reportTemplates.filter(template => template.id.startsWith('ct-'));
+  for (const template of ctTemplates) {
+    const recommendations = [];
+    walk(makeTemplateDocument(template.id), node => {
+      if (node.type === 'paragraph' && /^\s*(?:Рекоменд|Рекоменду)/i.test(plain(node))) recommendations.push(node);
+    });
+    for (const paragraph of recommendations) {
+      const runs = [];
+      walk(paragraph, node => { if (node.type === 'text') runs.push(node); });
+      assert.ok(runs.length > 0, `${template.title}: recommendation has text`);
+      for (const run of runs) {
+        const style = run.marks?.find(mark => mark.type === 'textStyle');
+        assert.equal(style?.attrs?.color, '#000000', `${template.title}: ${run.text}`);
+      }
+    }
+  }
+});
+
 test('source protocols preserve wording and have editable unique fields', () => {
   for (const template of mriTemplates) {
     const doc = makeTemplateDocument(template.id);

@@ -280,6 +280,25 @@ export function highlightDeletionNotes(input: RichNode, options: { ct?: boolean 
     node.content?.forEach(markAgeNorms);
   };
   markAgeNorms(doc);
+  if (options.ct) {
+    const normalizeRecommendationColor = (node: RichNode) => {
+      if (node.type === 'paragraph' && /^\s*(?:Рекоменд|Рекоменду)/i.test(textOfNode(node))) {
+        const setBlack = (run: RichNode) => {
+          if (run.type === 'text') {
+            const marks = [...(run.marks ?? [])];
+            const textStyle = marks.find(mark => mark.type === 'textStyle');
+            if (textStyle) textStyle.attrs = { ...textStyle.attrs, color: '#000000' };
+            else marks.push({ type: 'textStyle', attrs: { color: '#000000' } });
+            run.marks = marks;
+          }
+          run.content?.forEach(setBlack);
+        };
+        setBlack(node);
+      }
+      node.content?.forEach(normalizeRecommendationColor);
+    };
+    normalizeRecommendationColor(doc);
+  }
   const topLevel = doc.content ?? [];
   const physician = topLevel.findIndex(node => node.type === 'paragraph'
     && /Врач\s*:/i.test(textOfNode(node))
