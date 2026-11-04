@@ -120,7 +120,7 @@ function choiceRanges(text: string): Array<{ start: number; end: number }> {
 }
 
 /** Make text explicitly marked for later removal stand out in editing and Word. */
-export function highlightDeletionNotes(input: RichNode): RichNode {
+export function highlightDeletionNotes(input: RichNode, options: { ct?: boolean } = {}): RichNode {
   const doc = structuredClone(input);
   const textOfNode = (node: RichNode): string => node.type === 'text' ? node.text ?? '' : node.content?.map(textOfNode).join('') ?? '';
   const styleText = (node: RichNode) => {
@@ -166,6 +166,62 @@ export function highlightDeletionNotes(input: RichNode): RichNode {
     }
     paragraph.content = split;
   };
+  const normalizeCtMeasurements = (paragraph: RichNode) => {
+    if (!options.ct || paragraph.type !== 'paragraph' || !paragraph.content) return;
+    const fullText = paragraph.content.map(child => child.type === 'text' ? child.text ?? '' : child.type === 'hardBreak' ? '\n' : '').join('');
+    const reference = /(?:норм(?:а|ы|альный|альные|атив)|референсн\w*)[^.!?;\n]*/gi;
+    const references = [...fullText.matchAll(reference)].map(match => ({ start: match.index!, end: match.index! + match[0].length }));
+    const fixedSliceThickness = /(?:толщин[а-яё]*\s+срез[а-яё]*|шаг[а-яё]*\s+срез[а-яё]*)[^.!?;\n]{0,55}?\d+(?:[,.]\d+)?(?:\s*[xх×]\s*\d+(?:[,.]\d+)?)?\s*мм/giu;
+    const protocolRanges = [...fullText.matchAll(fixedSliceThickness)].map(match => ({ start: match.index!, end: match.index! + match[0].length }));
+    const replacements: Array<{ start: number; end: number; value: string }> = [];
+    // Lesion/focal findings with sample measurements are prompts, not patient facts.
+    const number = String.raw`\d+(?:[,.]\d+)?`;
+    const lesionMeasurement = new RegExp(String.raw`(?:очаг[а-яё]*|образован[а-яё]*|узел[а-яё]*|кист[а-яё]*|конкремент[а-яё]*|метастаз[а-яё]*)[^.!?;\n]{0,70}?(${number}(?:\s*[xх×]\s*${number})?)\s*мм`, 'giu');
+    for (const match of fullText.matchAll(lesionMeasurement)) {
+      const start = match.index! + match[0].indexOf(match[1]);
+      if (!references.some(item => start >= item.start && start < item.end)) replacements.push({ start, end: start + match[1].length, value: '0,0' });
+    }
+    // Add an editable zero where a measurement unit has no value. Fixed slice
+    // thickness and reference limits are deliberately excluded.
+    const bareUnit = /(?<![а-яё])мм(?![а-яё])/giu;
+    for (const match of fullText.matchAll(bareUnit)) {
+      const at = match.index!;
+      if (replacements.some(item => at >= item.start && at < item.end)) continue;
+      if (references.some(item => at >= item.start && at < item.end)) continue;
+      if (protocolRanges.some(item => at >= item.start && at < item.end)) continue;
+      if (/дд\s*\.\s*$/iu.test(fullText.slice(Math.max(0, at - 8), at)) && /^\s*\.\s*г{2,4}/iu.test(fullText.slice(at + 2, at + 12))) continue;
+      const before = fullText.slice(Math.max(0, at - 90), at);
+      const danglingDecimal = before.match(/(?<![\d,.])([,.]\s*\d+)\s*$/u);
+      if (danglingDecimal && /(?:диаметр\w*|размер\w*|длин\w*|ширин\w*|высот\w*|толщин\w*)/iu.test(before.slice(0, -danglingDecimal[0].length))) {
+        replacements.push({ start: at - danglingDecimal[0].length, end: at, value: '0,0 ' });
+        continue;
+      }
+      const preceding = before.match(/(\d+(?:[,.]\d+)?(?:\s*[xх×]\s*\d+(?:[,.]\d+)?)?)\s*$/u);
+      if (preceding) continue;
+      if (/(?:срез[а-яё]*|шаг[а-яё]*)[^.!?;\n]{0,35}$/iu.test(before)) continue;
+      replacements.push({ start: at, end: at, value: '0,0 ' });
+    }
+    replacements.sort((a, b) => a.start - b.start || a.end - b.end);
+    if (!replacements.length) return;
+    // Rebuild text runs while retaining each run's formatting.
+    const rebuilt: RichNode[] = [];
+    let originalOffset = 0;
+    for (const child of paragraph.content) {
+      if (child.type !== 'text') { rebuilt.push(child); if (child.type === 'hardBreak') { rebuilt.push({ type: 'text', text: '\n', marks: [] }); } continue; }
+      const text = child.text ?? '', end = originalOffset + text.length;
+      const segment = replacements.filter(item => item.start >= originalOffset && item.start < end);
+      let cursor = 0;
+      for (const item of segment) {
+        const localStart = item.start - originalOffset, localEnd = item.end - originalOffset;
+        if (localStart > cursor) rebuilt.push({ ...child, text: text.slice(cursor, localStart) });
+        if (item.value) rebuilt.push({ ...child, text: item.value });
+        cursor = Math.max(cursor, localEnd);
+      }
+      if (cursor < text.length) rebuilt.push({ ...child, text: text.slice(cursor) });
+      originalOffset = end;
+    }
+    paragraph.content = rebuilt;
+  };
   const styleAgeBasedNorms = (paragraph: RichNode) => {
     if (paragraph.type !== 'paragraph' || !paragraph.content) return;
     const number = String.raw`\d+(?:[,.]\d+)?`;
@@ -179,6 +235,7 @@ export function highlightDeletionNotes(input: RichNode): RichNode {
   };
   const highlightPatientDimensions = (paragraph: RichNode) => {
     if (paragraph.type !== 'paragraph' || !paragraph.content) return;
+    normalizeCtMeasurements(paragraph);
     const fullText = paragraph.content.map(child => child.type === 'text' ? child.text ?? '' : child.type === 'hardBreak' ? '\n' : '').join('');
     const number = String.raw`\d+(?:[,.]\d+)?`;
     const dimension = new RegExp(`${number}(?:\\s*[xх×]\\s*${number})?\\s*(?:см|мм|мл|м)(?:²|2)?(?![а-яё])`, 'gi');
@@ -187,6 +244,10 @@ export function highlightDeletionNotes(input: RichNode): RichNode {
     // The Omniscan dose is a fixed part of the standard contrast protocol, not a patient measurement.
     const standardContrastDose = /Омнискан\s+в\s+дозе\s+\d+(?:[,.]\d+)?\s*мл\s+на\s+кг\s+массы\s+тела/gi;
     exclusions.push(...[...fullText.matchAll(standardContrastDose)].map(match => ({ start: match.index!, end: match.index! + match[0].length })));
+    if (options.ct) {
+      const fixedSliceThickness = /(?:толщин[а-яё]*\s+срез[а-яё]*|шаг[а-яё]*\s+срез[а-яё]*)[^.!?;\n]{0,55}?\d+(?:[,.]\d+)?(?:\s*[xх×]\s*\d+(?:[,.]\d+)?)?\s*мм/giu;
+      exclusions.push(...[...fullText.matchAll(fixedSliceThickness)].map(match => ({ start: match.index!, end: match.index! + match[0].length })));
+    }
     const ranges = [...fullText.matchAll(dimension)].map(match => ({ start: match.index!, end: match.index! + match[0].length }))
       .filter(range => !exclusions.some(excluded => range.start >= excluded.start && range.start < excluded.end));
     ranges.push(...choiceRanges(fullText));

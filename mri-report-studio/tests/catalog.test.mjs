@@ -211,6 +211,40 @@ test('patient-specific dimensions are highlighted while reference norms are left
   assert.ok(norm.every(node => !node.marks?.some(mark => mark.type === 'highlight' && mark.attrs?.color === '#ffff00')));
 });
 
+test('CT measurements use editable yellow zero fields while norms and fixed slice parameters stay clean', () => {
+  const input = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Очаг печени размером 4,2 мм. Диаметр справа мм, норма 0,15-0,38 мм. Толщина срезов 64x1,0 мм.' }] }] };
+  const doc = highlightDeletionNotes(input, { ct: true });
+  const paragraph = doc.content[0];
+  const text = plain(paragraph);
+  assert.match(text, /Очаг печени размером 0,0 мм/);
+  assert.match(text, /Диаметр справа 0,0 мм/);
+  assert.match(text, /норма 0,15-0,38 мм/);
+  assert.match(text, /Толщина срезов 64x1,0 мм/);
+  const marked = paragraph.content.filter(node => node.marks?.some(mark => mark.type === 'highlight' && mark.attrs?.color === '#ffff00')).map(node => node.text).join('');
+  assert.match(marked, /0,0 мм/);
+  assert.doesNotMatch(marked, /0,15-0,38 мм|64x1,0 мм/);
+});
+
+test('all CT templates fill blank millimeter measurements without highlighting norms or scan thickness', () => {
+  const unit = /(?<![а-яё])мм(?![а-яё])/giu;
+  const norms = /(?:норм(?:а|ы|альный|альные|атив)|референсн\w*)[^.!?;\n]*/giu;
+  const slices = /(?:толщин[а-яё]*\s+срез[а-яё]*|шаг[а-яё]*\s+срез[а-яё]*)[^.!?;\n]{0,55}?\d+(?:[,.]\d+)?(?:\s*[xх×]\s*\d+(?:[,.]\d+)?)?\s*мм/giu;
+  for (const template of reportTemplates.filter(item => item.id.startsWith('ct-'))) {
+    const doc = makeTemplateDocument(template.id);
+    walk(doc, node => {
+      if (node.type !== 'paragraph' || !node.content) return;
+      const text = node.content.map(child => child.text ?? '').join('');
+      const excluded = [...text.matchAll(norms), ...text.matchAll(slices)].map(match => [match.index, match.index + match[0].length]);
+      for (const match of text.matchAll(unit)) {
+        const at = match.index;
+        if (/дд\s*\.$/iu.test(text.slice(Math.max(0, at - 8), at)) && /^\s*\.\s*г{2,4}/iu.test(text.slice(at + 2, at + 12))) continue;
+        if (excluded.some(([start, end]) => at >= start && at < end)) continue;
+        assert.match(text.slice(Math.max(0, at - 12), at), /\d+(?:[,.]\d+)?(?:\s*[xх×]\s*\d+(?:[,.]\d+)?)?\s*$/u, `${template.title}: ${text.slice(Math.max(0, at - 50), at + 5)}`);
+      }
+    });
+  }
+});
+
 test('every source template highlights patient dimensions but leaves reference ranges and the standard contrast dose unhighlighted', () => {
   const number = String.raw`\d+(?:[,.]\d+)?`;
   const dimension = new RegExp(`${number}(?:\\s*[xх×]\\s*${number})?\\s*(?:см|мм|мл|м)(?:²|2)?(?![а-яё])`, 'gi');

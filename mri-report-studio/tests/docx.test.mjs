@@ -324,6 +324,7 @@ test('doctor stamp stays inside the physician column behind the footer without a
   assert.match(xml,/<wp:anchor/);
   assert.match(xml,/<wp:anchor[^>]*behindDoc="1"/);
   assert.match(xml,/<wp:wrapNone\/>/);
+  assert.match(xml,/<wp:align>center<\/wp:align>/);
   assert.ok(xml.indexOf('Врач-рентгенолог')<xml.indexOf('wp:anchor'));
   assert.ok(xml.indexOf('wp:anchor')<xml.indexOf('Дата:'));
   assert.equal((xml.match(/<wp:anchor\b/g)||[]).length,1);

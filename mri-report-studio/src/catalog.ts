@@ -57,5 +57,5 @@ export function makeTemplateDocument(templateId = DEFAULT_TEMPLATE_ID): RichNode
       src: piRadsReference, alt: 'Справочная схема PI-RADS v2.1 (2019)', width: 640, height: 291,
     } });
   }
-  return highlightDeletionNotes(separateRecommendations(compactTemplateTables(document)));
+  return highlightDeletionNotes(separateRecommendations(compactTemplateTables(document)), { ct: templateId.startsWith('ct-') });
 }

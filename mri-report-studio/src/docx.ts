@@ -106,7 +106,7 @@ function inline(nodes: RichNode[] = [], inherited: IRunOptions = {}): ParagraphC
       const source=String(node.attrs?.src??'');
       const jpeg=/^data:image\/(?:jpeg|jpg);base64,/i.test(source);
       if(!jpeg&&!/^data:image\/png;base64,/.test(source)) return [];
-      return [new ImageRun({type:jpeg?'jpg':'png',data:source,transformation:{width:Number(node.attrs?.width)||250,height:Number(node.attrs?.height)||90},...(node.attrs?.floating?{floating:{horizontalPosition:{relative:HorizontalPositionRelativeFrom.COLUMN,align:HorizontalPositionAlign.RIGHT},verticalPosition:{relative:VerticalPositionRelativeFrom.PARAGRAPH,offset:0},allowOverlap:true,behindDocument:true,wrap:{type:TextWrappingType.NONE}}}:{}),altText:{title:'Подпись и печать врача',description:'Подпись и печать врача',name:'Подпись и печать врача'}})];
+      return [new ImageRun({type:jpeg?'jpg':'png',data:source,transformation:{width:Number(node.attrs?.width)||250,height:Number(node.attrs?.height)||90},...(node.attrs?.floating?{floating:{horizontalPosition:{relative:HorizontalPositionRelativeFrom.COLUMN,align:HorizontalPositionAlign.CENTER},verticalPosition:{relative:VerticalPositionRelativeFrom.PARAGRAPH,offset:0},allowOverlap:true,behindDocument:true,wrap:{type:TextWrappingType.NONE}}}:{}),altText:{title:'Подпись и печать врача',description:'Подпись и печать врача',name:'Подпись и печать врача'}})];
     }
     if (node.type === 'reportField') {
       const value = String(node.attrs?.value ?? '');

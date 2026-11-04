@@ -1,7 +1,6 @@
 import type { RichNode } from './model';
 
 const STAMP_ALT = 'Подпись и печать врача';
-const STAMP_WIDTH = 250;
 const text = (node: RichNode): string => node.type === 'text' ? node.text ?? ''
   : node.type === 'reportField' ? String(node.attrs?.value || node.attrs?.hint || '')
     : (node.content ?? []).map(text).join('');
@@ -10,6 +9,7 @@ export function attachDoctorStamp(
   input: RichNode,
   stamps: Record<string, string>,
   sizes: Record<string, { width: number; height: number }>,
+  heights: Record<string, number> = {},
 ): RichNode {
   const doc = structuredClone(input);
   const removePrevious = (nodes: RichNode[]) => {
@@ -36,10 +36,11 @@ export function attachDoctorStamp(
   const src = doctor ? stamps[doctor] : '';
   if (!src) return doc;
   const dimensions = sizes[doctor!] ?? { width: 360, height: 130 };
-  const height = Math.max(1, Math.round(STAMP_WIDTH * dimensions.height / Math.max(1, dimensions.width)));
+  const height = Math.max(40, Math.min(500, Math.round(heights[doctor!] || 140)));
+  const width = Math.max(40, Math.round(height * dimensions.width / Math.max(1, dimensions.height)));
   const stamp: RichNode = { type: 'image', attrs: {
     src, alt: STAMP_ALT,
-    width: STAMP_WIDTH, height, floating: true,
+    width, height, floating: true,
   } };
 
   const insert = (nodes: RichNode[]): boolean => {
