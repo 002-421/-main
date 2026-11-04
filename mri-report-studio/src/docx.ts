@@ -275,7 +275,31 @@ function table(node: RichNode, context: Context): Table {
 }
 
 function blocks(nodes: RichNode[], context: Context): (Paragraph | Table)[] {
-  return nodes.flatMap((node): (Paragraph | Table)[] => {
+  const sequence: RichNode[] = [];
+  const nodeText = (node: RichNode): string => node.type === 'text' ? node.text ?? '' : (node.content ?? []).map(nodeText).join('');
+  const hasDateField = (node: RichNode): boolean => Boolean(node.marks?.some(mark => mark.type === 'templateField' && String(mark.attrs?.id ?? '').endsWith('.reportdate')) || node.content?.some(hasDateField));
+  for (let index = 0; index < nodes.length; index++) {
+    const current = nodes[index], next = nodes[index + 1];
+    if (current.type === 'paragraph' && /Врач(?:-рентгенолог)?\s*:/i.test(nodeText(current))
+      && next?.type === 'paragraph' && hasDateField(next)) {
+      sequence.push({ type: 'signatureRow', content: [current, next] });
+      index++;
+    } else sequence.push(current);
+  }
+  const signatureTable = (left: RichNode, right: RichNode): Table => {
+    const width = Math.max(300, context.width ?? BODY_WIDTH);
+    const leftWidth = Math.round(width * 0.67), rightWidth = width - leftWidth;
+    const noBorders = { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideVertical: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } };
+    return new Table({
+      rows: [new TableRow({ cantSplit: true, children: [
+        new TableCell({ width: { size: leftWidth, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [paragraph(left, { ...context, width: leftWidth }, { alignment: AlignmentType.LEFT })] }),
+        new TableCell({ width: { size: rightWidth, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [paragraph({ ...right, attrs: { ...right.attrs, textAlign: 'right' } }, { ...context, width: rightWidth }, { alignment: AlignmentType.RIGHT })] }),
+      ] })],
+      columnWidths: [leftWidth, rightWidth], width: { size: width, type: WidthType.DXA }, layout: TableLayoutType.FIXED, borders: noBorders,
+    });
+  };
+  return sequence.flatMap((node): (Paragraph | Table)[] => {
+    if (node.type === 'signatureRow') return [signatureTable(node.content![0], node.content![1])];
     if (node.type === 'image') {
       const attrs = node.attrs ?? {};
       const source = String(attrs.src ?? '');
@@ -290,7 +314,7 @@ function blocks(nodes: RichNode[], context: Context): (Paragraph | Table)[] {
         })],
       })];
     }
-    if (node.type === 'paragraph' && /Врач\s*:/i.test((node.content ?? []).map(child => child.text ?? '').join('')) && node.content?.some(child => child.marks?.some(mark => mark.type === 'templateField' && String(mark.attrs?.id ?? '').endsWith('.reportdate')))) {
+    if (node.type === 'paragraph' && /Врач(?:-рентгенолог)?\s*:/i.test(nodeText(node)) && hasDateField(node)) {
       const left: RichNode[] = [], right: RichNode[] = [];
       let isDate = false;
       for (const child of node.content ?? []) {
@@ -299,16 +323,7 @@ function blocks(nodes: RichNode[], context: Context): (Paragraph | Table)[] {
           right.push({ ...child, text: (child.text ?? '').replace(/^\s*/, '').replace(/дата\s*:/i, 'дата:') });
         } else (isDate ? right : left).push(child);
       }
-      const width = Math.max(300, context.width ?? BODY_WIDTH);
-      const leftWidth = Math.round(width * 0.67), rightWidth = width - leftWidth;
-      const noBorders = { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideVertical: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } };
-      return [new Table({
-        rows: [new TableRow({ cantSplit: true, children: [
-          new TableCell({ width: { size: leftWidth, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [paragraph({ ...node, content: left }, { ...context, width: leftWidth }, { alignment: AlignmentType.LEFT })] }),
-          new TableCell({ width: { size: rightWidth, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [paragraph({ ...node, attrs: { ...node.attrs, textAlign: 'right' }, content: right }, { ...context, width: rightWidth }, { alignment: AlignmentType.RIGHT })] }),
-        ] })],
-        columnWidths: [leftWidth, rightWidth], width: { size: width, type: WidthType.DXA }, layout: TableLayoutType.FIXED, borders: noBorders,
-      })];
+      return [signatureTable({ ...node, content: left }, { ...node, content: right })];
     }
     if (node.type === 'paragraph' || node.type === 'heading') return [paragraph(node, context)];
     if (node.type === 'table') return [table(node, context)];

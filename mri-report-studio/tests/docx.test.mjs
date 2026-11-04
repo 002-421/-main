@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { exportDocx, importOwnDocx, DOCX_MIME } from '../src/docx.ts';
 import { makeDocument, collectFields, builtinModules, moduleNode, insertModule } from '../src/model.ts';
-import { makeTemplateDocument } from '../src/catalog.ts';
+import { makeTemplateDocument, reportTemplates } from '../src/catalog.ts';
 import { initializeReportFooter } from '../src/report-footer.ts';
 import { attachDoctorStamp } from '../src/doctor-stamp.ts';
 
@@ -251,6 +251,17 @@ test('source template physician and date sit at opposite sides of the signature 
   assert.match(signature, /<w:jc w:val="right"\/>/);
   assert.match(signature, /дата:/);
   assert.match(signature, /03\.11\.2026/);
+});
+
+test('CT physician and date print on one line at opposite sides like MRI reports', async () => {
+  const template = reportTemplates.find(item => item.id.startsWith('ct-'));
+  const doc = initializeReportFooter(makeTemplateDocument(template.id), '04.11.2026');
+  const { xml } = await exported(doc, { templateId: template.id });
+  const row = xml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/g)?.find(value => value.includes('Врач-рентгенолог:') && value.includes('Дата:'));
+  assert.ok(row, template.title);
+  assert.match(row, /<w:gridCol w:w="[0-9]+"\/><w:gridCol w:w="[0-9]+"\/>/);
+  assert.match(row, /<w:jc w:val="right"\/>/);
+  assert.match(row, /04\.11\.2026/);
 });
 
 test('template export retains the footer when editor document attrs are absent', async () => {
