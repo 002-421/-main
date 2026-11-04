@@ -4,9 +4,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 
 const require = createRequire(import.meta.url);
-const { installUpdateArchive } = require('../electron/update-install.cjs');
+const { extractWithTar, installUpdateArchive } = require('../electron/update-install.cjs');
 const { activateRendererUpdate, isUsableRenderer } = require('../electron/live-update.cjs');
 
 async function fixture() {
@@ -68,6 +69,21 @@ test('invalid update package leaves the current installation untouched', async t
     writeShortcut: async () => assert.fail('shortcut must not change'),
   }), /отсутствуют файлы приложения/);
   assert.equal(await fs.readFile(path.join(f.currentRoot, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'old app');
+});
+
+test('update archive extraction invokes the system tar command', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'xray-tar-test-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const source = path.join(directory, 'source');
+  const destination = path.join(directory, 'destination');
+  await fs.mkdir(source);
+  await fs.mkdir(destination);
+  await fs.writeFile(path.join(source, 'payload.txt'), 'update payload');
+  const archive = path.join(directory, 'payload.tar');
+  const tarCommand = process.platform === 'win32' ? 'tar.exe' : 'tar';
+  execFileSync(tarCommand, ['-cf', archive, '-C', source, 'payload.txt']);
+  await extractWithTar(archive, destination, tarCommand);
+  assert.equal(await fs.readFile(path.join(destination, 'payload.txt'), 'utf8'), 'update payload');
 });
 
 test('live update keeps the current window and resolves when the new renderer reports ready', async () => {

@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
+const { spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 
 function run(command, args) {
