@@ -1,6 +1,11 @@
 const { app, BrowserWindow, ipcMain, dialog, clipboard, ClipboardItem, session } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const https = require('node:https');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const { spawn } = require('node:child_process');
+const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/mri-report-studio/downloads/latest.json';
 
 // Keep the existing profile path so the rename preserves drafts and settings.
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
@@ -12,6 +17,7 @@ const sharedDictionaryDir = process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR
 const sharedDictionaryFile = path.join(sharedDictionaryDir, 'dictionary.json');
 const personalDictionaryFile = path.join(app.getPath('userData'), 'dictionary.json');
 let dictionaryQueue = Promise.resolve();
+let updateInstalling = false;
 
 function validDictionaryWords(value) {
   return [...new Set((Array.isArray(value) ? value : []).filter(word => typeof word === 'string')
@@ -55,6 +61,52 @@ function requireMain(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Недоступный источник запроса.');
 }
 
+async function renderPdf() {
+  mainWindow.setBackgroundColor('#ffffff');
+  try {
+    return await mainWindow.webContents.printToPDF({
+      printBackground: true, pageSize: 'A4', preferCSSPageSize: true,
+      margins: { top: 16 / 25.4, bottom: 27 / 25.4, left: 18 / 25.4, right: 18 / 25.4 },
+      displayHeaderFooter: true,
+      headerTemplate: '<div></div>',
+      footerTemplate: '<div style="width:100%;font:8px Arial,sans-serif;line-height:1.1;color:#64748b"><div style="text-align:center">Данное заключение не является диагнозом и должно быть интерпретировано лечащим врачом на основании клинико-лабораторных данных и других диагностических исследований</div><div style="text-align:center;font-style:italic">Исследование выполнено на томографе, указанном в протоколе</div><div style="text-align:right;color:#000"><span class="pageNumber"></span></div></div>',
+    });
+  } finally { mainWindow.setBackgroundColor('#eef1f5'); }
+}
+
+function downloadBuffer(url, limit, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 5) return reject(new Error('Слишком много перенаправлений при загрузке обновления.'));
+    const target = new URL(url);
+    if (target.protocol !== 'https:' || !['raw.githubusercontent.com', 'github.com', 'objects.githubusercontent.com'].includes(target.hostname)) return reject(new Error('Недопустимый источник обновления.'));
+    const request = https.get(target, { timeout: 30000, headers: { 'User-Agent': 'MRI-Report-Studio-Updater' } }, response => {
+      if ([301,302,303,307,308].includes(response.statusCode) && response.headers.location) {
+        response.resume(); return resolve(downloadBuffer(new URL(response.headers.location, target).toString(), limit, redirects + 1));
+      }
+      if (response.statusCode !== 200) { response.resume(); return reject(new Error(`Сервер обновлений ответил ${response.statusCode}.`)); }
+      const chunks=[]; let total=0;
+      response.on('data', chunk => { total += chunk.length; if (total > limit) { request.destroy(new Error('Файл обновления больше допустимого размера.')); } else chunks.push(chunk); });
+      response.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+    request.on('timeout', () => request.destroy(new Error('Время ожидания сервера обновлений истекло.')));
+    request.on('error', reject);
+  });
+}
+function compareVersions(left, right) {
+  const a=String(left).split('.').map(Number), b=String(right).split('.').map(Number);
+  for(let i=0;i<Math.max(a.length,b.length);i++){const delta=(a[i]||0)-(b[i]||0);if(delta)return delta;}
+  return 0;
+}
+async function getUpdateManifest() {
+  const bytes=await downloadBuffer(UPDATE_MANIFEST, 32_000);
+  let manifest; try { manifest=JSON.parse(bytes.toString('utf8')); } catch { throw new Error('Файл обновлений повреждён.'); }
+  if (!manifest || typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.version)
+      || typeof manifest.url !== 'string' || typeof manifest.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(manifest.sha256)) throw new Error('Файл обновлений содержит некорректные данные.');
+  const artifact=new URL(manifest.url);
+  if (artifact.protocol!=='https:' || artifact.hostname!=='raw.githubusercontent.com' || !artifact.pathname.endsWith('/downloads/MRI_Report_Studio_Windows_Setup.zip')) throw new Error('Недопустимая ссылка на установочный файл.');
+  return { version: manifest.version, url: manifest.url, sha256: manifest.sha256.toLowerCase(), available: compareVersions(manifest.version, app.getVersion()) > 0 };
+}
+
 app.whenReady().then(() => {
   // All application resources are bundled. Clinical data is never sent to a server.
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) => callback({ cancel: true }));
@@ -91,19 +143,36 @@ app.whenReady().then(() => {
       properties: ['showOverwriteConfirmation', 'createDirectory'],
     });
     if (result.canceled || !result.filePath) return { canceled: true };
-    mainWindow.setBackgroundColor('#ffffff');
-    let pdf;
-    try {
-      pdf = await mainWindow.webContents.printToPDF({
-        printBackground: true, pageSize: 'A4', preferCSSPageSize: true,
-        margins: { top: 16 / 25.4, bottom: 27 / 25.4, left: 18 / 25.4, right: 18 / 25.4 },
-        displayHeaderFooter: true,
-        headerTemplate: '<div></div>',
-        footerTemplate: '<div style="width:100%;font:8px Arial,sans-serif;line-height:1.1;color:#64748b"><div style="text-align:center">Данное заключение не является диагнозом и должно быть интерпретировано лечащим врачом на основании клинико-лабораторных данных и других диагностических исследований</div><div style="text-align:center;font-style:italic">Исследование выполнено на магнитно-резонансном томографе Philips Achieva с высокой напряженностью магнитного поля 1,5 Тесла</div><div style="text-align:right;color:#000"><span class="pageNumber"></span></div></div>',
-      });
-    } finally { mainWindow.setBackgroundColor('#eef1f5'); }
+    const pdf = await renderPdf();
     await fs.writeFile(result.filePath, pdf);
     return { canceled: false, path: result.filePath };
+  });
+  ipcMain.handle('report:preview-pdf', async event => {
+    requireMain(event);
+    const pdf = await renderPdf();
+    return pdf.toString('base64');
+  });
+  ipcMain.handle('updates:check', async event => {
+    requireMain(event);
+    return getUpdateManifest();
+  });
+  ipcMain.handle('updates:install', async event => {
+    requireMain(event);
+    if (updateInstalling) throw new Error('Установка обновления уже запущена.');
+    if (process.platform !== 'win32') throw new Error('Автообновление установщика поддерживается в Windows-версии приложения.');
+    const update=await getUpdateManifest();
+    if (!update.available) return { available:false };
+    const archive=await downloadBuffer(update.url, 250_000_000);
+    const checksum=crypto.createHash('sha256').update(archive).digest('hex');
+    if(checksum!==update.sha256) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
+    const file=path.join(os.tmpdir(),`MRI_Report_Studio_${update.version}_${crypto.randomUUID()}.zip`);
+    await fs.writeFile(file,archive,{flag:'wx'});
+    const script=path.join(app.getAppPath(),'updater','update_windows.ps1');
+    const child=spawn('powershell.exe',['-NoLogo','-NoProfile','-File',script,file,path.dirname(process.execPath),update.version],{windowsHide:true,stdio:'ignore',detached:true});
+    await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});
+    child.unref();updateInstalling=true;
+    setTimeout(()=>app.quit(),500);
+    return { available:true, installing:true, version:update.version };
   });
   ipcMain.handle('report:copy', async (event, html, text) => {
     requireMain(event);

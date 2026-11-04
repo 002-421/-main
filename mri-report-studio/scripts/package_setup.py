@@ -8,6 +8,7 @@ from zipfile import ZipFile, ZIP_DEFLATED, ZipInfo
 import json
 import re
 import shutil
+import hashlib
 
 ROOT = Path(__file__).resolve().parents[1]
 DOWNLOADS = ROOT / 'downloads'
@@ -79,11 +80,13 @@ def main():
     setup = stage / 'MRI Report Studio Setup'
     (setup / 'app/dist').mkdir(parents=True)
     (setup / 'app/electron').mkdir()
+    (setup / 'app/updater').mkdir()
     shutil.copy2(BUILD, setup / 'app/dist/index.html')
     shutil.copy2(ROOT / 'public/mri-report-studio.ico', setup / 'app/dist/mri-report-studio.ico')
     shutil.copy2(ROOT / 'node_modules/rcedit/bin/rcedit-x64.exe', setup / 'app/dist/rcedit-x64.exe')
     for filename in ('main.cjs', 'preload.cjs'):
         shutil.copy2(ROOT / 'electron' / filename, setup / 'app/electron' / filename)
+    shutil.copy2(ROOT / 'electron/update_windows.ps1', setup / 'app/updater/update_windows.ps1')
     (setup / 'app/package.json').write_text(json.dumps({
         'name': metadata['name'], 'productName': 'MRI Report Studio',
         'version': metadata['version'], 'main': 'electron/main.cjs', 'private': True,
@@ -126,7 +129,14 @@ def main():
         encoding='utf-8-sig')
     notices = collect_licenses()
     (setup / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
-    write_zip(setup, DOWNLOADS / 'MRI_Report_Studio_Windows_Setup.zip')
+    setup_zip = DOWNLOADS / 'MRI_Report_Studio_Windows_Setup.zip'
+    write_zip(setup, setup_zip)
+    manifest = {
+        'version': metadata['version'],
+        'url': 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/mri-report-studio/downloads/MRI_Report_Studio_Windows_Setup.zip',
+        'sha256': hashlib.sha256(setup_zip.read_bytes()).hexdigest(),
+    }
+    (DOWNLOADS / 'latest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
 
     browser = stage / 'MRI Report Studio Browser'
     browser.mkdir()

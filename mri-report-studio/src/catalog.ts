@@ -1,4 +1,5 @@
 import source from './catalog.json' with { type: 'json' };
+import ctSource from './ct-catalog.json' with { type: 'json' };
 import type { RichNode } from './model';
 import { compactTemplateTables, separateRecommendations, highlightDeletionNotes } from './table-layout.ts';
 import piRadsReference from './assets/pi-rads-v21.ts';
@@ -19,12 +20,12 @@ export type ReportBlock = {
   conclusion: RichNode[];
 };
 
-export const areas = source.areas;
+export const areas = [...source.areas, ...ctSource.areas];
 export const PATIENT_FIELD_ID = source.patientFieldId;
 export const DOCTOR_FIELD_ID = source.doctorFieldId;
 export const DEFAULT_TEMPLATE_ID = source.defaultTemplateId;
 export const templatePage = source.page;
-export const reportTemplates = source.templates as ReportTemplate[];
+export const reportTemplates = [...source.templates, ...ctSource.templates] as ReportTemplate[];
 export const reportBlocks = source.blocks as ReportBlock[];
 
 /** A new independent document with source formatting and blank entry fields. */

@@ -101,6 +101,11 @@ function textRuns(text: string, options: IRunOptions): TextRun[] {
 function inline(nodes: RichNode[] = [], inherited: IRunOptions = {}): ParagraphChild[] {
   return nodes.flatMap((node): ParagraphChild[] => {
     if (node.type === 'hardBreak') return [new TextRun({ ...inherited, break: 1 })];
+    if (node.type === 'image') {
+      const source=String(node.attrs?.src??'');
+      if(!/^data:image\/png;base64,/.test(source)) return [];
+      return [new ImageRun({type:'png',data:source,transformation:{width:Number(node.attrs?.width)||140,height:Number(node.attrs?.height)||55},altText:{title:'Подпись и печать врача',description:'Подпись и печать врача',name:'Подпись и печать врача'}})];
+    }
     if (node.type === 'reportField') {
       const value = String(node.attrs?.value ?? '');
       const filled = Boolean(value.trim());

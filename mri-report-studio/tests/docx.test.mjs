@@ -293,3 +293,13 @@ test('line spacing selected in the editor overrides a source paragraph baseline 
   const { xml } = await exported(doc);
   assert.match(xml, /w:line="360" w:lineRule="auto"/);
 });
+
+test('a doctor stamp image is embedded between physician and date paragraphs', async () => {
+  const stamp='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW+0AAAAASUVORK5CYII=';
+  const doc={type:'doc',content:[p('Врач-рентгенолог: Иванов Иван Иванович'),{type:'image',attrs:{src:stamp,alt:'Подпись и печать врача',width:100,height:40}},p('Дата: 04.11.2026')]};
+  const {zip,xml}=await exported(doc);
+  assert.ok(Object.keys(zip).some(name => /^word\/media\/.*\.png$/.test(name)));
+  assert.match(xml,/w:drawing/);
+  assert.ok(xml.indexOf('Врач-рентгенолог')<xml.indexOf('w:drawing'));
+  assert.ok(xml.indexOf('w:drawing')<xml.indexOf('Дата:'));
+});

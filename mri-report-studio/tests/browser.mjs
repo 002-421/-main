@@ -28,7 +28,7 @@ async function saveWord(name){
  const filePath=path.join(output,name);await rm(filePath,{force:true});
  await application.evaluate(({session},dest)=>session.defaultSession.once('will-download',(_event,item)=>item.setSavePath(dest)),filePath);
  await page.locator('#save-docx').click();
- assert.ok(await page.locator('.export-preview-paper').count(),'preview opens before Word export');
+ assert.ok(await page.locator('.paged-preview-frame iframe, .preview-page').count(),'paginated preview opens before Word export');
  await page.locator('#preview-save-word').click();
  for(let i=0;i<200;i++){
   try{if((await stat(filePath)).size>0){const bytes=await readFile(filePath);const imported=await importOwnDocx(bytes);if(imported)return {filePath,bytes,imported};}}catch{}

@@ -47,3 +47,23 @@ html[data-theme="dark"] .notice{background:#203832;border-color:#35584e;color:#d
 html[data-theme="dark"] .dialog-overlay{background:#0009}
 .report-content img{display:block;max-width:100%;height:auto;margin:8px auto}
 .calculator{width:min(340px,75vw);margin:0 auto}.calculator-expression{display:block;min-height:22px;text-align:right;color:#7d909b;font-size:12px;padding:0 8px}.calculator-display{display:block;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;background:#f3f7f8;border:1px solid var(--border);border-radius:8px;padding:15px 13px;margin:4px 0 12px;font-size:30px;font-variant-numeric:tabular-nums;color:#20364b}.calculator-display.error{color:#bc3f4c;font-size:22px}.calculator-keys{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.calculator-key{min-height:48px;border:1px solid var(--border);border-radius:7px;background:#fff;font-size:17px;font-weight:600}.calculator-key:hover{background:#f1f7f8;border-color:#a3c8ca}.calculator-key.accent{background:#e9f7f4;color:#147d80}.calculator-key.utility{background:#f3f6f7;color:#617b87}.calculator-key[data-calc="digit"][data-value="0"]{grid-column:span 2}.calculator-help{margin:12px 2px 0;font-size:10px;color:#82949d}.calculator-keys button:focus-visible{outline:3px solid #8cdad5;outline-offset:1px}html[data-theme="dark"] .calculator-display{background:#17232e;border-color:#394958;color:#e4eaf2}html[data-theme="dark"] .calculator-key{background:#202d39;border-color:#3d4b59;color:#e4eaf2}html[data-theme="dark"] .calculator-key.accent{background:#23433f;color:#a8e0d4}html[data-theme="dark"] .calculator-key.utility{background:#293642;color:#b5c1ca}html[data-theme="dark"] .calculator-help,html[data-theme="dark"] .calculator-expression{color:#a3b1bf}
+
+/* Modality selection and explicit new-report tab control. */
+#modality-select{width:100%;font-size:13px;background:#f5f9fa;padding:12px 9px;margin-bottom:12px}
+.report-tab-add{flex:0 0 40px;min-height:34px;border:1px solid #dce5eb;border-radius:5px 5px 0 0;background:#fff;color:#3f8790;font-size:23px;line-height:1}
+.report-tab-add:hover{background:#e9f7f4;border-color:#a4d7cf}
+html[data-theme="dark"] .report-tab-add{background:#202c39;border-color:#34414f;color:#9de1d8}
+.wide-preview .dialog-body:has(.paged-preview-frame){padding:0 0 12px;background:#e8edf1}
+.paged-preview-frame{height:min(72dvh,850px);min-height:400px;background:#48515b}
+.paged-preview-frame iframe{width:100%;height:100%;border:0}
+.preview-note{padding:10px 20px 0!important;margin:0!important;font-size:11px!important}
+#stamp-preview{display:flex;align-items:center;justify-content:flex-start;min-height:58px;margin:8px 0 12px;padding:6px;border:1px dashed var(--border);border-radius:6px;color:#8499a4;font-size:11px}
+#stamp-preview img{max-width:140px;max-height:55px;object-fit:contain}
+.doctor-stamp-print{text-align:center;break-inside:avoid;page-break-inside:avoid;margin:2pt 0!important;min-height:0!important}
+.doctor-stamp-print img{width:auto!important;height:auto!important;max-width:140px!important;max-height:55px!important;display:inline-block!important;object-fit:contain;vertical-align:middle}
+.paginated-browser-preview{height:min(72dvh,850px);overflow:auto;padding:20px;background:#48515b}
+.preview-page{position:relative;width:210mm;margin:0 auto 18px}
+.preview-page-number{position:absolute;top:-17px;right:0;color:#dce4e8;font-size:10px}
+.preview-page .export-preview-paper{margin:0}
+.preview-measure{position:fixed!important;left:-10000px!important;top:0!important;visibility:hidden!important;display:block!important;width:210mm!important;min-height:0!important}
+.preview-measure .report-content{padding:0!important;min-height:0!important;width:174mm!important;font-size:10pt!important;line-height:1.05!important}

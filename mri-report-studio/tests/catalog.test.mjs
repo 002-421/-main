@@ -8,20 +8,42 @@ import { highlightDeletionNotes } from '../src/table-layout.ts';
 
 function walk(node, callback) { callback(node); node.content?.forEach(child => walk(child, callback)); }
 function plain(node) { return (node.text ?? '') + (node.content ?? []).map(plain).join(''); }
+const mriTemplates = reportTemplates.filter(template => !template.id.startsWith('ct-'));
+const mriAreas = areas.filter(area => !area.id.startsWith('ct-'));
+
 function visible(node) { return node.type === 'reportField' ? `⟦${node.attrs.hint}⟧` : (node.text ?? '') + (node.content ?? []).map(visible).join(''); }
 
 test('catalog contains the six archive zones and all imported protocols', () => {
-  assert.deepEqual(areas.map(a => a.title), [
+  assert.deepEqual(mriAreas.map(a => a.title), [
     'Брюшная полость и забрюшинное пространство', 'Голова', 'Малый таз', 'Остальные', 'Позвоночник', 'Суставы',
   ]);
-  assert.equal(reportTemplates.length, 55);
-  for (const area of areas) assert.ok(reportTemplates.some(t => t.areaId === area.id));
+  assert.equal(mriTemplates.length, 55);
+  for (const area of mriAreas) assert.ok(reportTemplates.some(t => t.areaId === area.id));
   assert.equal(reportBlocks.length, 13);
   assert.equal(makeTemplateDocument().attrs.templateId, DEFAULT_TEMPLATE_ID);
 });
 
+test('CT archive templates use the MRI-style editable patient, study and physician header', () => {
+  const ctTemplates = reportTemplates.filter(template => template.id.startsWith('ct-'));
+  assert.equal(ctTemplates.length, 58);
+  assert.equal(mriAreas.length, 6);
+  const ctAreas = areas.filter(area => area.id.startsWith('ct-'));
+  assert.equal(ctAreas.length, 8);
+  for (const template of ctTemplates) {
+    const doc = makeTemplateDocument(template.id);
+    validateTemplate(doc);
+    const text = plain(doc);
+    assert.match(text, /Протокол КТ-исследования №/);
+    assert.match(text, /Ф\.И\.О\. пациента:/);
+    assert.match(text, /Дата рождения:/);
+    assert.match(text, /Вид исследования:/);
+    assert.match(text, /Врач-рентгенолог:/);
+    assert.doesNotMatch(text, /Халиуллина Анастасия Игоревна|Протокол исследования № 2/);
+  }
+});
+
 test('source protocols preserve wording and have editable unique fields', () => {
-  for (const template of reportTemplates) {
+  for (const template of mriTemplates) {
     const doc = makeTemplateDocument(template.id);
     validateTemplate(doc);
     const fields = collectInlineFields(prepareInlineDocument(doc));
@@ -36,7 +58,7 @@ test('source protocols preserve wording and have editable unique fields', () => 
 });
 
 test('all protocol templates separate the closing block and fill its date automatically', () => {
-  for (const template of reportTemplates) {
+  for (const template of mriTemplates) {
     const doc = initializeReportFooter(prepareInlineDocument(makeTemplateDocument(template.id)), '03.11.2026');
     const physician = doc.content.findIndex(node => node.type === 'paragraph' && plain(node).includes('Врач:') && node.content?.some(child => child.marks?.some(mark => mark.type === 'templateField' && mark.attrs?.id.endsWith('.reportdate'))));
     assert.ok(physician >= 0, template.title);
@@ -50,7 +72,7 @@ test('all protocol templates separate the closing block and fill its date automa
 });
 
 test('tables in every template use compact widths, cell text and line breaks', () => {
-  for (const template of reportTemplates) {
+  for (const template of mriTemplates) {
     const doc = makeTemplateDocument(template.id);
     walk(doc, node => {
       if (node.type !== 'table') return;
@@ -71,7 +93,7 @@ test('tables in every template use compact widths, cell text and line breaks', (
 });
 
 test('templates default to Arial 12 and separate conclusion and recommendations', () => {
-  for (const template of reportTemplates) {
+  for (const template of mriTemplates) {
     const doc = makeTemplateDocument(template.id);
     assert.equal(doc.attrs.fontFamily, 'Arial', template.title);
     assert.equal(doc.attrs.fontSizePt, 12, template.title);
@@ -103,7 +125,7 @@ test('templates default to Arial 12 and separate conclusion and recommendations'
 
 test('removal notes are italic, 10 pt and highlighted yellow', () => {
   const deletionNotes = [];
-  for (const template of reportTemplates) walk(makeTemplateDocument(template.id), node => {
+  for (const template of mriTemplates) walk(makeTemplateDocument(template.id), node => {
     if (node.type !== 'paragraph') return;
     const text = plain(node).trim();
     if (/(?:нужно\s+)?удалять\s*!?/i.test(text) || /^По структуре, выделяют 4 типа молочных жел[её]з \(по Wolfe\)/i.test(text) || /^Тип\s*[1-4]\s*:/i.test(text)) deletionNotes.push({ template: template.title, node, text });
@@ -124,7 +146,7 @@ test('removal notes are italic, 10 pt and highlighted yellow', () => {
 
 test('all non-footer notes after the physician line are marked for deletion', () => {
   let styledParagraphs = 0;
-  for (const template of reportTemplates) {
+  for (const template of mriTemplates) {
     const doc = makeTemplateDocument(template.id);
     const physician = doc.content.findIndex(node => node.type === 'paragraph' && plain(node).includes('Врач:')
       && node.content?.some(child => child.marks?.some(mark => mark.type === 'templateField' && mark.attrs?.id.endsWith('.reportdate'))));
@@ -181,7 +203,7 @@ test('every source template highlights patient dimensions but leaves reference r
     /Омнискан\s+в\s+дозе\s+\d+(?:[,.]\d+)?\s*мл\s+на\s+кг\s+массы\s+тела/gi,
   ];
   let dimensions = 0;
-  for (const template of reportTemplates) {
+  for (const template of mriTemplates) {
     const visit = node => {
       if (node.type === 'paragraph' && node.content) {
         const pieces = []; let offset = 0;
@@ -279,7 +301,7 @@ test('clinical variants that require a radiologist choice are highlighted withou
 });
 
 test('numeric dimensions and indices use Russian decimal commas while dates keep dots', () => {
-  const text = reportTemplates.map(t => visible(t.doc)).join('\n');
+  const text = mriTemplates.map(t => visible(t.doc)).join('\n');
   assert.match(text, /22,6-26,0/);
   assert.match(text, /28,2-29,4/);
   assert.match(text, /1,5 Тесла/);
@@ -287,9 +309,9 @@ test('numeric dimensions and indices use Russian decimal commas while dates keep
   assert.doesNotMatch(text, /22\.6-26\.0|28\.2-29\.4|1\.5 Тесла/);
   assert.match(text, /размерами - 0,0 см/);
   const yellowZeros=[];
-  for(const template of reportTemplates)walk(template.doc,node=>{if(node.type==='text'&&node.text==='0,0'&&node.marks?.some(mark=>mark.type==='highlight'&&mark.attrs?.color==='#ffff00'))yellowZeros.push(node);});
+  for(const template of mriTemplates)walk(template.doc,node=>{if(node.type==='text'&&node.text==='0,0'&&node.marks?.some(mark=>mark.type==='highlight'&&mark.attrs?.color==='#ffff00'))yellowZeros.push(node);});
   assert.ok(yellowZeros.length>0);
-  for(const template of reportTemplates)walk(template.doc,node=>{
+  for(const template of mriTemplates)walk(template.doc,node=>{
     if(node.type!=='paragraph')return;
     const paragraph=visible(node);
     for(const match of paragraph.matchAll(/\bсм(?:²|2)?\b/gi)) assert.match(paragraph.slice(0,match.index),/\d(?:,\d+)?\s*$/,`${template.title}: missing centimetre value in ${paragraph}`);
