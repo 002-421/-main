@@ -5,11 +5,14 @@ const https = require('node:https');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { installUpdateArchive, launchUpdatedApp } = require('./update-install.cjs');
+const { summarizeFrame } = require('./startup-diagnostics.cjs');
 const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json';
 
 // Some Windows display drivers show a blank Electron surface despite the page
 // loading successfully. This text editor is small enough to render in software.
 app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-gpu-compositing');
+app.commandLine.appendSwitch('disable-features', 'DirectComposition');
 
 // Keep the existing profile path so the rename preserves drafts and settings.
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
@@ -179,12 +182,21 @@ async function getUpdateManifest() {
 
 app.whenReady().then(() => {
   startupLogFile = path.join(app.getPath('userData'), 'logs', `startup-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
-  void fs.mkdir(path.dirname(startupLogFile), { recursive: true }).then(() => logStartup({ event: 'app-start', version: app.getVersion(), platform: process.platform, hardwareAcceleration: false, executable: process.execPath, resources: process.resourcesPath }));
+  void fs.mkdir(path.dirname(startupLogFile), { recursive: true }).then(() => logStartup({ event: 'app-start', version: app.getVersion(), platform: process.platform, hardwareAcceleration: false, gpuCompositing: false, directComposition: false, executable: process.execPath, resources: process.resourcesPath }));
   ipcMain.on('app:ready', (event, details) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) return;
     rendererReady = true;
     clearTimeout(startupWatchdog);
     void logStartup({ event: 'renderer-ready', details });
+    setTimeout(async () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      try {
+        const frame = await mainWindow.webContents.capturePage();
+        await logStartup({ event: 'startup-frame', ...summarizeFrame(frame) });
+      } catch (error) {
+        await logStartup({ event: 'startup-frame-error', message: error.message });
+      }
+    }, 800);
   });
   // All application resources are bundled. Clinical data is never sent to a server.
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) => callback({ cancel: true }));

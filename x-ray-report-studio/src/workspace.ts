@@ -23,7 +23,7 @@ import italicFont from './assets/fonts/DejaVuSans-Oblique.ttf?url';
 import boldItalicFont from './assets/fonts/DejaVuSans-BoldOblique.ttf?url';
 
 declare global { interface Window { desktop?: {
-  reportReady:(details:{appRoot:boolean;templateCount:number})=>void;
+  reportReady:(details:{appRoot:boolean;templateCount:number;viewport:{width:number;height:number};shell:{width:number;height:number;display:string;visibility:string;opacity:string};bodyColor:string;textLength:number})=>void;
   exportPDF:(name:string)=>Promise<{canceled:boolean;path?:string}>;
   previewPDF:()=>Promise<string>;
   checkForUpdates:()=>Promise<{version:string;currentVersion:string;available:boolean}>;
@@ -321,4 +321,4 @@ window.addEventListener('beforeunload',()=>{if(!templateMode)saveLocal();});
 ($('#modality-select') as HTMLSelectElement).value=modalityForTemplate();renderTemplates();renderBlocks();renderCounts();renderReportTabs();
 $('#proof-toggle').classList.toggle('active',settings.liveProof);$('#proof-toggle').setAttribute('aria-pressed',String(settings.liveProof));
 if(recoveryError)toast('Предыдущий черновик не удалось восстановить. Можно открыть сохранённый Word.',true);checkAutomaticUpdateIfDue();window.setInterval(checkAutomaticUpdateIfDue,60*60*1000);
-window.desktop?.reportReady({appRoot:Boolean(document.querySelector('#app .shell')),templateCount:reportTemplates.length});
+const readyShell=document.querySelector<HTMLElement>('#app .shell');const readyStyle=readyShell?getComputedStyle(readyShell):null;const readyBounds=readyShell?.getBoundingClientRect();window.desktop?.reportReady({appRoot:Boolean(readyShell),templateCount:reportTemplates.length,viewport:{width:innerWidth,height:innerHeight},shell:{width:Math.round(readyBounds?.width??0),height:Math.round(readyBounds?.height??0),display:readyStyle?.display??'missing',visibility:readyStyle?.visibility??'missing',opacity:readyStyle?.opacity??'missing'},bodyColor:getComputedStyle(document.body).backgroundColor,textLength:document.body.innerText.length});

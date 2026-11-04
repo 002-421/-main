@@ -83,7 +83,7 @@ def main():
     shutil.copy2(BUILD, setup / 'app/dist/index.html')
     shutil.copy2(ROOT / 'public/x-ray-report-studio.ico', setup / 'app/dist/x-ray-report-studio.ico')
     shutil.copy2(ROOT / 'node_modules/rcedit/bin/rcedit-x64.exe', setup / 'app/dist/rcedit-x64.exe')
-    for filename in ('main.cjs', 'preload.cjs', 'update-install.cjs'):
+    for filename in ('main.cjs', 'preload.cjs', 'update-install.cjs', 'startup-diagnostics.cjs'):
         shutil.copy2(ROOT / 'electron' / filename, setup / 'app/electron' / filename)
     (setup / 'app/package.json').write_text(json.dumps({
         'name': metadata['name'], 'productName': 'X-ray Report Studio',
