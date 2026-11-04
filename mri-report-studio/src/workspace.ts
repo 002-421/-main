@@ -163,12 +163,13 @@ function doctorStampForLine(line:string){const normalized=line.toLocaleLowerCase
 function decorateExportFooter(root:HTMLElement){
  const doctor=[...root.querySelectorAll<HTMLElement>('p')].find(p=>/врач(?:-рентгенолог)?\s*:/i.test(p.textContent??''));if(!doctor)return;
  let date:HTMLElement|null=null;
- if(/\bдата\s*:/i.test(doctor.textContent??'')){
+ if(/дата\s*:/i.test(doctor.textContent??'')){
   const walker=document.createTreeWalker(doctor,NodeFilter.SHOW_TEXT);let dateText:Text|null=null,offset=0;
-  while(walker.nextNode()){const current=walker.currentNode as Text;const found=current.data.search(/\bдата\s*:/i);if(found>=0){dateText=current;offset=found;break;}}
+  while(walker.nextNode()){const current=walker.currentNode as Text;const found=current.data.search(/дата\s*:/i);if(found>=0){dateText=current;offset=found;break;}}
   if(dateText){const range=document.createRange();range.setStart(dateText,offset);range.setEnd(doctor,doctor.childNodes.length);const tail=range.extractContents();date=doctor.cloneNode(false) as HTMLElement;date.append(tail);doctor.after(date);}
- }else{const next=doctor.nextElementSibling as HTMLElement|null;if(next&&next.tagName==='P'&&/\bдата\s*:/i.test(next.textContent??''))date=next;}
+ }else{const next=doctor.nextElementSibling as HTMLElement|null;if(next&&next.tagName==='P'&&/дата\s*:/i.test(next.textContent??''))date=next;}
  const parent=doctor.parentElement;if(!parent)return;const row=document.createElement('div');row.className='doctor-signature-row';parent.insertBefore(row,doctor);row.append(doctor);doctor.classList.add('doctor-signature-doctor');if(date){row.append(date);date.classList.add('doctor-signature-date');}
+ if(date){const walker=document.createTreeWalker(date,NodeFilter.SHOW_TEXT);while(walker.nextNode()){const node=walker.currentNode as Text;node.data=node.data.replace(/дата\s*:/i,'дата:');}}
  const stamp=doctorStampForLine(doctor.textContent??'');if(stamp){const image=document.createElement('img');image.className='doctor-stamp-image';image.src=stamp.src;image.alt='Подпись и печать врача';image.style.setProperty('--stamp-height',`${stamp.height}px`);image.width=Math.max(1,Math.round(stamp.height*stamp.size.width/Math.max(1,stamp.size.height)));image.height=stamp.height;image.contentEditable='false';row.append(image);}root.contentEditable='false';
 }
 function mountExportEditor():()=>void {const original=$('#editor .ProseMirror');const previousDisplay=original.style.display;original.style.display='none';const host=document.createElement('div');host.className='export-only-editor';$('#editor').append(host);const temporary=makeEditor(host,templateMode?promoteInlineTemplate(json()):json(),()=>{});const root=host.querySelector<HTMLElement>('.ProseMirror')!;if(!templateMode)decorateExportFooter(root);const spacer=document.createElement('p');spacer.className='letterhead-spacer';spacer.contentEditable='false';spacer.setAttribute('aria-hidden','true');root.prepend(spacer);return()=>{temporary.destroy();host.remove();original.style.display=previousDisplay;};}

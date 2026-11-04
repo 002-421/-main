@@ -257,10 +257,12 @@ test('CT physician and date print on one line at opposite sides like MRI reports
   const template = reportTemplates.find(item => item.id.startsWith('ct-'));
   const doc = initializeReportFooter(makeTemplateDocument(template.id), '04.11.2026');
   const { xml } = await exported(doc, { templateId: template.id });
-  const row = xml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/g)?.find(value => value.includes('Врач-рентгенолог:') && value.includes('Дата:'));
+  const row = xml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/g)?.find(value => value.includes('Врач-рентгенолог:') && value.includes('дата:'));
   assert.ok(row, template.title);
   assert.match(row, /<w:gridCol w:w="[0-9]+"\/><w:gridCol w:w="[0-9]+"\/>/);
   assert.match(row, /<w:jc w:val="right"\/>/);
+  assert.doesNotMatch(row, /Дата:/);
+  assert.match(row, /дата:/);
   assert.match(row, /04\.11\.2026/);
 });
 

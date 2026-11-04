@@ -289,11 +289,17 @@ function blocks(nodes: RichNode[], context: Context): (Paragraph | Table)[] {
   const signatureTable = (left: RichNode, right: RichNode): Table => {
     const width = Math.max(300, context.width ?? BODY_WIDTH);
     const leftWidth = Math.round(width * 0.67), rightWidth = width - leftWidth;
+    const rightDate = structuredClone(right);
+    const lowercaseDateLabel = (node: RichNode) => {
+      if (node.type === 'text') node.text = (node.text ?? '').replace(/дата\s*:/i, 'дата:');
+      node.content?.forEach(lowercaseDateLabel);
+    };
+    lowercaseDateLabel(rightDate);
     const noBorders = { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideVertical: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } };
     return new Table({
       rows: [new TableRow({ cantSplit: true, children: [
         new TableCell({ width: { size: leftWidth, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [paragraph(left, { ...context, width: leftWidth }, { alignment: AlignmentType.LEFT })] }),
-        new TableCell({ width: { size: rightWidth, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [paragraph({ ...right, attrs: { ...right.attrs, textAlign: 'right' } }, { ...context, width: rightWidth }, { alignment: AlignmentType.RIGHT })] }),
+        new TableCell({ width: { size: rightWidth, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [paragraph({ ...rightDate, attrs: { ...rightDate.attrs, textAlign: 'right' } }, { ...context, width: rightWidth }, { alignment: AlignmentType.RIGHT })] }),
       ] })],
       columnWidths: [leftWidth, rightWidth], width: { size: width, type: WidthType.DXA }, layout: TableLayoutType.FIXED, borders: noBorders,
     });
