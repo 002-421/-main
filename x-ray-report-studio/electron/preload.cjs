@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('desktop', {
   previewPDF: () => ipcRenderer.invoke('report:preview-pdf'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   installUpdate: force => ipcRenderer.invoke('updates:install', force === true),
+  openUpdateLog: () => ipcRenderer.invoke('updates:open-log'),
   onUpdateProgress: callback => {
     ipcRenderer.removeAllListeners('updates:progress');
     ipcRenderer.on('updates:progress', (_event, progress) => callback(progress));

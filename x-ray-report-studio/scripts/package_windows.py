@@ -40,7 +40,7 @@ legacy_destination = RELEASE / 'MRI Alliance'
 if legacy_destination.exists(): shutil.rmtree(legacy_destination)
 for old_package in RELEASE.glob('MRI_Alliance*'):
     old_package.unlink()
-destination = RELEASE / 'MRI Report Studio'
+destination = RELEASE / 'X-ray Report Studio'
 if destination.exists(): shutil.rmtree(destination)
 destination.mkdir()
 with ZipFile(archive) as package:
@@ -48,10 +48,10 @@ with ZipFile(archive) as package:
         if not (destination / name).resolve().is_relative_to(destination.resolve()):
             raise RuntimeError('Invalid archive path')
     package.extractall(destination)
-(destination / 'electron.exe').rename(destination / 'MRI Report Studio.exe')
+(destination / 'electron.exe').rename(destination / 'X-ray Report Studio.exe')
 subprocess.run([
     'node', str(ROOT / 'scripts/set_exe_icon.mjs'),
-    str(destination / 'MRI Report Studio.exe'), str(ROOT / 'public/mri-report-studio.ico'),
+    str(destination / 'X-ray Report Studio.exe'), str(ROOT / 'public/x-ray-report-studio.ico'),
 ], check=True)
 app = destination / 'resources/app'
 (app / 'electron').mkdir(parents=True)
@@ -59,21 +59,21 @@ app = destination / 'resources/app'
 for filename in ['main.cjs', 'preload.cjs', 'update-install.cjs']:
     shutil.copy2(ROOT / 'electron' / filename, app / 'electron' / filename)
 shutil.copy2(ROOT / 'dist/index.html', app / 'dist/index.html')
-shutil.copy2(ROOT / 'public/mri-report-studio.ico', app / 'dist/mri-report-studio.ico')
+shutil.copy2(ROOT / 'public/x-ray-report-studio.ico', app / 'dist/x-ray-report-studio.ico')
 (app / 'package.json').write_text(json.dumps({
-    'name': 'mri-report-studio', 'productName': 'MRI Report Studio',
+    'name': 'x-ray-report-studio', 'productName': 'X-ray Report Studio',
     'version': json.loads((ROOT / 'package.json').read_text())['version'], 'main': 'electron/main.cjs', 'private': True,
 }, indent=2))
 shutil.copy2(ROOT / 'README_RU.txt', destination / 'ПРОЧИТАЙТЕ.txt')
 
 (destination / 'THIRD_PARTY_LICENSES.txt').write_text(collect_licenses(), encoding='utf-8')
-output = RELEASE / 'MRI_Report_Studio_Windows_x64.zip'
+output = RELEASE / 'X-ray_Report_Studio_Windows_x64.zip'
 with ZipFile(output, 'w', ZIP_DEFLATED, compresslevel=6) as package:
     for file in sorted(destination.rglob('*')):
         if file.is_file(): package.write(file, file.relative_to(RELEASE))
 print('Windows package:', output, 'bytes:', output.stat().st_size, flush=True)
 
 # A browser-only edition runs by double-clicking one HTML file; no installation.
-browser = RELEASE / 'MRI_Report_Studio.html'
+browser = RELEASE / 'X-ray_Report_Studio.html'
 shutil.copy2(ROOT / 'dist/index.html', browser)
 print('Browser edition:', browser, flush=True)

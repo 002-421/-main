@@ -77,16 +77,16 @@ def main():
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir()
-    setup = stage / 'MRI Report Studio Setup'
+    setup = stage / 'X-ray Report Studio Setup'
     (setup / 'app/dist').mkdir(parents=True)
     (setup / 'app/electron').mkdir()
     shutil.copy2(BUILD, setup / 'app/dist/index.html')
-    shutil.copy2(ROOT / 'public/mri-report-studio.ico', setup / 'app/dist/mri-report-studio.ico')
+    shutil.copy2(ROOT / 'public/x-ray-report-studio.ico', setup / 'app/dist/x-ray-report-studio.ico')
     shutil.copy2(ROOT / 'node_modules/rcedit/bin/rcedit-x64.exe', setup / 'app/dist/rcedit-x64.exe')
     for filename in ('main.cjs', 'preload.cjs', 'update-install.cjs'):
         shutil.copy2(ROOT / 'electron' / filename, setup / 'app/electron' / filename)
     (setup / 'app/package.json').write_text(json.dumps({
-        'name': metadata['name'], 'productName': 'MRI Report Studio',
+        'name': metadata['name'], 'productName': 'X-ray Report Studio',
         'version': metadata['version'], 'main': 'electron/main.cjs', 'private': True,
     }, indent=2) + '\n', encoding='utf-8')
     shutil.copy2(ROOT / 'README_RU.txt', setup / 'README_RU.txt')
@@ -116,7 +116,7 @@ def main():
         '1. Распакуйте весь архив.\n'
         '2. Запустите Install.cmd двойным щелчком.\n'
         '3. Дождитесь загрузки официальной среды запуска (около 150 МБ).\n'
-        '4. Приложение откроется; его папка появится на рабочем столе в MRI Report Studio.\n\n'
+        '4. Приложение откроется; его папка появится на рабочем столе в X-ray Report Studio.\n\n'
         'Интернет нужен для установки; готовое приложение работает без Интернета. '
         'Права администратора не нужны. Установщик не меняет ExecutionPolicy, настройки защиты, '
         'реестр или системные папки. SHA256 загруженного Electron проверяется; '
@@ -127,34 +127,35 @@ def main():
         encoding='utf-8-sig')
     notices = collect_licenses()
     (setup / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
-    setup_zip = DOWNLOADS / 'MRI_Report_Studio_Windows_Setup.zip'
+    setup_zip = DOWNLOADS / 'X-ray_Report_Studio_Windows_Setup.zip'
     write_zip(setup, setup_zip)
     manifest = {
         'version': metadata['version'],
-        'url': 'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/mri-report-studio/downloads/MRI_Report_Studio_Windows_Setup.zip',
+        'url': 'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip',
         'sha256': hashlib.sha256(setup_zip.read_bytes()).hexdigest(),
     }
     (DOWNLOADS / 'latest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
 
-    browser = stage / 'MRI Report Studio Browser'
+    browser = stage / 'X-ray Report Studio Browser'
     browser.mkdir()
     shutil.copy2(BUILD, browser / 'index.html')
     shutil.copy2(ROOT / 'README_RU.txt', browser / 'README_RU.txt')
     (browser / 'START_HERE_RU.txt').write_text(
-        f'MRI REPORT STUDIO {metadata["version"]} — БРАУЗЕРНАЯ ВЕРСИЯ\n\n'
+        f'X-RAY REPORT STUDIO {metadata["version"]} — БРАУЗЕРНАЯ ВЕРСИЯ\n\n'
         'Распакуйте архив целиком. Откройте index.html двойным щелчком в Chrome или Edge.\n'
         'Интернет и установка не нужны. Описания сохраняются кнопкой DOCX. '
         'Для PDF выберите «Сохранить как PDF» в окне печати.\n'
         'Локальный черновик и настройки связаны с этим браузером и адресом файла. '
         'Храните нужные описания отдельными файлами DOCX.\n', encoding='utf-8-sig')
     (browser / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
-    write_zip(browser, DOWNLOADS / 'MRI_Report_Studio_Browser.zip')
-    shutil.copy2(BUILD, DOWNLOADS / 'MRI_Report_Studio.html')
+    write_zip(browser, DOWNLOADS / 'X-ray_Report_Studio_Browser.zip')
+    shutil.copy2(BUILD, DOWNLOADS / 'X-ray_Report_Studio.html')
     (DOWNLOADS / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
     old_preview = DOWNLOADS / 'MRI_Alliance_Preview.png'
-    if old_preview.exists(): old_preview.rename(DOWNLOADS / 'MRI_Report_Studio_Preview.png')
-    for old_name in DOWNLOADS.glob('MRI_Alliance*'):
-        old_name.unlink()
+    if old_preview.exists(): old_preview.rename(DOWNLOADS / 'X-ray_Report_Studio_Preview.png')
+    for pattern in ('MRI_Alliance*', 'MRI_Report_Studio*'):
+        for old_name in DOWNLOADS.glob(pattern):
+            old_name.unlink()
     print('Standalone HTML and license notices updated.', flush=True)
 
 

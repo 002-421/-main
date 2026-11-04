@@ -5,11 +5,11 @@ const https = require('node:https');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { installUpdateArchive } = require('./update-install.cjs');
-const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/mri-report-studio/downloads/latest.json';
+const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json';
 
 // Keep the existing profile path so the rename preserves drafts and settings.
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
-app.setName('MRI Report Studio');
+app.setName('X-ray Report Studio');
 let mainWindow;
 const sharedDictionaryDir = process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR
   ? path.resolve(process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR)
@@ -18,6 +18,7 @@ const sharedDictionaryFile = path.join(sharedDictionaryDir, 'dictionary.json');
 const personalDictionaryFile = path.join(app.getPath('userData'), 'dictionary.json');
 let dictionaryQueue = Promise.resolve();
 let updateInstalling = false;
+let latestUpdateLogPath = '';
 
 function validDictionaryWords(value) {
   return [...new Set((Array.isArray(value) ? value : []).filter(word => typeof word === 'string')
@@ -59,6 +60,36 @@ async function updateDictionary(words) {
 
 function requireMain(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Недоступный источник запроса.');
+}
+
+async function createUpdateLogger() {
+  const directory = path.join(app.getPath('userData'), 'logs');
+  await fs.mkdir(directory, { recursive: true });
+  const filename = path.join(directory, `update-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
+  latestUpdateLogPath = filename;
+  let queue = Promise.resolve();
+  const log = entry => {
+    queue = queue.then(() => fs.appendFile(filename, `${JSON.stringify({ time: new Date().toISOString(), ...entry })}\n`, 'utf8')).catch(() => {});
+    return queue;
+  };
+  await log({ event: 'log-start', applicationVersion: app.getVersion(), platform: process.platform });
+  return { filename, log };
+}
+
+async function openLatestUpdateLog() {
+  const directory = path.join(app.getPath('userData'), 'logs');
+  let filename = latestUpdateLogPath;
+  if (!filename || !(await fs.stat(filename).catch(() => null))) {
+    const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
+    const files = await Promise.all(entries.filter(entry => entry.isFile() && /^update-.*\.log$/.test(entry.name)).map(async entry => {
+      const candidate = path.join(directory, entry.name);
+      return { candidate, mtime: (await fs.stat(candidate)).mtimeMs };
+    }));
+    filename = files.sort((left, right) => right.mtime - left.mtime)[0]?.candidate ?? '';
+  }
+  if (!filename) throw new Error('Журнал обновлений ещё не создан.');
+  const error = await shell.openPath(filename);
+  if (error) throw new Error(`Не удалось открыть журнал: ${error}`);
 }
 
 async function renderPdf() {
@@ -105,7 +136,7 @@ async function getUpdateManifest() {
   if (!manifest || typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.version)
       || typeof manifest.url !== 'string' || typeof manifest.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(manifest.sha256)) throw new Error('Файл обновлений содержит некорректные данные.');
   const artifact=new URL(manifest.url);
-  if (artifact.protocol!=='https:' || !['raw.githubusercontent.com','github.com'].includes(artifact.hostname) || !artifact.pathname.endsWith('/downloads/MRI_Report_Studio_Windows_Setup.zip')) throw new Error('Недопустимая ссылка на установочный файл.');
+  if (artifact.protocol!=='https:' || !['raw.githubusercontent.com','github.com'].includes(artifact.hostname) || !artifact.pathname.endsWith('/downloads/X-ray_Report_Studio_Windows_Setup.zip')) throw new Error('Недопустимая ссылка на установочный файл.');
   return { version: manifest.version, currentVersion: app.getVersion(), url: manifest.url, sha256: manifest.sha256.toLowerCase(), available: compareVersions(manifest.version, app.getVersion()) > 0 };
 }
 
@@ -122,8 +153,8 @@ app.whenReady().then(() => {
 
   mainWindow = new BrowserWindow({
     width: 1500, height: 1000, minWidth: 900, minHeight: 650,
-    title: 'MRI Report Studio', backgroundColor: '#eef1f5',
-    icon: path.join(__dirname, '..', 'dist', 'mri-report-studio.ico'),
+    title: 'X-ray Report Studio', backgroundColor: '#eef1f5',
+    icon: path.join(__dirname, '..', 'dist', 'x-ray-report-studio.ico'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -158,6 +189,10 @@ app.whenReady().then(() => {
     requireMain(event);
     return getUpdateManifest();
   });
+  ipcMain.handle('updates:open-log', async event => {
+    requireMain(event);
+    return openLatestUpdateLog();
+  });
   ipcMain.handle('updates:install', async (event, force = false) => {
     requireMain(event);
     if (updateInstalling) throw new Error('Установка обновления уже запущена.');
@@ -165,31 +200,54 @@ app.whenReady().then(() => {
     if (typeof force !== 'boolean') throw new Error('Некорректный режим установки обновления.');
     const update=await getUpdateManifest();
     if (!update.available && !force) return { available:false };
+    const { filename: logFile, log } = await createUpdateLogger();
+    await log({ event: 'update-requested', currentVersion: app.getVersion(), targetVersion: update.version, archiveUrl: update.url });
     const sendProgress = progress => { if (!event.sender.isDestroyed()) event.sender.send('updates:progress', progress); };
-    sendProgress({stage:'downloading',loaded:0,total:0,percent:0});
-    const archive=await downloadBuffer(update.url, 250_000_000, 0, progress => sendProgress({stage:'downloading',...progress}));
-    sendProgress({stage:'verifying',loaded:archive.length,total:archive.length,percent:100});
-    const checksum=crypto.createHash('sha256').update(archive).digest('hex');
-    if(checksum!==update.sha256) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
-    const file=path.join(os.tmpdir(),`MRI_Report_Studio_${update.version}_${crypto.randomUUID()}.zip`);
-    await fs.writeFile(file,archive,{flag:'wx'});
-    sendProgress({stage:'installing',loaded:archive.length,total:archive.length,percent:100});
+    let file = '';
+    let archiveBytes = 0;
     try {
+      sendProgress({stage:'downloading',loaded:0,total:0,percent:0});
+      await log({ event: 'download-start', url: update.url });
+      let lastLoggedPercent = -10;
+      const archive=await downloadBuffer(update.url, 250_000_000, 0, progress => {
+        sendProgress({stage:'downloading',...progress});
+        if (progress.percent !== null && progress.percent - lastLoggedPercent >= 10) {
+          lastLoggedPercent = progress.percent;
+          void log({ event: 'download-progress', ...progress });
+        }
+      });
+      archiveBytes = archive.length;
+      await log({ event: 'download-complete', bytes: archive.length });
+      sendProgress({stage:'verifying',loaded:archive.length,total:archive.length,percent:100});
+      const checksum=crypto.createHash('sha256').update(archive).digest('hex');
+      await log({ event: 'checksum-check', expected: update.sha256, actual: checksum });
+      if(checksum!==update.sha256) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
+      await log({ event: 'checksum-verified' });
+      file=path.join(os.tmpdir(),`X-ray_Report_Studio_${update.version}_${crypto.randomUUID()}.zip`);
+      await fs.writeFile(file,archive,{flag:'wx'});
+      sendProgress({stage:'installing',loaded:archive.length,total:archive.length,percent:100});
       await installUpdateArchive({
         archive: file,
         currentRoot: path.dirname(process.execPath),
         version: update.version,
+        log,
         writeShortcut: async (target, cwd, icon) => {
-          const shortcut = path.join(app.getPath('desktop'), 'MRI Report Studio.lnk');
-          const options = { target, cwd, icon, description: 'MRI Report Studio' };
+          const shortcut = path.join(app.getPath('desktop'), 'X-ray Report Studio.lnk');
+          const options = { target, cwd, icon, description: 'X-ray Report Studio' };
           const written = shell.writeShortcutLink(shortcut, 'replace', options)
             || shell.writeShortcutLink(shortcut, 'create', options);
           if (!written) throw new Error('Не удалось обновить ярлык приложения на рабочем столе.');
+          await fs.unlink(path.join(app.getPath('desktop'), 'MRI Report Studio.lnk')).catch(() => {});
         },
       });
-    } finally { await fs.unlink(file).catch(() => {}); }
+      await log({ event: 'update-complete', targetVersion: update.version });
+    } catch (error) {
+      await log({ event: 'update-error', message: error.message, stack: error.stack, logFile });
+      sendProgress({stage:'error',loaded:0,total:0,percent:0,message:error.message,logFile});
+      throw new Error(`${error.message} Журнал обновления: ${logFile}`);
+    } finally { if (file) await fs.unlink(file).catch(() => {}); }
     updateInstalling=true;
-    sendProgress({stage:'installed',loaded:archive.length,total:archive.length,percent:100});
+    sendProgress({stage:'installed',loaded:archiveBytes,total:archiveBytes,percent:100});
     setTimeout(()=>app.quit(),300);
     return { available:true, installing:true, version:update.version };
   });

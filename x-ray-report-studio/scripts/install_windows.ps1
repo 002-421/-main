@@ -5,7 +5,7 @@ try {
     if ([string]::IsNullOrWhiteSpace($package)) { $package = $PSScriptRoot }
     $desktop = [Environment]::GetFolderPath('Desktop')
     if ([string]::IsNullOrWhiteSpace($desktop)) { throw 'Desktop folder is unavailable.' }
-    $parent = Join-Path $desktop 'MRI Report Studio'
+    $parent = Join-Path $desktop 'X-ray Report Studio'
     $stem = 'App_' + (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss')
     $destination = Join-Path $parent $stem
     $i = 1
@@ -27,12 +27,12 @@ try {
         Expand-Archive -LiteralPath $archive -DestinationPath $stage
         $appTarget = Join-Path $stage 'resources/app'
         Copy-Item -LiteralPath (Join-Path $package 'app') -Destination $appTarget -Recurse
-        $executable = Join-Path $stage 'MRI Report Studio.exe'
-        Rename-Item -LiteralPath (Join-Path $stage 'electron.exe') -NewName 'MRI Report Studio.exe'
-        $icon = Join-Path $appTarget 'dist\mri-report-studio.ico'
+        $executable = Join-Path $stage 'X-ray Report Studio.exe'
+        Rename-Item -LiteralPath (Join-Path $stage 'electron.exe') -NewName 'X-ray Report Studio.exe'
+        $icon = Join-Path $appTarget 'dist\x-ray-report-studio.ico'
         $resourceEditor = Join-Path $appTarget 'dist\rcedit-x64.exe'
         & $resourceEditor $executable --set-icon $icon
-        if ($LASTEXITCODE -ne 0) { throw 'Could not apply the MRI Report Studio icon to the application.' }
+        if ($LASTEXITCODE -ne 0) { throw 'Could not apply the X-ray Report Studio icon to the application.' }
         Copy-Item -LiteralPath (Join-Path $package 'README_RU.txt') -Destination (Join-Path $stage 'README_RU.txt')
         if (Test-Path -LiteralPath (Join-Path $package 'THIRD_PARTY_LICENSES.txt')) {
             Copy-Item -LiteralPath (Join-Path $package 'THIRD_PARTY_LICENSES.txt') -Destination (Join-Path $stage 'THIRD_PARTY_LICENSES.txt')
@@ -44,12 +44,14 @@ try {
     }
     Write-Host ('Installed: ' + $destination) -ForegroundColor Green
     $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut((Join-Path $desktop 'MRI Report Studio.lnk'))
-    $shortcut.TargetPath = Join-Path $destination 'MRI Report Studio.exe'
+    $shortcut = $shell.CreateShortcut((Join-Path $desktop 'X-ray Report Studio.lnk'))
+    $shortcut.TargetPath = Join-Path $destination 'X-ray Report Studio.exe'
     $shortcut.WorkingDirectory = $destination
-    $shortcut.IconLocation = Join-Path $destination 'resources\app\dist\mri-report-studio.ico'
+    $shortcut.IconLocation = Join-Path $destination 'resources\app\dist\x-ray-report-studio.ico'
     $shortcut.Save()
-    Start-Process -FilePath (Join-Path $destination 'MRI Report Studio.exe')
+    $legacyShortcut = Join-Path $desktop 'MRI Report Studio.lnk'
+    if (Test-Path -LiteralPath $legacyShortcut) { Remove-Item -LiteralPath $legacyShortcut -Force }
+    Start-Process -FilePath (Join-Path $destination 'X-ray Report Studio.exe')
     Start-Process explorer.exe -ArgumentList ('"' + $destination + '"')
 } catch {
     Write-Host ('Installation failed: ' + $_.Exception.Message) -ForegroundColor Red
