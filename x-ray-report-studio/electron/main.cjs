@@ -12,6 +12,11 @@ if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.jo
 app.setName('X-ray Report Studio');
 let mainWindow;
 let rendererUnresponsive = false;
+let rendererReady = false;
+let startupLogFile = '';
+let startupLogQueue = Promise.resolve();
+let startupWatchdog;
+let startupFailureDialogOpen = false;
 const sharedDictionaryDir = process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR
   ? path.resolve(process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR)
   : path.join(process.env.PUBLIC || path.dirname(app.getPath('appData')), 'Documents', 'MRI Report Studio');
@@ -22,6 +27,31 @@ let updateInstalling = false;
 let latestUpdateLogPath = '';
 let updatedExecutableToLaunch = '';
 let updateLogForLaunch = () => Promise.resolve();
+
+function logStartup(event) {
+  if (!startupLogFile) return startupLogQueue;
+  startupLogQueue = startupLogQueue.then(() => fs.appendFile(startupLogFile, `${JSON.stringify({ time: new Date().toISOString(), ...event })}\n`, 'utf8')).catch(() => {});
+  return startupLogQueue;
+}
+
+async function showStartupFailure(message) {
+  if (startupFailureDialogOpen || !mainWindow || mainWindow.isDestroyed()) return;
+  startupFailureDialogOpen = true;
+  await logStartup({ event: 'startup-failure', message, logFile: startupLogFile });
+  try {
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'error', title: 'X-ray Report Studio', message,
+      detail: `Диагностический журнал: ${startupLogFile}`,
+      buttons: ['Закрыть', 'Перезапустить'], defaultId: 1, cancelId: 0,
+    });
+    if (result.response === 1) {
+      rendererReady = false;
+      startupFailureDialogOpen = false;
+      mainWindow.webContents.reload();
+      startupWatchdog = setTimeout(() => { if (!rendererReady) void showStartupFailure('Интерфейс снова не запустился.'); }, 30000);
+    } else { mainWindow.destroy(); app.quit(); }
+  } catch { if (!mainWindow.isDestroyed()) mainWindow.destroy(); app.quit(); }
+}
 
 function validDictionaryWords(value) {
   return [...new Set((Array.isArray(value) ? value : []).filter(word => typeof word === 'string')
@@ -144,6 +174,14 @@ async function getUpdateManifest() {
 }
 
 app.whenReady().then(() => {
+  startupLogFile = path.join(app.getPath('userData'), 'logs', `startup-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
+  void fs.mkdir(path.dirname(startupLogFile), { recursive: true }).then(() => logStartup({ event: 'app-start', version: app.getVersion(), platform: process.platform, executable: process.execPath, resources: process.resourcesPath }));
+  ipcMain.on('app:ready', (event, details) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return;
+    rendererReady = true;
+    clearTimeout(startupWatchdog);
+    void logStartup({ event: 'renderer-ready', details });
+  });
   // All application resources are bundled. Clinical data is never sent to a server.
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) => callback({ cancel: true }));
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
@@ -165,10 +203,27 @@ app.whenReady().then(() => {
       webSecurity: true,
     },
   });
+  startupWatchdog = setTimeout(() => { if (!rendererReady) void showStartupFailure('Интерфейс не запустился за 30 секунд.'); }, 30000);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  mainWindow.webContents.on('did-finish-load', () => { void logStartup({ event: 'page-finished-loading', url: mainWindow.webContents.getURL() }); });
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    void logStartup({ event: 'page-load-failed', errorCode, errorDescription, validatedURL, isMainFrame });
+    if (isMainFrame && errorCode !== -3) void showStartupFailure(`Не удалось загрузить интерфейс приложения (${errorCode}).`);
+  });
+  mainWindow.webContents.on('console-message', (_event, details) => {
+    if (details?.level >= 2) void logStartup({ event: 'renderer-console-error', level: details.level, message: details.message, line: details.lineNumber, source: details.sourceId });
+  });
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    void logStartup({ event: 'renderer-process-gone', details });
+    if (!rendererReady) void showStartupFailure('Процесс интерфейса приложения завершился при запуске.');
+  });
   mainWindow.webContents.on('will-prevent-unload', event => event.preventDefault());
-  mainWindow.webContents.on('unresponsive', () => { rendererUnresponsive = true; });
+  mainWindow.webContents.on('unresponsive', () => {
+    rendererUnresponsive = true;
+    void logStartup({ event: 'renderer-unresponsive', rendererReady });
+    if (!rendererReady) void showStartupFailure('Интерфейс приложения не отвечает при запуске.');
+  });
   mainWindow.webContents.on('responsive', () => { rendererUnresponsive = false; });
   mainWindow.on('close', event => {
     if (rendererUnresponsive) {

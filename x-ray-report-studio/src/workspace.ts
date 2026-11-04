@@ -23,6 +23,7 @@ import italicFont from './assets/fonts/DejaVuSans-Oblique.ttf?url';
 import boldItalicFont from './assets/fonts/DejaVuSans-BoldOblique.ttf?url';
 
 declare global { interface Window { desktop?: {
+  reportReady:(details:{appRoot:boolean;templateCount:number})=>void;
   exportPDF:(name:string)=>Promise<{canceled:boolean;path?:string}>;
   previewPDF:()=>Promise<string>;
   checkForUpdates:()=>Promise<{version:string;currentVersion:string;available:boolean}>;
@@ -320,3 +321,4 @@ window.addEventListener('beforeunload',()=>{if(!templateMode)saveLocal();});
 ($('#modality-select') as HTMLSelectElement).value=modalityForTemplate();renderTemplates();renderBlocks();renderCounts();renderReportTabs();
 $('#proof-toggle').classList.toggle('active',settings.liveProof);$('#proof-toggle').setAttribute('aria-pressed',String(settings.liveProof));
 if(recoveryError)toast('Предыдущий черновик не удалось восстановить. Можно открыть сохранённый Word.',true);checkAutomaticUpdateIfDue();window.setInterval(checkAutomaticUpdateIfDue,60*60*1000);
+window.desktop?.reportReady({appRoot:Boolean(document.querySelector('#app .shell')),templateCount:reportTemplates.length});

@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('desktop', {
+  reportReady: details => ipcRenderer.send('app:ready', details),
   exportPDF: filename => ipcRenderer.invoke('report:export-pdf', filename),
   previewPDF: () => ipcRenderer.invoke('report:preview-pdf'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
