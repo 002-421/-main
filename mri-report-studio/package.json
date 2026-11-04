@@ -1,6 +1,6 @@
 {
   "name": "mri-report-studio",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "private": true,
   "description": "MRI Report Studio: локальный редактор протоколов МРТ с шаблонами, проверкой русского текста, DOCX и PDF",
   "main": "electron/main.cjs",

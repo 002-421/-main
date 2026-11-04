@@ -2,6 +2,7 @@ import {
   AlignmentType, BorderStyle, Document, ExternalHyperlink, Footer, HeadingLevel,
   LevelFormat, LineRuleType, Packer, Paragraph, ImageRun, ShadingType, Table, TableCell,
   TableLayoutType, TableRow, Tab, TextRun, UnderlineType, WidthType, PageNumber,
+  HorizontalPositionAlign, HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom, TextWrappingType,
   type IParagraphOptions, type IRunOptions, type NumberingDefinition, type ParagraphChild,
 } from 'docx';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
@@ -103,8 +104,9 @@ function inline(nodes: RichNode[] = [], inherited: IRunOptions = {}): ParagraphC
     if (node.type === 'hardBreak') return [new TextRun({ ...inherited, break: 1 })];
     if (node.type === 'image') {
       const source=String(node.attrs?.src??'');
-      if(!/^data:image\/png;base64,/.test(source)) return [];
-      return [new ImageRun({type:'png',data:source,transformation:{width:Number(node.attrs?.width)||140,height:Number(node.attrs?.height)||55},altText:{title:'Подпись и печать врача',description:'Подпись и печать врача',name:'Подпись и печать врача'}})];
+      const jpeg=/^data:image\/(?:jpeg|jpg);base64,/i.test(source);
+      if(!jpeg&&!/^data:image\/png;base64,/.test(source)) return [];
+      return [new ImageRun({type:jpeg?'jpg':'png',data:source,transformation:{width:Number(node.attrs?.width)||360,height:Number(node.attrs?.height)||130},...(node.attrs?.floating?{floating:{horizontalPosition:{relative:HorizontalPositionRelativeFrom.MARGIN,align:HorizontalPositionAlign.RIGHT},verticalPosition:{relative:VerticalPositionRelativeFrom.PARAGRAPH,offset:0},allowOverlap:true,behindDocument:true,wrap:{type:TextWrappingType.NONE}}}:{}),altText:{title:'Подпись и печать врача',description:'Подпись и печать врача',name:'Подпись и печать врача'}})];
     }
     if (node.type === 'reportField') {
       const value = String(node.attrs?.value ?? '');

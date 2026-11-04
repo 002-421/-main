@@ -1,6 +1,7 @@
 import type { RichNode } from './model';
 
 const STAMP_ALT = 'Подпись и печать врача';
+const STAMP_WIDTH = 360;
 const text = (node: RichNode): string => node.type === 'text' ? node.text ?? ''
   : node.type === 'reportField' ? String(node.attrs?.value || node.attrs?.hint || '')
     : (node.content ?? []).map(text).join('');
@@ -34,11 +35,11 @@ export function attachDoctorStamp(
     .find(name => normalizedLine.includes(name.toLocaleLowerCase('ru')));
   const src = doctor ? stamps[doctor] : '';
   if (!src) return doc;
-  const dimensions = sizes[doctor!] ?? { width: 140, height: 55 };
+  const dimensions = sizes[doctor!] ?? { width: 360, height: 130 };
+  const height = Math.max(1, Math.round(STAMP_WIDTH * dimensions.height / Math.max(1, dimensions.width)));
   const stamp: RichNode = { type: 'image', attrs: {
     src, alt: STAMP_ALT,
-    width: Math.max(1, Math.min(140, Math.round(dimensions.width))),
-    height: Math.max(1, Math.min(55, Math.round(dimensions.height))),
+    width: STAMP_WIDTH, height, floating: true,
   } };
 
   const insert = (nodes: RichNode[]): boolean => {
@@ -49,23 +50,24 @@ export function attachDoctorStamp(
         const combined = children.map(text).join('');
         const dateOffset = combined.search(/\bдата\s*:/i);
         if (dateOffset >= 0) {
-          const left: RichNode[] = [], right: RichNode[] = [];
-          let offset = 0;
-          for (const child of children) {
-            const value = text(child);
-            if (offset + value.length <= dateOffset) left.push(child);
-            else if (offset >= dateOffset) right.push(child);
-            else if (child.type === 'text') {
-              const cut = dateOffset - offset;
-              if (cut > 0) left.push({ ...child, text: (child.text ?? '').slice(0, cut) });
-              if (cut < (child.text ?? '').length) right.push({ ...child, text: (child.text ?? '').slice(cut) });
-            } else (offset < dateOffset ? left : right).push(child);
+          let offset = 0, at = children.length;
+          for (let childIndex = 0; childIndex < children.length; childIndex++) {
+            const child = children[childIndex], value = text(child);
+            if (offset <= dateOffset && dateOffset <= offset + value.length) {
+              at = childIndex;
+              if (child.type === 'text') {
+                const cut = dateOffset - offset;
+                const left = (child.text ?? '').slice(0, cut), right = (child.text ?? '').slice(cut);
+                const replacement = [...(left ? [{ ...child, text: left }] : []), stamp, ...(right ? [{ ...child, text: right }] : [])];
+                children.splice(childIndex, 1, ...replacement);
+                return true;
+              }
+              break;
+            }
             offset += value.length;
           }
-          const dateLine = { ...structuredClone(node), content: right };
-          node.content = left;
-          nodes.splice(index + 1, 0, stamp, dateLine);
-        } else nodes.splice(index + 1, 0, stamp);
+          children.splice(at, 0, stamp);
+        } else children.push(stamp);
         return true;
       }
       if (node.content && insert(node.content)) return true;

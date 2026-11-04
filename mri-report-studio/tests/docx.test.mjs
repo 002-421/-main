@@ -7,6 +7,7 @@ import { exportDocx, importOwnDocx, DOCX_MIME } from '../src/docx.ts';
 import { makeDocument, collectFields, builtinModules, moduleNode, insertModule } from '../src/model.ts';
 import { makeTemplateDocument } from '../src/catalog.ts';
 import { initializeReportFooter } from '../src/report-footer.ts';
+import { attachDoctorStamp } from '../src/doctor-stamp.ts';
 
 const STATE_PART = 'customXml/mri-report-studio.xml';
 const p = (text, attrs) => ({ type: 'paragraph', ...(attrs ? { attrs } : {}), content: [{ type: 'text', text }] });
@@ -302,4 +303,17 @@ test('a doctor stamp image is embedded between physician and date paragraphs', a
   assert.match(xml,/w:drawing/);
   assert.ok(xml.indexOf('Врач-рентгенолог')<xml.indexOf('w:drawing'));
   assert.ok(xml.indexOf('w:drawing')<xml.indexOf('Дата:'));
+});
+
+test('doctor stamp stays full size behind the physician and date without adding vertical space', async () => {
+  const stamp='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW+0AAAAASUVORK5CYII=';
+  const source={type:'doc',content:[p('Врач-рентгенолог: Иванов Иван Иванович'),p('Дата: 04.11.2026')]};
+  const document=attachDoctorStamp(source,{'Иванов Иван Иванович':stamp},{'Иванов Иван Иванович':{width:1177,height:422}});
+  const {xml}=await exported(document);
+  assert.match(xml,/<wp:anchor/);
+  assert.match(xml,/<wp:anchor[^>]*behindDoc="1"/);
+  assert.match(xml,/<wp:wrapNone\/>/);
+  assert.ok(xml.indexOf('Врач-рентгенолог')<xml.indexOf('wp:anchor'));
+  assert.ok(xml.indexOf('wp:anchor')<xml.indexOf('Дата:'));
+  assert.equal((xml.match(/<wp:anchor\b/g)||[]).length,1);
 });
