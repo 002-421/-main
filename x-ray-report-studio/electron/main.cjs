@@ -25,6 +25,7 @@ let startupLogFile = '';
 let startupLogQueue = Promise.resolve();
 let startupWatchdog;
 let startupFailureDialogOpen = false;
+let startupRecoveryAttempted = false;
 const sharedDictionaryDir = process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR
   ? path.resolve(process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR)
   : path.join(process.env.PUBLIC || path.dirname(app.getPath('appData')), 'Documents', 'MRI Report Studio');
@@ -227,7 +228,23 @@ app.whenReady().then(() => {
       if (!mainWindow || mainWindow.isDestroyed()) return;
       try {
         const frame = await mainWindow.webContents.capturePage();
-        await logStartup({ event: 'startup-frame', ...summarizeFrame(frame) });
+        const summary = summarizeFrame(frame);
+        await logStartup({ event: 'startup-frame', ...summary });
+        if (!liveUpdateInProgress && !isUsableRenderer(details, summary)) {
+          if (!startupRecoveryAttempted) {
+            startupRecoveryAttempted = true;
+            rendererReady = false;
+            await logStartup({ event: 'startup-render-recovery', action: 'reload-page' });
+            startupWatchdog = setTimeout(() => {
+              if (!rendererReady) void showStartupFailure('После повторной загрузки интерфейс не отобразился.');
+            }, 20000);
+            setTimeout(() => {
+              if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload();
+            }, 100);
+          } else {
+            void showStartupFailure('Интерфейс подтвердил запуск, но окно осталось пустым.');
+          }
+        }
       } catch (error) {
         await logStartup({ event: 'startup-frame-error', message: error.message });
       }
