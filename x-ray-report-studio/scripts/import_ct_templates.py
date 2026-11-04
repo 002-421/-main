@@ -149,6 +149,11 @@ for folder, area_id in FOLDERS:
                     {'type':'text','text':'Врач-рентгенолог: ','marks':[mark('bold')]},
                     field_node('Ф.И.О. врача',DOCTOR_ID,[mark('bold')]) ]})
                 continue
+            # Match MRI's first-line paragraph indent throughout the report
+            # body, while keeping the study metadata and printed date flush-left.
+            metadata = r'\s*(?:Фамилия\s*,\s*имя\s*,\s*отчество|Исследование\s*:|Контрастный\s+препарат\s*:|Доза\s*:|Протокол\s+исследования\s*№|Мультиспиральная\s+компьютерная\s+томография|Toshiba\b)'
+            if node.get('type') == 'paragraph' and not re.match(metadata, value, re.I) and not re.match(r'\s*Дата\s*:',value,re.I):
+                node.setdefault('attrs',{})['firstLineIndentPt']=17.717
             normalized.append(node)
         if not any('Врач-рентгенолог:' in plain(p['content']) for p in normalized):
             normalized.append({'type':'paragraph','attrs':dict(MRI_HEADER[1].get('attrs',{})), 'content':[

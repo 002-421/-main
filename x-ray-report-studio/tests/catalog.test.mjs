@@ -42,6 +42,21 @@ test('CT archive templates use the MRI-style editable patient, study and physici
   }
 });
 
+test('CT report paragraphs have the same first-line indent as MRI while metadata and date stay flush', () => {
+  const metadata = /^\s*(?:Фамилия\s*,\s*имя\s*,\s*отчество|Исследование\s*:|Контрастный\s+препарат\s*:|Доза\s*:|Протокол\s+исследования\s*№|Мультиспиральная\s+компьютерная\s+томография|Toshiba\b)/i;
+  for (const template of reportTemplates.filter(item => item.id.startsWith('ct-'))) {
+    const paragraphs = makeTemplateDocument(template.id).content.filter(node => node.type === 'paragraph');
+    for (const paragraph of paragraphs.slice(4)) {
+      const text = plain(paragraph).trim();
+      if (metadata.test(text) || /^Дата\s*:/i.test(text) || /^Врач(?:-рентгенолог)?\s*:/i.test(text)) {
+        assert.notEqual(paragraph.attrs?.firstLineIndentPt, 17.717, `${template.title}: metadata/footer should stay flush`);
+      } else {
+        assert.equal(paragraph.attrs?.firstLineIndentPt, 17.717, `${template.title}: ${text.slice(0, 60)}`);
+      }
+    }
+  }
+});
+
 test('CT recommendation paragraphs use black text in every template', () => {
   const ctTemplates = reportTemplates.filter(template => template.id.startsWith('ct-'));
   for (const template of ctTemplates) {
