@@ -133,7 +133,7 @@ def main():
     write_zip(setup, setup_zip)
     manifest = {
         'version': metadata['version'],
-        'url': 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/mri-report-studio/downloads/MRI_Report_Studio_Windows_Setup.zip',
+        'url': 'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/mri-report-studio/downloads/MRI_Report_Studio_Windows_Setup.zip',
         'sha256': hashlib.sha256(setup_zip.read_bytes()).hexdigest(),
     }
     (DOWNLOADS / 'latest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')

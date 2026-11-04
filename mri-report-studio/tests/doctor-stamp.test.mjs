@@ -25,7 +25,7 @@ test('doctor stamp export is repeatable and preserves the date in place', () => 
   assert.equal(nodes[0].type, 'paragraph');
   assert.equal(nodes.length, 2);
   assert.equal(nodes[0].content.filter(node => node.type === 'image').length, 1);
-  assert.equal(nodes[0].content.find(node => node.type === 'image').attrs.width, 360);
+  assert.equal(nodes[0].content.find(node => node.type === 'image').attrs.width, 250);
   assert.equal(nodes[0].content.find(node => node.type === 'image').attrs.floating, true);
   assert.equal(doc.content[0].content[0].text, 'Врач-рентгенолог: Иванов Иван Иванович');
 });

@@ -1,7 +1,7 @@
 import type { RichNode } from './model';
 
 const STAMP_ALT = 'Подпись и печать врача';
-const STAMP_WIDTH = 360;
+const STAMP_WIDTH = 250;
 const text = (node: RichNode): string => node.type === 'text' ? node.text ?? ''
   : node.type === 'reportField' ? String(node.attrs?.value || node.attrs?.hint || '')
     : (node.content ?? []).map(text).join('');

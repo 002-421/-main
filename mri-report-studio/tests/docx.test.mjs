@@ -305,7 +305,7 @@ test('a doctor stamp image is embedded between physician and date paragraphs', a
   assert.ok(xml.indexOf('w:drawing')<xml.indexOf('Дата:'));
 });
 
-test('doctor stamp stays full size behind the physician and date without adding vertical space', async () => {
+test('doctor stamp stays inside the physician column behind the footer without adding vertical space', async () => {
   const stamp='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW+0AAAAASUVORK5CYII=';
   const source={type:'doc',content:[p('Врач-рентгенолог: Иванов Иван Иванович'),p('Дата: 04.11.2026')]};
   const document=attachDoctorStamp(source,{'Иванов Иван Иванович':stamp},{'Иванов Иван Иванович':{width:1177,height:422}});

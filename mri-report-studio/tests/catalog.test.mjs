@@ -71,6 +71,22 @@ test('all protocol templates separate the closing block and fill its date automa
   }
 });
 
+test('all CT templates fill the physician date on opening', () => {
+  const date = '04.11.2026';
+  for (const template of reportTemplates.filter(item => item.id.startsWith('ct-'))) {
+    const doc = initializeReportFooter(makeTemplateDocument(template.id), date);
+    const dateFields = [];
+    walk(doc, node => {
+      const field = node.marks?.find(mark => mark.type === 'templateField' && String(mark.attrs?.id ?? '').endsWith('.reportdate'));
+      if (field && node.type === 'text') dateFields.push({ text: node.text, filled: field.attrs.filled });
+      if (node.type === 'reportField' && String(node.attrs?.id ?? '').endsWith('.reportdate')) dateFields.push({ text: node.attrs.value, filled: true });
+    });
+    assert.equal(dateFields.length, 1, template.title);
+    assert.equal(dateFields[0].text, date, template.title);
+    assert.equal(dateFields[0].filled, true, template.title);
+  }
+});
+
 test('tables in every template use compact widths, cell text and line breaks', () => {
   for (const template of mriTemplates) {
     const doc = makeTemplateDocument(template.id);

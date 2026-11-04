@@ -5,7 +5,7 @@ const https = require('node:https');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
-const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/mri-report-studio/downloads/latest.json';
+const UPDATE_MANIFEST = 'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/mri-report-studio/downloads/latest.json';
 
 // Keep the existing profile path so the rename preserves drafts and settings.
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
@@ -103,7 +103,7 @@ async function getUpdateManifest() {
   if (!manifest || typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.version)
       || typeof manifest.url !== 'string' || typeof manifest.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(manifest.sha256)) throw new Error('Файл обновлений содержит некорректные данные.');
   const artifact=new URL(manifest.url);
-  if (artifact.protocol!=='https:' || artifact.hostname!=='raw.githubusercontent.com' || !artifact.pathname.endsWith('/downloads/MRI_Report_Studio_Windows_Setup.zip')) throw new Error('Недопустимая ссылка на установочный файл.');
+  if (artifact.protocol!=='https:' || !['raw.githubusercontent.com','github.com'].includes(artifact.hostname) || !artifact.pathname.endsWith('/downloads/MRI_Report_Studio_Windows_Setup.zip')) throw new Error('Недопустимая ссылка на установочный файл.');
   return { version: manifest.version, url: manifest.url, sha256: manifest.sha256.toLowerCase(), available: compareVersions(manifest.version, app.getVersion()) > 0 };
 }
 
