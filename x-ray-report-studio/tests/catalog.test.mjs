@@ -173,7 +173,7 @@ test('templates default to Arial 12 and separate conclusion and recommendations'
         const child = node.content[index];
         const text = plain(child).trim();
         if (child.type === 'paragraph' && (/^(?:Рекоменд|Рекоменду)/i.test(text) || /^Заключение\s*:?/i.test(text))) {
-          assert.equal(node.content[index - 1]?.type, 'paragraph', `${template.title}: section separator`);
+          assert.ok(['paragraph', 'horizontalRule'].includes(node.content[index - 1]?.type), `${template.title}: section separator`);
           assert.equal(plain(node.content[index - 1]), '', `${template.title}: section separator`);
         }
       }

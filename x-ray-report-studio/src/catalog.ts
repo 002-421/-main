@@ -1,5 +1,6 @@
 import source from './catalog.json' with { type: 'json' };
 import ctSource from './ct-catalog.json' with { type: 'json' };
+import { addReportSeparators } from './report-separators.ts';
 import type { RichNode } from './model';
 import { compactTemplateTables, separateRecommendations, highlightDeletionNotes } from './table-layout.ts';
 import piRadsReference from './assets/pi-rads-v21.ts';
@@ -57,5 +58,5 @@ export function makeTemplateDocument(templateId = DEFAULT_TEMPLATE_ID): RichNode
       src: piRadsReference, alt: 'Справочная схема PI-RADS v2.1 (2019)', width: 640, height: 291,
     } });
   }
-  return highlightDeletionNotes(separateRecommendations(compactTemplateTables(document)), { ct: templateId.startsWith('ct-') });
+  return addReportSeparators(highlightDeletionNotes(separateRecommendations(compactTemplateTables(document)), { ct: templateId.startsWith('ct-') }));
 }

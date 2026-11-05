@@ -1,9 +1,11 @@
 import './style.css';
+import { addReportSeparators } from './report-separators';
+const prepareInlineDocument = (doc: RichNode, trackOriginal = true) => prepareInlineDocumentBase(addReportSeparators(doc), trackOriginal);
 import packageInfo from '../package.json' with { type: 'json' };
 import { TextSelection } from '@tiptap/pm/state';
 import DOMPurify from 'dompurify';
 import { makeEditor } from './editor';
-import { prepareInlineDocument, initializeTemplateTracking, promoteInlineTemplate, resetInlineTemplate, collectInlineFields, countUnchangedParts, setReviewHighlights } from './inline-fields';
+import { prepareInlineDocument as prepareInlineDocumentBase, initializeTemplateTracking, promoteInlineTemplate, resetInlineTemplate, collectInlineFields, countUnchangedParts, setReviewHighlights } from './inline-fields';
 import { getLiveProofIssueAtPosition, refreshProofreading, setLiveProofreading } from './live-proofreading';
 import { areas, reportTemplates, reportBlocks, makeTemplateDocument, DOCTOR_FIELD_ID, PATIENT_FIELD_ID, DEFAULT_TEMPLATE_ID } from './catalog';
 import { builtinModules, moduleNode, compiler, validateDraft, validateTemplate, draftVersion, type RichNode } from './model';
