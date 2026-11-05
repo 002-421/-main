@@ -3,7 +3,7 @@ import type { RichNode } from './model';
 /** Keep the two report boundaries visible in both the editor and exports. */
 export function addReportSeparators(input: RichNode): RichNode {
   const doc = structuredClone(input);
-  const content = doc.content ?? [];
+  const content = (doc.content ?? []).filter(node => node.type !== 'horizontalRule');
   const text = (node: RichNode): string => node.text ?? (node.content ?? []).map(text).join('');
   let headerEnd = -1;
   for (let i = 0; i < content.length; i++) {

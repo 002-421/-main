@@ -126,9 +126,13 @@ const replacesPromptOnFirstInput = (mark: PMMark) => /\.(number|patient|birthdat
 function yellowZeroRange(state: EditorState, pos: number): FieldRange | null {
   let result: FieldRange | null = null;
   state.doc.descendants((node, from) => {
-    if (result || !node.isText || node.text !== '0,0') return;
+    if (result || !node.isText) return;
     const yellow = node.marks.find(mark => mark.type.name === 'highlight' && String(mark.attrs.color ?? '').toLowerCase() === '#ffff00');
-    if (yellow && pos >= from && pos <= from + node.nodeSize) result = { from, to: from + node.nodeSize, mark: yellow };
+    if (!yellow) return;
+    for (const match of (node.text ?? '').matchAll(/(?<![\d,])0,0(?![\d,])/g)) {
+      const start = from + match.index!;
+      if (pos >= start && pos <= start + 3) result = { from: start, to: start + 3, mark: yellow };
+    }
   });
   return result;
 }
