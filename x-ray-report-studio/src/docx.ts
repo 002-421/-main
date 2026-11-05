@@ -2,7 +2,7 @@ import {
   AlignmentType, BorderStyle, Document, ExternalHyperlink, Footer, HeadingLevel,
   LevelFormat, LineRuleType, Packer, Paragraph, ImageRun, ShadingType, Table, TableCell,
   TableLayoutType, TableRow, Tab, TextRun, UnderlineType, WidthType, PageNumber,
-  HorizontalPositionAlign, HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom, TextWrappingType,
+  HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom, TextWrappingType,
   type IParagraphOptions, type IRunOptions, type NumberingDefinition, type ParagraphChild,
 } from 'docx';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
@@ -106,7 +106,7 @@ function inline(nodes: RichNode[] = [], inherited: IRunOptions = {}): ParagraphC
       const source=String(node.attrs?.src??'');
       const jpeg=/^data:image\/(?:jpeg|jpg);base64,/i.test(source);
       if(!jpeg&&!/^data:image\/png;base64,/.test(source)) return [];
-      return [new ImageRun({type:jpeg?'jpg':'png',data:source,transformation:{width:Number(node.attrs?.width)||250,height:Number(node.attrs?.height)||90},...(node.attrs?.floating?{floating:{horizontalPosition:{relative:HorizontalPositionRelativeFrom.COLUMN,align:HorizontalPositionAlign.CENTER},verticalPosition:{relative:VerticalPositionRelativeFrom.PARAGRAPH,offset:0},allowOverlap:true,behindDocument:true,wrap:{type:TextWrappingType.NONE}}}:{}),altText:{title:'Подпись и печать врача',description:'Подпись и печать врача',name:'Подпись и печать врача'}})];
+      return [new ImageRun({type:jpeg?'jpg':'png',data:source,transformation:{width:Number(node.attrs?.width)||250,height:Number(node.attrs?.height)||90},...(node.attrs?.floating?{floating:{horizontalPosition:{relative:HorizontalPositionRelativeFrom.COLUMN,offset:Number(node.attrs?.positionXEmu)||0},verticalPosition:{relative:VerticalPositionRelativeFrom.PARAGRAPH,offset:Number(node.attrs?.positionYEmu)||0},allowOverlap:true,behindDocument:true,wrap:{type:TextWrappingType.NONE}}}:{}),altText:{title:'Подпись и печать врача',description:'Подпись и печать врача',name:'Подпись и печать врача'}})];
     }
     if (node.type === 'reportField') {
       const value = String(node.attrs?.value ?? '');

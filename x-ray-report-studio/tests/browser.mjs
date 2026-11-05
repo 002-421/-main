@@ -87,6 +87,8 @@ try{
  await page.keyboard.press('Control+z');assert.equal(await field(patientId).innerText(),patientHint);assert.equal(await field(patientId).getAttribute('data-filled'),'false');
  await fillField(patientId,'Тестовый Пациент');
  assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
+ assert.match(await page.locator('.report-tab-select').first().textContent(),/Тестовый ·/);
+ assert.ok(await page.locator('.report-tab-select').first().evaluate(el=>el.scrollWidth<=el.clientWidth),'the patient surname is visible in the report tab');
  assert.equal(await page.locator('#document-name').textContent(),selectedTemplateTitle);
  assert.equal(await field(patientId).getAttribute('data-filled'),'true');
  await page.keyboard.press('Control+z');assert.equal(await field(patientId).innerText(),patientHint);
@@ -219,9 +221,9 @@ try{
  assert.equal(await browserPage.locator(`[data-field-id="${patientId}"]`).innerText(),'Проверка браузерной версии');
  await browserPage.locator('#settings').click();await browserPage.locator('#doctor-name').fill('Тестов Иван Петрович');
  const jpegBytes=await browserPage.evaluate(async()=>{const canvas=document.createElement('canvas');canvas.width=1200;canvas.height=1000;const context=canvas.getContext('2d'),pixels=context.createImageData(canvas.width,canvas.height);let seed=112233;for(let i=0;i<pixels.data.length;i+=4){seed=(seed*1664525+1013904223)>>>0;pixels.data[i]=seed&255;pixels.data[i+1]=(seed>>>8)&255;pixels.data[i+2]=(seed>>>16)&255;pixels.data[i+3]=255;}context.putImageData(pixels,0,0);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.95));const transfer=new DataTransfer();transfer.items.add(new File([blob],'stamp.jpg',{type:'image/jpeg'}));const input=document.querySelector('#doctor-stamp-file');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));return blob.size;});
- assert.ok(jpegBytes>1_000_000&&jpegBytes<=5*1024*1024,'JPG above the former 1 MB limit is accepted');await browserPage.locator('#stamp-preview img').waitFor();await browserPage.locator('#save-settings').click();
- const storedStamp=await browserPage.evaluate(()=>{const value=JSON.parse(localStorage.getItem('mri-alliance.settings.v3'));return {image:value.doctorStamps['Тестов Иван Петрович'],size:value.doctorStampSizes['Тестов Иван Петрович']};});
- assert.match(storedStamp.image,/^data:image\/jpeg;base64,/);assert.deepEqual(storedStamp.size,{width:1200,height:1000});
+ assert.ok(jpegBytes>1_000_000&&jpegBytes<=5*1024*1024,'JPG above the former 1 MB limit is accepted');await browserPage.locator('#stamp-preview img').waitFor();for(const [id,value] of [['#stamp-position-y','35'],['#stamp-position-x','-45']])await browserPage.locator(id).evaluate((input,value)=>{input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));},value);await browserPage.locator('#save-settings').click();
+ const storedStamp=await browserPage.evaluate(()=>{const value=JSON.parse(localStorage.getItem('mri-alliance.settings.v3'));return {image:value.doctorStamps['Тестов Иван Петрович'],size:value.doctorStampSizes['Тестов Иван Петрович'],position:value.doctorStampPositions['Тестов Иван Петрович']};});
+ assert.match(storedStamp.image,/^data:image\/jpeg;base64,/);assert.deepEqual(storedStamp.size,{width:1200,height:1000});assert.deepEqual(storedStamp.position,{x:-45,y:35});
  await browserPage.screenshot({path:path.join(root,'downloads','MRI_Alliance_Preview.png')});
  assert.equal(requests.some(url=>!url.startsWith('http://127.0.0.1:')&&!url.startsWith('data:')),false);
  console.log('PASS: standalone browser bundle, font resources and autosave need no external network.');

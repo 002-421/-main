@@ -10,6 +10,7 @@ export function attachDoctorStamp(
   stamps: Record<string, string>,
   sizes: Record<string, { width: number; height: number }>,
   heights: Record<string, number> = {},
+  positions: Record<string, { x: number; y: number }> = {},
 ): RichNode {
   const doc = structuredClone(input);
   const removePrevious = (nodes: RichNode[]) => {
@@ -38,9 +39,19 @@ export function attachDoctorStamp(
   const dimensions = sizes[doctor!] ?? { width: 360, height: 130 };
   const height = Math.max(40, Math.min(500, Math.round(heights[doctor!] || 140)));
   const width = Math.max(40, Math.round(height * dimensions.width / Math.max(1, dimensions.height)));
+  const position = positions[doctor!] ?? { x: 0, y: 0 };
+  const x = Math.max(-300, Math.min(300, Math.round(position.x || 0)));
+  const y = Math.max(-200, Math.min(200, Math.round(position.y || 0)));
+  const pageWidthDxa = Number(doc.attrs?.sourceFormat === 'alliance-template' && doc.attrs?.pageWidthMm
+    ? Math.round(Number(doc.attrs.pageWidthMm) / 25.4 * 1440) : 11906);
+  const marginLeftDxa = Number(doc.attrs?.sourceFormat === 'alliance-template' && doc.attrs?.marginLeftMm
+    ? Math.round(Number(doc.attrs.marginLeftMm) / 25.4 * 1440) : doc.attrs?.sourceFormat === 'alliance-template' ? 1020 : 850);
+  const marginRightDxa = Number(doc.attrs?.sourceFormat === 'alliance-template' && doc.attrs?.marginRightMm
+    ? Math.round(Number(doc.attrs.marginRightMm) / 25.4 * 1440) : doc.attrs?.sourceFormat === 'alliance-template' ? 1020 : 850);
+  const centeredColumnOffsetEmu = Math.round(((pageWidthDxa - marginLeftDxa - marginRightDxa) * 635 - width * 9525) / 2 + x * 9525);
   const stamp: RichNode = { type: 'image', attrs: {
     src, alt: STAMP_ALT,
-    width, height, floating: true,
+    width, height, floating: true, positionXEmu: centeredColumnOffsetEmu, positionYEmu: y * 9525,
   } };
 
   const insert = (nodes: RichNode[]): boolean => {

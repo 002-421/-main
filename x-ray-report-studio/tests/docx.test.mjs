@@ -321,12 +321,13 @@ test('a doctor stamp image is embedded between physician and date paragraphs', a
 test('doctor stamp stays inside the physician column behind the footer without adding vertical space', async () => {
   const stamp='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW+0AAAAASUVORK5CYII=';
   const source={type:'doc',content:[p('Врач-рентгенолог: Иванов Иван Иванович'),p('Дата: 04.11.2026')]};
-  const document=attachDoctorStamp(source,{'Иванов Иван Иванович':stamp},{'Иванов Иван Иванович':{width:1177,height:422}});
+  const document=attachDoctorStamp(source,{'Иванов Иван Иванович':stamp},{'Иванов Иван Иванович':{width:1177,height:422}},{},{'Иванов Иван Иванович':{x:25,y:-15}});
   const {xml}=await exported(document);
   assert.match(xml,/<wp:anchor/);
   assert.match(xml,/<wp:anchor[^>]*behindDoc="1"/);
   assert.match(xml,/<wp:wrapNone\/>/);
-  assert.match(xml,/<wp:align>center<\/wp:align>/);
+  assert.match(xml,/<wp:posOffset>\d+<\/wp:posOffset>/);
+  assert.match(xml,/<wp:posOffset>-142875<\/wp:posOffset>/);
   assert.ok(xml.indexOf('Врач-рентгенолог')<xml.indexOf('wp:anchor'));
   assert.ok(xml.indexOf('wp:anchor')<xml.indexOf('Дата:'));
   assert.equal((xml.match(/<wp:anchor\b/g)||[]).length,1);
