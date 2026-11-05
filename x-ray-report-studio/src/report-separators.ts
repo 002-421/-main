@@ -3,7 +3,24 @@ import type { RichNode } from './model';
 /** Keep the two report boundaries visible in both the editor and exports. */
 export function addReportSeparators(input: RichNode): RichNode {
   const doc = structuredClone(input);
-  const content = (doc.content ?? []).filter(node => node.type !== 'horizontalRule');
+  const raw = (doc.content ?? []).filter(node => node.type !== 'horizontalRule');
+  const content: RichNode[] = [];
+  for (const node of raw) {
+    if (node.type === 'paragraph' && !(node.content ?? []).some(child => child.type !== 'text' || child.text?.trim())) continue;
+    const line = (node.content ?? []).map(child => child.text ?? '').join('');
+    if (node.type === 'paragraph' && /Врач(?:-рентгенолог)?\s*:/i.test(line) && /дата\s*:/i.test(line)) {
+      const left: RichNode[] = [], right: RichNode[] = []; let date = false;
+      for (const child of node.content ?? []) {
+        const offset = child.type === 'text' ? (child.text ?? '').search(/дата\s*:/i) : -1;
+        if (offset >= 0) { if (offset) left.push({...child,text:child.text!.slice(0,offset).trimEnd()}); right.push({...child,text:child.text!.slice(offset).replace(/дата\s*:/i,'Дата:')}); date=true; }
+        else (date ? right : left).push(child);
+      }
+      content.push({...node,content:left.filter(child=>child.type!=='text'||child.text)},{...node,attrs:{...node.attrs,textAlign:'left'},content:right});
+    } else {
+      if (/^дата\s*:/i.test(line.trim())) { node.attrs={...node.attrs,textAlign:'left'}; for(const child of node.content ?? []) if(child.text) child.text=child.text.replace(/дата\s*:/i,'Дата:'); }
+      content.push(node);
+    }
+  }
   const text = (node: RichNode): string => node.text ?? (node.content ?? []).map(text).join('');
   let headerEnd = -1;
   for (let i = 0; i < content.length; i++) {

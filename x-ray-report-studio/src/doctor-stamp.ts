@@ -48,7 +48,7 @@ export function attachDoctorStamp(
     ? Math.round(Number(doc.attrs.marginLeftMm) / 25.4 * 1440) : doc.attrs?.sourceFormat === 'alliance-template' ? 1020 : 850);
   const marginRightDxa = Number(doc.attrs?.sourceFormat === 'alliance-template' && doc.attrs?.marginRightMm
     ? Math.round(Number(doc.attrs.marginRightMm) / 25.4 * 1440) : doc.attrs?.sourceFormat === 'alliance-template' ? 1020 : 850);
-  const centeredColumnOffsetEmu = Math.round(((pageWidthDxa - marginLeftDxa - marginRightDxa) * 635 - width * 9525) / 2 + x * 9525);
+  const centeredColumnOffsetEmu = Math.round(((pageWidthDxa - marginLeftDxa - marginRightDxa) * 635 - width * 9525) + x * 9525);
   const stamp: RichNode = { type: 'image', attrs: {
     src, alt: STAMP_ALT,
     width, height, floating: true, positionXEmu: centeredColumnOffsetEmu, positionYEmu: y * 9525,

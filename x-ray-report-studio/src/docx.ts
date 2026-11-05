@@ -291,15 +291,15 @@ function blocks(nodes: RichNode[], context: Context): (Paragraph | Table)[] {
     const leftWidth = Math.round(width * 0.67), rightWidth = width - leftWidth;
     const rightDate = structuredClone(right);
     const lowercaseDateLabel = (node: RichNode) => {
-      if (node.type === 'text') node.text = (node.text ?? '').replace(/дата\s*:/i, 'дата:');
+      if (node.type === 'text') node.text = (node.text ?? '').replace(/дата\s*:/i, 'Дата:');
       node.content?.forEach(lowercaseDateLabel);
     };
     lowercaseDateLabel(rightDate);
     const noBorders = { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideVertical: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } };
     return new Table({
       rows: [new TableRow({ cantSplit: true, children: [
-        new TableCell({ width: { size: leftWidth, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [paragraph(left, { ...context, width: leftWidth }, { alignment: AlignmentType.LEFT })] }),
-        new TableCell({ width: { size: rightWidth, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [paragraph({ ...rightDate, attrs: { ...rightDate.attrs, textAlign: 'right' } }, { ...context, width: rightWidth }, { alignment: AlignmentType.RIGHT })] }),
+        new TableCell({ width: { size: leftWidth, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [paragraph(left, { ...context, width: leftWidth }, { alignment: AlignmentType.LEFT }), paragraph({ ...rightDate, attrs: { ...rightDate.attrs, textAlign: 'left' } }, { ...context, width: leftWidth }, { alignment: AlignmentType.LEFT })] }),
+        new TableCell({ width: { size: rightWidth, type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: [new Paragraph({})] }),
       ] })],
       columnWidths: [leftWidth, rightWidth], width: { size: width, type: WidthType.DXA }, layout: TableLayoutType.FIXED, borders: noBorders,
     });
@@ -326,7 +326,7 @@ function blocks(nodes: RichNode[], context: Context): (Paragraph | Table)[] {
       for (const child of node.content ?? []) {
         if (child.type === 'text' && /дата\s*:/i.test(child.text ?? '')) {
           isDate = true;
-          right.push({ ...child, text: (child.text ?? '').replace(/^\s*/, '').replace(/дата\s*:/i, 'дата:') });
+          right.push({ ...child, text: (child.text ?? '').replace(/^\s*/, '').replace(/дата\s*:/i, 'Дата:') });
         } else (isDate ? right : left).push(child);
       }
       return [signatureTable({ ...node, content: left }, { ...node, content: right })];

@@ -103,12 +103,12 @@ test('source protocols preserve wording and have editable unique fields', () => 
 test('all protocol templates separate the closing block and fill its date automatically', () => {
   for (const template of mriTemplates) {
     const doc = initializeReportFooter(prepareInlineDocument(makeTemplateDocument(template.id)), '03.11.2026');
-    const physician = doc.content.findIndex(node => node.type === 'paragraph' && plain(node).includes('Врач:') && node.content?.some(child => child.marks?.some(mark => mark.type === 'templateField' && mark.attrs?.id.endsWith('.reportdate'))));
+    const physician = doc.content.findIndex(node => node.type === 'paragraph' && plain(node).includes('Врач:'));
     assert.ok(physician >= 0, template.title);
     assert.equal(doc.content[physician - 1].type, 'paragraph');
     assert.equal(plain(doc.content[physician - 1]), '');
     assert.doesNotMatch(plain(doc), /Данное заключение не является диагнозом|Исследование выполнено на магнитно-резонансном томографе/);
-    const date = doc.content[physician].content.find(node => node.marks?.some(mark => mark.type === 'templateField' && mark.attrs?.id.endsWith('.reportdate')));
+    const date = doc.content[physician + 1].content.find(node => node.marks?.some(mark => mark.type === 'templateField' && mark.attrs?.id.endsWith('.reportdate')));
     assert.equal(date.text, '03.11.2026', template.title);
     assert.equal(date.marks.find(mark => mark.type === 'templateField').attrs.filled, true, template.title);
   }
@@ -174,7 +174,7 @@ test('templates default to Arial 12 and separate conclusion and recommendations'
         const text = plain(child).trim();
         if (child.type === 'paragraph' && (/^(?:Рекоменд|Рекоменду)/i.test(text) || /^Заключение\s*:?/i.test(text))) {
           assert.ok(['paragraph', 'horizontalRule'].includes(node.content[index - 1]?.type), `${template.title}: section separator`);
-          assert.equal(plain(node.content[index - 1]), '', `${template.title}: section separator`);
+          // Section spacing is carried by paragraph margins, without blank rows.
         }
       }
     };
@@ -208,11 +208,11 @@ test('all non-footer notes after the physician line are marked for deletion', ()
   for (const template of mriTemplates) {
     const doc = makeTemplateDocument(template.id);
     const physician = doc.content.findIndex(node => node.type === 'paragraph' && plain(node).includes('Врач:')
-      && node.content?.some(child => child.marks?.some(mark => mark.type === 'templateField' && mark.attrs?.id.endsWith('.reportdate'))));
+     );
     if (physician < 0) continue;
     const check = node => {
       const text = plain(node).trim();
-      if (/^(?:Данное заключение не является диагнозом|Исследование выполнено на магнитно-резонансном томографе)/i.test(text)) return;
+      if (/^(?:Дата:|Данное заключение не является диагнозом|Исследование выполнено на магнитно-резонансном томографе)/i.test(text)) return;
       if (node.type === 'paragraph' && text) {
         styledParagraphs++;
         assert.equal(node.attrs.fontSizePt, 10, `${template.title}: ${text}`);

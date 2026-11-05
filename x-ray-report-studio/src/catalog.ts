@@ -34,6 +34,7 @@ export function makeTemplateDocument(templateId = DEFAULT_TEMPLATE_ID): RichNode
   const template = reportTemplates.find(item => item.id === templateId);
   if (!template) throw new Error('Шаблон исследования не найден.');
   const document = structuredClone(template.doc);
+  const spacing = (node: RichNode) => { if (['doc','paragraph','heading'].includes(node.type)) node.attrs={...node.attrs,lineHeight:1.05}; for(const mark of node.marks ?? []) if(mark.type==='textStyle' && mark.attrs) delete mark.attrs.lineHeight; node.content?.forEach(spacing); }; spacing(document);
   if (templateId === 'pelvis-omt-zh' || templateId === 'pelvis-omt-zh-ku') {
     const content = document.content ??= [];
     if (!content.some(node => node.type === 'paragraph' && /День цикла\s*:/i.test((node.content ?? []).map(child => child.text ?? '').join('')))) {
