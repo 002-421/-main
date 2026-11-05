@@ -403,12 +403,6 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
     ...(source ? { inherited: { font, size: fontSize, color: '000000' }, lineHeight: Number(a.lineHeight) || 1.05, spaceAfterPt: Number(a.spaceAfterPt) || 5 } : {}),
   };
   const children = blocks(doc.content ?? [], context);
-  // Leave about 27 mm on the first page for the preprinted letterhead; keep
-  // the following pages at the template's normal top margin.
-  if (options.kind !== 'template') children.unshift(new Paragraph({
-    spacing: { before: 1500, after: 0, line: 20, lineRule: LineRuleType.EXACT },
-    children: [new TextRun({ text: ' ', size: 2 })],
-  }));
   if (!children.length) children.push(new Paragraph({}));
   const file = new Document({
     creator: 'МРТ Альянс', title: cleanText(options.title ?? 'Протокол МРТ-исследования'),
@@ -431,7 +425,7 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
     numbering: { config: context.numbering },
     sections: [{
       properties: { page: { size: { width: pageWidth, height: pageHeight }, margin: {
-        top: source ? millimetres(a.marginTopMm, 907, 0, 80) : 800,
+        top: Math.max(source ? millimetres(a.marginTopMm, 907, 0, 80) : 800, millimetres(43, 0)),
         bottom: source ? millimetres(a.marginBottomMm, 907, 0, 80) : 900,
         left: marginLeft, right: marginRight,
         ...(source ? { header: 369, footer: 369 } : {}),

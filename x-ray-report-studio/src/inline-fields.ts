@@ -123,6 +123,28 @@ export const TemplateField = Mark.create({
 type FieldRange = { from: number; to: number; mark: PMMark };
 const replacesPromptOnFirstInput = (mark: PMMark) => /\.(number|patient|birthdate)$/i.test(String(mark.attrs.id));
 
+function yellowZeroRange(state: EditorState, pos: number): FieldRange | null {
+  let result: FieldRange | null = null;
+  state.doc.descendants((node, from) => {
+    if (result || !node.isText || node.text !== '0,0') return;
+    const yellow = node.marks.find(mark => mark.type.name === 'highlight' && String(mark.attrs.color ?? '').toLowerCase() === '#ffff00');
+    if (yellow && pos >= from && pos <= from + node.nodeSize) result = { from, to: from + node.nodeSize, mark: yellow };
+  });
+  return result;
+}
+
+function replaceYellowZero(view: EditorView, text: string, range: FieldRange): boolean {
+  const tr = view.state.tr;
+  const marks = view.state.doc.resolve(range.from).nodeAfter?.marks.filter(mark => !(mark.type.name === 'highlight' && String(mark.attrs.color ?? '').toLowerCase() === '#ffff00')) ?? [];
+  if (text) {
+    tr.replaceWith(range.from, range.to, view.state.schema.text(text, marks));
+    tr.setSelection(TextSelection.create(tr.doc, range.from + text.length));
+    tr.setStoredMarks(marks);
+  } else tr.delete(range.from, range.to);
+  view.dispatch(tr.scrollIntoView());
+  return true;
+}
+
 function placeholderRange(state: EditorState, pos?: number): FieldRange | null {
   const ranges: FieldRange[] = [];
   state.doc.descendants((node, at) => {
@@ -174,6 +196,8 @@ export const InlineFieldEditing = Extension.create({
           return new Slice(copy(slice.content), slice.openStart, slice.openEnd);
         },
         handleTextInput(view, from, to, text) {
+          const zero = yellowZeroRange(view.state, from);
+          if (zero && to <= zero.to) return replaceYellowZero(view, text, zero);
           const range = placeholderRange(view.state, from);
           if (!range || to > range.to) return false;
           if (!replacesPromptOnFirstInput(range.mark) && (from !== range.from || to !== range.to)) return false;
@@ -181,6 +205,11 @@ export const InlineFieldEditing = Extension.create({
         },
         handlePaste(view, event) {
           const selection = view.state.selection;
+          const zero = yellowZeroRange(view.state, selection.from);
+          if (zero && selection.to <= zero.to) {
+            const pasted = event.clipboardData?.getData('text/plain');
+            if (pasted !== undefined) return replaceYellowZero(view, pasted.replace(/\r\n?/g, '\n'), zero);
+          }
           const range = placeholderRange(view.state, selection.from);
           if (!range || selection.to > range.to) return false;
           if (!replacesPromptOnFirstInput(range.mark) && (selection.from !== range.from || selection.to !== range.to)) return false;

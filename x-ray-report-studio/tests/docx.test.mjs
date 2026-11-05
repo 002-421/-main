@@ -38,7 +38,8 @@ test('Word export is an OPC ZIP with A4 pages, report content and resolvable cus
   assert.deepEqual([...bytes.subarray(0, 4)], [0x50, 0x4b, 0x03, 0x04]);
   for (const required of ['[Content_Types].xml', '_rels/.rels', 'word/document.xml', 'word/styles.xml', 'word/numbering.xml', 'docProps/core.xml', STATE_PART]) assert.ok(zip[required], required);
   assert.match(xml, /<w:pgSz\b[^>]*w:w="11906"[^>]*w:h="16838"/);
-  assert.match(xml, /<w:body><w:p><w:pPr><w:spacing\b[^>]*w:before="1500"[^>]*w:lineRule="exact"/);
+  assert.match(xml, /<w:body><w:p>/);
+  assert.match(xml, /<w:pgMar(?=[^>]*w:top="2438")/);
   assert.match(xml, /МРТ орбит/);
   assert.match(xml, /Методика/);
   assert.match(xml, /Заключение/);
@@ -198,7 +199,7 @@ test('source template profile retains exact page geometry, title styles, spacing
     p('МРТ ГОЛОВЫ', { sourceStyle: 'Title', fontSizePt: 21, pageBreakBefore: true }),
   ] };
   const { xml, zip, blob } = await exported(doc);
-  assert.match(xml, /<w:pgMar(?=[^>]*w:top="907")(?=[^>]*w:right="1020")(?=[^>]*w:bottom="907")(?=[^>]*w:left="1020")/);
+  assert.match(xml, /<w:pgMar(?=[^>]*w:top="2438")(?=[^>]*w:right="1020")(?=[^>]*w:bottom="907")(?=[^>]*w:left="1020")/);
   assert.match(xml, /<w:pStyle w:val="Title"\/>/);
   assert.match(xml, /<w:pStyle w:val="Subtitle"\/>/);
   assert.match(xml, /<w:pStyle w:val="Heading2"\/>/);

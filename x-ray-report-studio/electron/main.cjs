@@ -153,7 +153,7 @@ async function renderPdf() {
   try {
     return await mainWindow.webContents.printToPDF({
       printBackground: true, pageSize: 'A4', preferCSSPageSize: true,
-      margins: { top: 16 / 25.4, bottom: 27 / 25.4, left: 18 / 25.4, right: 18 / 25.4 },
+      margins: { top: 43 / 25.4, bottom: 27 / 25.4, left: 18 / 25.4, right: 18 / 25.4 },
       displayHeaderFooter: true,
       headerTemplate: '<div></div>',
       footerTemplate: '<div style="width:100%;font:8px Arial,sans-serif;line-height:1.1;color:#64748b"><div style="text-align:center">Данное заключение не является диагнозом и должно быть интерпретировано лечащим врачом на основании клинико-лабораторных данных и других диагностических исследований</div><div style="text-align:center;font-style:italic">Исследование выполнено на томографе, указанном в протоколе</div><div style="text-align:right;color:#000"><span class="pageNumber"></span></div></div>',
