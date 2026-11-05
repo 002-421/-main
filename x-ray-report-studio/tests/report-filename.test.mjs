@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReportFilename, extractFilenameFields, initials, shortPatientName } from '../src/report-filename.ts';
+import { buildReportFilename, extractFilenameFields, initials, patientSurname, shortPatientName } from '../src/report-filename.ts';
 
 test('report filenames use protocol, doctor initials, patient surname and initials, template, and report date', () => {
   assert.equal(initials('Кочетов Сергей Владимирович'), 'КСВ');
@@ -18,4 +18,10 @@ test('filename fields are recovered from visible report lines even when editable
   const found = extractFilenameFields(text);
   assert.deepEqual(found, { number: '4214', patient: 'Иванов Иван Андреевич', doctor: 'Кочетов Сергей Владимирович', date: '21.10.2026' });
   assert.equal(buildReportFilename({ ...found, template: 'ГМ+Эпизиндром' }, '.docx', '01.11.2026'), '4214 КСВ Иванов И.А. ГМ+Эпизиндром 21.10.2026.docx');
+});
+
+test('report tabs use the full patient surname', () => {
+  assert.equal(patientSurname('Лунева И.В.'), 'Лунева');
+  assert.equal(patientSurname('Лунева Ирина Викторовна'), 'Лунева');
+  assert.equal(patientSurname('дд.мм.гггг'), '');
 });

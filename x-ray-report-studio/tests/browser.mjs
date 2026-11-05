@@ -23,6 +23,8 @@ const patientId='head-gm.patient', doctorId='HEAD.BASE.2.FIELD.0043';
 const field=id=>page.locator(`[data-template-field][data-field-id="${id}"]`);
 async function selectField(id){await field(id).first().evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});}
 async function fillField(id,text){await selectField(id);await page.keyboard.insertText(text);}
+async function typeAtFieldCaret(id,text='Ж'){await field(id).first().evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,Math.floor((node.textContent??'').length/2));range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.insertText(text);}
+async function assertFirstTypingReplacesHint(id){const target=field(id).first(),hint=await target.innerText();await typeAtFieldCaret(id,'Ж');assert.equal(await target.innerText(),'Ж',`${id}: typing at an interior caret replaces the whole hint`);assert.equal(await target.getAttribute('data-filled'),'true');await page.keyboard.press('Control+z');assert.equal(await target.innerText(),hint,`${id}: undo restores the complete hint`);assert.equal(await target.getAttribute('data-filled'),'false');}
 async function newReport(){await page.locator('#new-report').click();if(await page.locator('#confirm-new').count())await page.locator('#confirm-new').click();}
 async function saveWord(name){
  const filePath=path.join(output,name);await rm(filePath,{force:true});
@@ -44,6 +46,7 @@ try{
  assert.ok(await page.locator('[data-template-field]').count()>=4);
  assert.match(await page.locator('.report-content').innerText(),/22,1, после 60 лет 22,6-26,0/);
  assert.match(await page.locator('.report-content').innerText(),/справа 0,0 см, слева 0,0 см/);
+ for(const suffix of ['number','patient','birthdate'])await assertFirstTypingReplacesHint(`head-gm.${suffix}`);
  assert.equal(await page.evaluate(()=>typeof window.desktop.exportPDF),'function');
  console.log('PASS: one document editor, no right inspector, source placeholders.');
 
@@ -199,6 +202,7 @@ try{
  await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await page.reload();await page.locator('.report-content').waitFor();
  assert.match(await page.locator('.report-content').innerText(),/Исследование\. Очаг не выявлен\./);
  await page.locator('#new-report').click();const persistedTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');await fillField(patientId,'Сохранённое второе заключение');await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await page.reload();await page.locator('.report-content').waitFor();assert.equal(await page.locator('.report-tab').count(),2);assert.equal(await field(patientId).innerText(),'Сохранённое второе заключение');assert.equal(await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select'),persistedTab);
+ await page.locator('#modality-select').selectOption('ct');const ctTemplate=page.locator('[data-template]').first(),ctTemplateId=await ctTemplate.getAttribute('data-template');await ctTemplate.click();if(await page.locator('#confirm-new').count())await page.locator('#confirm-new').click();for(const suffix of ['number','patient','birthdate'])await assertFirstTypingReplacesHint(`${ctTemplateId}.${suffix}`);
  assert.deepEqual(errors,[]);
  await page.screenshot({path:path.join(output,'v3-desktop.png')});
  console.log('PASS: rich selection library save and local report persistence.');

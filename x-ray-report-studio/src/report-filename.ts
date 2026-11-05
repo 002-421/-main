@@ -36,6 +36,11 @@ export function shortPatientName(value = ''): string {
   return `${parts[0]} ${initials.map(initial => `${initial}.`).join('')}`.trim();
 }
 
+export function patientSurname(value = ''): string {
+  const surname = value.trim().split(/\s+/).filter(Boolean)[0]?.replace(/[.,:;]+$/g, '') ?? '';
+  return /^(?:Ф\.?И\.?О\.?|дд\.мм\.гггг)$/i.test(surname) ? '' : surname;
+}
+
 export function buildReportFilename(fields: FilenameFields, suffix: '.docx' | '.pdf', fallbackDate: string): string {
   const parts = [fields.number, initials(fields.doctor), shortPatientName(fields.patient), fields.template, fields.date || fallbackDate]
     .map(value => value?.trim() ?? '').filter(Boolean);

@@ -40,6 +40,13 @@ test('template vocabulary missed by Hunspell is preloaded in the personal dictio
   assert.deepEqual(await check('Нерезко выражены дорзальные изменения при нормометрии.', [...TEMPLATE_PERSONAL_WORDS]), []);
 });
 
+test('CT radiology terms and contrast-agent names are recognized without whitelisting source typos', async () => {
+  const words = ['гиподенсивная', 'брахиоцефальный', 'атланто-дентальном', 'краниокаудальная', 'мультиспиральная', 'парапанкреатическая', 'чашечно-лоханочная', 'омнипак', 'ультравист'];
+  for (const word of words) assert.ok(TEMPLATE_PERSONAL_WORDS.includes(word), word);
+  assert.deepEqual(await check(words.join('\n'), [...TEMPLATE_PERSONAL_WORDS]), []);
+  assert.ok(!TEMPLATE_PERSONAL_WORDS.includes('кальцинированые'), 'do not whitelist a source misspelling');
+});
+
 test('Latin misspellings are underlined while common MRI abbreviations and English sequence names are accepted', async () => {
   const text = 'Мама мыла раму. safsaf T1 T2 DWI ADC FLAIR STIR diffusion-weighted.';
   const issues = await check(text);

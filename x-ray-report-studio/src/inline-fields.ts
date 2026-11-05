@@ -121,6 +121,8 @@ export const TemplateField = Mark.create({
 });
 
 type FieldRange = { from: number; to: number; mark: PMMark };
+const replacesPromptOnFirstInput = (mark: PMMark) => /\.(number|patient|birthdate)$/i.test(String(mark.attrs.id));
+
 function placeholderRange(state: EditorState, pos?: number): FieldRange | null {
   const ranges: FieldRange[] = [];
   state.doc.descendants((node, at) => {
@@ -173,13 +175,15 @@ export const InlineFieldEditing = Extension.create({
         },
         handleTextInput(view, from, to, text) {
           const range = placeholderRange(view.state, from);
-          if (!range || from !== range.from || to !== range.to) return false;
+          if (!range || to > range.to) return false;
+          if (!replacesPromptOnFirstInput(range.mark) && (from !== range.from || to !== range.to)) return false;
           return replacePlaceholder(view, text, range);
         },
         handlePaste(view, event) {
           const selection = view.state.selection;
           const range = placeholderRange(view.state, selection.from);
-          if (!range || selection.from !== range.from || selection.to !== range.to) return false;
+          if (!range || selection.to > range.to) return false;
+          if (!replacesPromptOnFirstInput(range.mark) && (selection.from !== range.from || selection.to !== range.to)) return false;
           const text = event.clipboardData?.getData('text/plain');
           if (text === undefined) return false;
           return replacePlaceholder(view, text.replace(/\r\n?/g, '\n'), range);

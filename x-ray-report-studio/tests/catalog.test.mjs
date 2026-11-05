@@ -42,6 +42,15 @@ test('CT archive templates use the MRI-style editable patient, study and physici
   }
 });
 
+test('all MRI and CT templates have stable study-number, patient and birth-date field suffixes', () => {
+  for (const template of reportTemplates) {
+    const ids = collectInlineFields(makeTemplateDocument(template.id)).map(field => field.id);
+    for (const suffix of ['number', 'patient', 'birthdate']) {
+      assert.ok(ids.some(id => id.endsWith(`.${suffix}`)), `${template.id} is missing its ${suffix} field`);
+    }
+  }
+});
+
 test('CT report paragraphs have the same first-line indent as MRI while metadata and date stay flush', () => {
   const metadata = /^\s*(?:Фамилия\s*,\s*имя\s*,\s*отчество|Исследование\s*:|Контрастный\s+препарат\s*:|Доза\s*:|Протокол\s+исследования\s*№|Мультиспиральная\s+компьютерная\s+томография|Toshiba\b)/i;
   for (const template of reportTemplates.filter(item => item.id.startsWith('ct-'))) {
