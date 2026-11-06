@@ -7,6 +7,7 @@ import {
 } from 'docx';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { draftVersion, validateDraft, type Module, type RichNode } from './model.ts';
+import { compactWordSpaces } from './word-spacing.ts';
 import { DISCLAIMER_TEXT, EQUIPMENT_TEXT } from './report-footer.ts';
 
 export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -164,7 +165,7 @@ function paragraph(node: RichNode, context: Context, extra: IParagraphOptions = 
   if (typeof attrs.fontFamily === 'string') inherited.font = attrs.fontFamily;
   if (typeof attrs.fontSizePt === 'number' && attrs.fontSizePt > 0 && attrs.fontSizePt <= 200) inherited.size = Math.round(attrs.fontSizePt * 2);
   return new Paragraph({
-    children: inline(node.content, inherited),
+    children: inline(compactWordSpaces(node.content ?? []), inherited),
     ...(style ? { style } : { heading }),
     alignment: ALIGNMENTS[attrs.textAlign],
     spacing: { line, lineRule: LineRuleType.AUTO, before: pt(attrs.spaceBeforePt, context.source && sourceStyle !== 'Normal' ? 180 : heading ? (level === 1 ? 0 : 180) : 0), after: pt(attrs.spaceAfterPt, heading ? 100 : Math.round((context.spaceAfterPt ?? 4.25) * 20)) },
