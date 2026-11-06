@@ -94,7 +94,7 @@ function newDocument(id:string) { return defaultDoctor(prepareInlineDocument(ini
 let initial = newDocument(activeTemplateId);
 try {
   const raw=read<any>(KEYS.draft,null);
-  if(raw) { const restored=validateDraft(raw);initial=prepareInlineDocument(highlightDeletionNotes(separateRecommendations(compactTemplateTables(restored.doc))));if(reportTemplates.some(t=>t.id===raw.templateId)){activeTemplateId=raw.templateId;selectedAreaId=reportTemplates.find(t=>t.id===activeTemplateId)!.areaId;} }
+  if(raw) { const restored=validateDraft(raw);initial=prepareInlineDocument(restored.doc);if(reportTemplates.some(t=>t.id===raw.templateId)){activeTemplateId=raw.templateId;selectedAreaId=reportTemplates.find(t=>t.id===activeTemplateId)!.areaId;} }
 } catch { recoveryError=true; }
 let openReports:OpenReport[]=[];
 let activeReportId='';
@@ -150,7 +150,7 @@ editor.on('selectionUpdate',()=>{ savedSelection=editor.state.selection;editor.v
 editor.on('update',()=>{if(!suppress){changedSinceOpen=true;const active=openReports.find(r=>r.id===activeReportId);if(active){active.doc=editor.getJSON() as RichNode;active.templateId=activeTemplateId;active.dirty=true;}clearTimeout(timer);if(!templateMode){$('#save-state').textContent='Сохраняется…';timer=setTimeout(saveLocal,450);}else $('#save-state').textContent='Шаблон изменён';renderCounts();renderReportTabs();}});
 editor.on('transaction',updateRibbon);
 const json=()=>editor.getJSON() as RichNode;
-function restore(doc:RichNode) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(highlightDeletionNotes(separateRecommendations(compactTemplateTables(doc)))));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
+function restore(doc:RichNode) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(doc));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
 function toast(message:string,error=false) { $('.toast')?.remove();const t=document.createElement('div');t.className=`toast${error?' error':''}`;t.role=error?'alert':'status';t.textContent=message;document.body.append(t);setTimeout(()=>t.remove(),5000); }
 function syncActiveReport(){const active=openReports.find(r=>r.id===activeReportId);if(active){active.doc=json();active.templateId=activeTemplateId;active.dirty=changedSinceOpen;}}
 function saveLocal() { if(templateMode)return;try{syncActiveReport();localStorage.setItem(KEYS.draft,JSON.stringify({format:'mri-report-studio',version:draftVersion,profile:profileForTemplate(),templateId:activeTemplateId,doc:json(),customModules:[]}));localStorage.setItem(KEYS.workspace,JSON.stringify({activeId:activeReportId,reports:openReports}));$('#save-state').textContent='Сохранено на компьютере';}catch{ $('#save-state').textContent='Не сохранено';toast('Не удалось сохранить локальный черновик. Сохраните документ Word.',true); } }
