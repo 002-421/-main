@@ -1,4 +1,5 @@
 import './style.css';
+import { makeSizeBlock } from './size-block';
 import { hasYellowFields } from './export-validation';
 import { openStickyNote } from './sticky-note';
 import { addReportSeparators } from './report-separators';
@@ -167,7 +168,7 @@ function renderReportTabs(){const tabs=$('#report-tabs');tabs.innerHTML=openRepo
 function modalityForTemplate(id=activeTemplateId):'mri'|'ct' { return id.startsWith('ct-')?'ct':'mri'; }
 function renderTemplates() { const modality=($('#modality-select') as HTMLSelectElement).value||modalityForTemplate();const choices=areas.filter(a=>a.id.startsWith(modality==='ct'?'ct-':'')&& (modality==='ct'||!a.id.startsWith('ct-')));if(!choices.some(a=>a.id===selectedAreaId))selectedAreaId=choices[0]?.id??'';const areaSelect=$('#area-select') as HTMLSelectElement;areaSelect.innerHTML=choices.map(a=>`<option value="${esc(a.id)}">${esc(a.title)}</option>`).join('');areaSelect.value=selectedAreaId;$('#template-list').innerHTML=reportTemplates.filter(t=>t.areaId===selectedAreaId).map(t=>`<button class="template-card ${t.id===activeTemplateId?'selected':''}" data-template="${esc(t.id)}"><span class="template-icon">▤</span><span><strong>${esc(t.title)}</strong><small>${esc(t.description)}${overrides[t.id]?' · Изменённый шаблон':''}</small></span>${t.id===activeTemplateId?'<span class="check">✓</span>':''}</button>`).join(''); }
 let blockFilter='all';
-function allBlocks(){return [...customBlocks,...builtInBlocks];}
+function allBlocks():Block[]{return [...customBlocks,{id:'standard-size',title:'Размер (фронтальный/сагиттальный/вертикальный)',areaId:'',tags:'размер размеры фронтальный сагиттальный вертикальный',doc:makeSizeBlock(modalityForTemplate()==='ct'),custom:false},...builtInBlocks];}
 function plain(doc:RichNode):string {if(doc.type==='reportField')return doc.attrs?.value||doc.attrs?.hint||'';return doc.text??(doc.content??[]).map(plain).join(['paragraph','heading','doc','reportSection'].includes(doc.type)?'\n':'');}
 function exportDocument():RichNode{return templateMode?promoteInlineTemplate(json()):attachDoctorStamp(json(),settings.doctorStamps,settings.doctorStampSizes,settings.doctorStampHeights,settings.doctorStampPositions);}
 function doctorStampForLine(line:string){const normalized=line.toLocaleLowerCase('ru');const name=Object.keys(settings.doctorStamps).sort((a,b)=>b.length-a.length).find(key=>normalized.includes(key.toLocaleLowerCase('ru')));if(!name)return null;return {src:settings.doctorStamps[name],size:settings.doctorStampSizes[name]??{width:140,height:55},height:settings.doctorStampHeights[name]??140,position:settings.doctorStampPositions[name]??{x:0,y:0}};}
