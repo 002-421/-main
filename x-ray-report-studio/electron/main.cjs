@@ -198,7 +198,11 @@ async function getUpdateManifest() {
   return { version: manifest.version, currentVersion: activeApplicationVersion, url: manifest.url, sha256: manifest.sha256.toLowerCase(), available: compareVersions(manifest.version, activeApplicationVersion) > 0 };
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  const exportSettingsFile = path.join(app.getPath('userData'), 'export-folders.json');
+  let lastWordDirectory = '';
+  try { const saved = JSON.parse(await fs.readFile(exportSettingsFile, 'utf8')); if (typeof saved.word === 'string' && path.isAbsolute(saved.word)) lastWordDirectory = saved.word; } catch {}
+
   startupLogFile = path.join(app.getPath('userData'), 'logs', `startup-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
   void fs.mkdir(path.dirname(startupLogFile), { recursive: true }).then(() => logStartup({ event: 'app-start', version: app.getVersion(), platform: process.platform, hardwareAcceleration: false, gpuCompositing: false, directComposition: false, executable: process.execPath, resources: process.resourcesPath }));
   ipcMain.on('app:ready', (event, details) => {
@@ -256,9 +260,16 @@ app.whenReady().then(() => {
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) => callback({ cancel: true }));
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   session.defaultSession.on('will-download', (_event, item) => {
+    const isWord = /\.docx$/i.test(item.getFilename());
+    const directory = isWord && lastWordDirectory && require('node:fs').existsSync(lastWordDirectory) ? lastWordDirectory : app.getPath('documents');
     item.setSaveDialogOptions({
       title: 'Сохранить файл',
-      defaultPath: path.join(app.getPath('documents'), path.basename(item.getFilename())),
+      defaultPath: path.join(directory, path.basename(item.getFilename())),
+    });
+    if (isWord) item.once('done', async (_event, state) => {
+      if (state !== 'completed' || !item.getSavePath()) return;
+      lastWordDirectory = path.dirname(item.getSavePath());
+      try { await fs.writeFile(exportSettingsFile, JSON.stringify({word: lastWordDirectory}), 'utf8'); } catch (error) { console.error('Не удалось сохранить папку Word:', error.message); }
     });
   });
 
