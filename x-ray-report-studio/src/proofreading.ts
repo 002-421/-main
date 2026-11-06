@@ -1,3 +1,4 @@
+import morphologyLicense from './assets/morphology/LICENSE.txt?raw';
 import aff from '../node_modules/dictionary-ru/index.aff?raw';
 import dic from '../node_modules/dictionary-ru/index.dic?raw';
 import dictionaryLicense from '../node_modules/dictionary-ru/license?raw';
@@ -13,7 +14,7 @@ export { MAX_PROOF_ISSUES } from './proofreading-core';
 
 // The dictionary and its licences are included in the standalone HTML bundle.
 // This checker never sends report text, names, or personal words to a service.
-export const russianProofreadingLicense = `dictionary-ru 3.0.0\n${dictionaryLicense}\n\ndictionary-en 4.0.0\n${englishDictionaryLicense}\n\nnspell 2.1.5\n${nspellLicense}\n\nis-buffer 2.0.5\n${isBufferLicense}`;
+export const russianProofreadingLicense = `dictionary-ru 3.0.0\n${dictionaryLicense}\n\ndictionary-en 4.0.0\n${englishDictionaryLicense}\n\nnspell 2.1.5\n${nspellLicense}\n\nis-buffer 2.0.5\n${isBufferLicense}\n\n${morphologyLicense}`;
 
 let checker: ReturnType<typeof createRussianChecker> | undefined;
 export async function checkRussian(text: string, personalWords: string[] = []) {

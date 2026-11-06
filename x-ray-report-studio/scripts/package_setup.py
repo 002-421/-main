@@ -38,6 +38,7 @@ def collect_licenses():
         raise RuntimeError('Bundled font license notices are missing.')
     notices.append(f"\n{'=' * 60}\nBundled DejaVu Sans and Carlito fonts\n"
                    f"{font_notice.read_text(encoding='utf-8')}\n")
+    notices.append('\n' + (ROOT / 'src/assets/morphology/LICENSE.txt').read_text(encoding='utf-8') + '\n')
     return ''.join(notices)
 
 

@@ -1,6 +1,6 @@
 {
   "name": "x-ray-report-studio",
-  "version": "0.4.43",
+  "version": "0.4.44",
   "private": true,
   "description": "X-ray Report Studio: локальный редактор протоколов МРТ и КТ с шаблонами, проверкой русского текста, DOCX и PDF",
   "main": "electron/main.cjs",
@@ -12,7 +12,8 @@
     "test": "node --test tests/*.test.mjs",
     "test:browser": "node tests/browser.mjs",
     "package:windows": "python3 scripts/package_windows.py",
-    "package:setup": "python3 scripts/package_setup.py"
+    "package:setup": "python3 scripts/package_setup.py",
+    "test:morphology-browser": "node tests/morphology-browser.mjs"
   },
   "dependencies": {
     "@tiptap/core": "3.32.0",
@@ -23,6 +24,7 @@
     "@tiptap/extension-text-align": "3.32.0",
     "@tiptap/extension-text-style": "3.32.0",
     "@tiptap/starter-kit": "3.32.0",
+    "az": "0.2.3",
     "dictionary-en": "4.0.0",
     "dictionary-ru": "^3.0.0",
     "docx": "^9.14.0",

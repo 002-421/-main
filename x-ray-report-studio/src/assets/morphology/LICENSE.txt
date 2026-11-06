@@ -1,0 +1,26 @@
+Az.js 0.2.3 — Denis Olshin (https://github.com/deNULL/Az.js), MIT license.
+Copyright Denis Olshin.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Morphological dictionary: OpenCorpora (https://opencorpora.org/), version 0.92,
+revision 394551, compiled 2016-04-14 for pymorphy2/Az.js.
+OpenCorpora dictionary is licensed CC BY-SA 3.0:
+https://creativecommons.org/licenses/by-sa/3.0/
+The dictionary is redistributed without linguistic modifications as the binary
+files shipped in Az.js 0.2.3 (https://www.npmjs.com/package/az/v/0.2.3), packed in
+a ZIP archive for offline loading. Original metadata is included in the archive.

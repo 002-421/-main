@@ -61,7 +61,7 @@ test('contextual grammar rules catch infinitive, agreement and preposition error
   const text = 'Очаг может находится в центре. Согласно заключения, очаговые изменение отсутствуют. Данные свидетельствует о динамике. В отличии от предыдущего исследования, в течении дня состояние стабильно.';
   const issues = (await check(text)).filter(issue => issue.kind === 'grammar');
   const suggestions = issues.flatMap(issue => issue.suggestions);
-  for (const expected of ['находиться', 'Согласно заключению', 'очаговые изменения', 'Данные свидетельствуют', 'В отличие от', 'в течение']) {
+  for (const expected of ['находиться', 'заключению', 'изменения', 'свидетельствуют', 'В отличие от', 'в течение']) {
     assert.ok(suggestions.includes(expected), `missing contextual suggestion: ${expected}`);
   }
   const fixed = issues.reduceRight((value, issue) => value.slice(0, issue.start) + issue.suggestions[0] + value.slice(issue.end), text);
@@ -110,13 +110,13 @@ test('issue count is bounded and each suggested replacement addresses its origin
 test('medical genitive plural agreement catches singular modifiers without flagging correct phrases', async()=>{
  const text='Высота остального межпозвонковых дисков не изменена, сигнал от остальных дисков по Т2 не снижен.';
  const issues=await check(text);
- const issue=issues.find(item=>item.id.startsWith('grammar.number-agreement'));
+ const issue=issues.find(item=>item.id.startsWith('grammar.morph.modifier-agreement'));
  assert.ok(issue);
  assert.equal(issue.text,'остального');
  assert.deepEqual(issue.suggestions,['остальных']);
  assert.equal(text.slice(issue.start,issue.end),'остального');
  for(const phrase of ['Высота остальных межпозвонковых дисков не изменена.','Высота остального межпозвонкового диска не изменена.','Сигнал от данного очага.']){
-  assert.equal((await check(phrase)).some(item=>item.id.startsWith('grammar.number-agreement')),false,phrase);
+  assert.equal((await check(phrase)).some(item=>item.id.startsWith('grammar.morph.modifier-agreement')),false,phrase);
  }
  const other=await check('Сигнал от данного суставов и этого дисков.');
  assert.ok(other.some(issue=>issue.suggestions.includes('данных')));
@@ -124,21 +124,21 @@ test('medical genitive plural agreement catches singular modifiers without flagg
 });
 
 test('medical gender, case and past-tense agreement offer contextual corrections',async()=>{
- for(const [text,correction] of [['Печень увеличен.','Печень увеличена'],['Почки не расширена.','Почки не расширены'],['В левом почке очаг.','В левой почке'],['Было выполнена томография.','Была выполнена'],['Были проведено исследование.','Было проведено исследование']]){
+ for(const [text,correction] of [['Печень увеличен.','увеличена'],['Почки не расширена.','расширены'],['В левом почке очаг.','левой'],['Было выполнена томография.','Была'],['Были проведено исследование.','Было']]){
   assert.ok((await check(text)).some(issue=>issue.kind==='grammar'&&issue.suggestions.includes(correction)),text);
  }
  for(const text of ['Печень увеличена.','Почки не расширены.','В левой почке очаг.','Было выполнено исследование.','Будет проведено исследование.']){
-  assert.equal((await check(text)).some(issue=>issue.id.startsWith('grammar.agreement')),false,text);
+  assert.equal((await check(text)).some(issue=>issue.id.startsWith('grammar.morph.')),false,text);
  }
 });
 
 test('joint space agreement catches the reported singular noun mismatch',async()=>{
  const text='Суставная щели нерезко сужена в области медиальных мыщелков, конгруэнтность суставных поверхностей сохранена.';
- const issue=(await check(text)).find(issue=>issue.id.startsWith('grammar.joint-space-agreement'));
+ const issue=(await check(text)).find(issue=>issue.id.startsWith('grammar.morph.noun-agreement'));
  assert.ok(issue);
- assert.equal(issue.text,'Суставная щели');
- assert.deepEqual(issue.suggestions,['Суставная щель']);
+ assert.equal(issue.text,'щели');
+ assert.deepEqual(issue.suggestions,['щель']);
  for(const valid of ['Суставная щель нерезко сужена.','Суставные щели нерезко сужены.']){
-  assert.equal((await check(valid)).some(issue=>issue.id.startsWith('grammar.joint-space-agreement')),false);
+  assert.equal((await check(valid)).some(issue=>issue.id.startsWith('grammar.morph.noun-agreement')),false);
  }
 });

@@ -1,0 +1,25 @@
+import {chromium} from 'playwright-core';
+import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {readFile} from 'node:fs/promises';
+const server=createServer(async(_req,res)=>{res.setHeader('Content-Type','text/html;charset=utf-8');res.end(await readFile('dist/index.html'));});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const origin=`http://127.0.0.1:${server.address().port}`;
+let browser;
+try {
+ browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
+ const page=await browser.newPage(),errors=[],external=[];
+ page.on('pageerror',error=>errors.push(error.message));
+ page.on('request',request=>{if(/^https?:/.test(request.url())&&!request.url().startsWith(origin))external.push(request.url());});
+ await page.goto(origin);await page.locator('.report-content').waitFor();
+ await page.locator('.report-content').fill('Суставная щели нерезко сужена. Высота остального межпозвонковых дисков не изменена. Большая окно открыто.');
+ await page.locator('#check-now').click();
+ await page.waitForFunction(()=>Array.from(document.querySelectorAll('.proof-grammar')).some(el=>el.textContent==='щели'),{},{timeout:30000});
+ const warnings=await page.locator('.proof-grammar').allTextContents();
+ for(const word of ['щели','остального','Большая'])assert.ok(warnings.includes(word),word);
+ await page.locator('.proof-grammar').filter({hasText:/^щели$/}).click();
+ await page.locator('.proof-popup [data-correction]').filter({hasText:/^щель$/}).click();
+ assert.match(await page.locator('.report-content').innerText(),/Суставная щель нерезко сужена/);
+ assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
+ console.log('PASS: offline browser whole-text morphology and correction, no external requests.');
+} finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
