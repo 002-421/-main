@@ -25,6 +25,12 @@ try {
  const inserted=await page.locator('.report-content').innerText();
  for(const label of ['фронтальный','сагиттальный','вертикальный'])assert.ok(inserted.includes(label),label);
  assert.equal(await page.locator('.report-content mark[data-color="#ffff00"]').count(),1);
+ await page.locator('#save-docx').click();await page.locator('#preview-save-word').click();
+ await page.locator('.yellow-export-warning').waitFor();
+ assert.ok(await page.locator('.yellow-export-warning-text').evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=24));
+ const downloadEvent=page.waitForEvent('download');await page.locator('#continue-yellow-export').click();
+ const download=await downloadEvent;assert.match(download.suggestedFilename(),/\.docx$/i);
+ assert.equal(await page.locator('.yellow-export-warning').count(),0);
  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
  console.log('PASS: offline browser whole-text morphology and correction, no external requests.');
 } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
