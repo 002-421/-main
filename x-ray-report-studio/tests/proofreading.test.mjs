@@ -131,3 +131,14 @@ test('medical gender, case and past-tense agreement offer contextual corrections
   assert.equal((await check(text)).some(issue=>issue.id.startsWith('grammar.agreement')),false,text);
  }
 });
+
+test('joint space agreement catches the reported singular noun mismatch',async()=>{
+ const text='Суставная щели нерезко сужена в области медиальных мыщелков, конгруэнтность суставных поверхностей сохранена.';
+ const issue=(await check(text)).find(issue=>issue.id.startsWith('grammar.joint-space-agreement'));
+ assert.ok(issue);
+ assert.equal(issue.text,'Суставная щели');
+ assert.deepEqual(issue.suggestions,['Суставная щель']);
+ for(const valid of ['Суставная щель нерезко сужена.','Суставные щели нерезко сужены.']){
+  assert.equal((await check(valid)).some(issue=>issue.id.startsWith('grammar.joint-space-agreement')),false);
+ }
+});
