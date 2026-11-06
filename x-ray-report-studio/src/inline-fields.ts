@@ -1,3 +1,4 @@
+import { normalizeDateInput } from './date-input.ts';
 import { Extension, Mark, mergeAttributes, type Editor } from '@tiptap/core';
 import { Mapping } from '@tiptap/pm/transform';
 import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
@@ -262,6 +263,9 @@ export const InlineFieldEditing = Extension.create({
           tr ??= state.tr;
           for (const n of group.nodes) tr.removeMark(n.pos, n.pos + n.size, n.mark).addMark(n.pos, n.pos + n.size, n.mark.type.create({ ...n.mark.attrs, filled: true }));
         }
+        const dateEdits: Array<{pos:number;size:number;text:string;marks:readonly PMMark[]}> = [];
+        state.doc.descendants((node,pos)=>{if(!node.isText)return;const normalized=normalizeDateInput(node.text??'');if(normalized!==node.text)dateEdits.push({pos,size:node.nodeSize,text:normalized,marks:node.marks});});
+        for(const edit of dateEdits.reverse()){tr??=state.tr;tr.replaceWith(edit.pos,edit.pos+edit.size,state.schema.text(edit.text,tr.doc.resolve(edit.pos).nodeAfter?.marks??edit.marks));}
         return tr?.setMeta('inline-field-fix', true);
       },
     })];

@@ -31,6 +31,13 @@ try {
  const downloadEvent=page.waitForEvent('download');await page.locator('#continue-yellow-export').click();
  const download=await downloadEvent;assert.match(download.suggestedFilename(),/\.docx$/i);
  assert.equal(await page.locator('.yellow-export-warning').count(),0);
+ await page.locator('.report-content').fill('Дата рождения: 20,01,2026');
+ await page.waitForFunction(()=>document.querySelector('.report-content').textContent.includes('20.01.2026'));
+ await page.locator('.report-tab-close').first().click();await page.locator('#close-unsaved-report').waitFor();
+ await page.getByRole('button',{name:'Продолжить редактирование',exact:true}).click();
+ assert.match(await page.locator('.report-content').innerText(),/20\.01\.2026/);
+ await page.locator('.report-tab-close').first().click();await page.locator('#close-unsaved-report').click();
+ assert.doesNotMatch(await page.locator('.report-content').innerText(),/20\.01\.2026/);
  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
  console.log('PASS: offline browser whole-text morphology and correction, no external requests.');
 } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}

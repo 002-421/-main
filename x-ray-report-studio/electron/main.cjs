@@ -259,7 +259,7 @@ app.whenReady().then(async () => {
   // All application resources are bundled. Clinical data is never sent to a server.
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) => callback({ cancel: true }));
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
-  session.defaultSession.on('will-download', (_event, item) => {
+  session.defaultSession.on('will-download', (_event, item, contents) => {
     const isWord = /\.docx$/i.test(item.getFilename());
     const directory = isWord && lastWordDirectory && require('node:fs').existsSync(lastWordDirectory) ? lastWordDirectory : app.getPath('documents');
     item.setSaveDialogOptions({
@@ -268,6 +268,7 @@ app.whenReady().then(async () => {
     });
     if (isWord) item.once('done', async (_event, state) => {
       if (state !== 'completed' || !item.getSavePath()) return;
+      if(contents&&!contents.isDestroyed())contents.send('report:word-saved',item.getURL());
       lastWordDirectory = path.dirname(item.getSavePath());
       try { await fs.writeFile(exportSettingsFile, JSON.stringify({word: lastWordDirectory}), 'utf8'); } catch (error) { console.error('Не удалось сохранить папку Word:', error.message); }
     });
