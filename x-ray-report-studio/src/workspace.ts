@@ -1,4 +1,5 @@
 import './style.css';
+import { justifyDescription } from './description-alignment';
 import { makeSizeBlock } from './size-block';
 import { hasYellowFields } from './export-validation';
 import { openStickyNote } from './sticky-note';
@@ -90,7 +91,7 @@ function defaultDoctor(doc:RichNode):RichNode {
   let applied=false;
   const walk=(n:RichNode)=>{if(n.content)n.content=n.content.filter(child=>{const m=fieldMark(child);if(m?.attrs?.id===DOCTOR_FIELD_ID&&child.type==='text'){if(applied)return false;applied=true;child.text=settings.doctor.trim();m.attrs={...m.attrs,filled:true};}walk(child);return true;});};walk(doc);return doc;
 }
-function newDocument(id:string) { return defaultDoctor(prepareInlineDocument(initializeReportFooter(resetInlineTemplate(highlightDeletionNotes(separateRecommendations(compactTemplateTables(overrides[id]??makeTemplateDocument(id)))))))); }
+function newDocument(id:string) { return justifyDescription(defaultDoctor(prepareInlineDocument(initializeReportFooter(resetInlineTemplate(highlightDeletionNotes(separateRecommendations(compactTemplateTables(overrides[id]??makeTemplateDocument(id))))))))); }
 let initial = newDocument(activeTemplateId);
 try {
   const raw=read<any>(KEYS.draft,null);
