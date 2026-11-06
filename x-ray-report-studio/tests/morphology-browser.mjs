@@ -38,6 +38,12 @@ try {
  assert.match(await page.locator('.report-content').innerText(),/20\.01\.2026/);
  await page.locator('.report-tab-close').first().click();await page.locator('#close-unsaved-report').click();
  assert.doesNotMatch(await page.locator('.report-content').innerText(),/20\.01\.2026/);
+ await page.locator('#area-select').selectOption('joints');await page.locator('[data-template="joints-gs"]').click();
+ await page.locator('.report-content').fill('Вид исследования: МРТ левого голеностопного сустава');
+ await page.waitForFunction(()=>document.querySelector('#document-name').textContent==='ГС лев');
+ assert.match(await page.locator('.report-tab.active .report-tab-select').innerText(),/ГС лев/);
+ await page.locator('#save-docx').click();const sidedDownloadEvent=page.waitForEvent('download');await page.locator('#preview-save-word').click();
+ const sidedDownload=await sidedDownloadEvent;assert.match(sidedDownload.suggestedFilename(),/ГС лев/);
  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
  console.log('PASS: offline browser whole-text morphology and correction, no external requests.');
 } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}

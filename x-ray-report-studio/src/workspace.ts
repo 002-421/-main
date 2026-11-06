@@ -1,4 +1,5 @@
 import './style.css';
+import { titleWithStudySide } from './report-side';
 import { justifyDescription } from './description-alignment';
 import { makeSizeBlock } from './size-block';
 import { hasYellowFields } from './export-validation';
@@ -157,16 +158,17 @@ function toast(message:string,error=false) { $('.toast')?.remove();const t=docum
 function syncActiveReport(){const active=openReports.find(r=>r.id===activeReportId);if(active){active.doc=json();active.templateId=activeTemplateId;active.dirty=changedSinceOpen;}}
 function saveLocal() { if(templateMode)return;try{syncActiveReport();localStorage.setItem(KEYS.draft,JSON.stringify({format:'mri-report-studio',version:draftVersion,profile:profileForTemplate(),templateId:activeTemplateId,doc:json(),customModules:[]}));localStorage.setItem(KEYS.workspace,JSON.stringify({activeId:activeReportId,reports:openReports}));$('#save-state').textContent='Сохранено на компьютере';}catch{ $('#save-state').textContent='Не сохранено';toast('Не удалось сохранить локальный черновик. Сохраните документ Word.',true); } }
 function profileForTemplate() { const area=reportTemplates.find(t=>t.id===activeTemplateId)?.areaId;return area==='head'?'brain':'custom'; }
+function reportTitle(id:string,doc:RichNode){const template=reportTemplates.find(t=>t.id===id);return template?titleWithStudySide(template.title,overrides[id]??template.doc,doc):'Исследование';}
 function renderCounts() {
  const fields=collectInlineFields(json()),empty=fields.filter(f=>!f.filled);$('#empty-count').textContent=String(empty.length);
- const templateTitle=reportTemplates.find(t=>t.id===activeTemplateId)?.title??'Исследование';
+ const templateTitle=reportTitle(activeTemplateId,json());
  const patient=extractFilenameFields(editor.getText({blockSeparator:'\n'})).patient;
  $('#document-name').textContent=patient?`${shortPatientName(patient)} · ${templateTitle}`:templateTitle;
- $('#template-name').textContent=reportTemplates.find(t=>t.id===activeTemplateId)?.title??'Открытое описание';
+ $('#template-name').textContent=templateTitle;
  $('#word-count').textContent=`${editor.state.doc.textContent.split(/\s+/).filter(Boolean).length} слов`;
  $('#review-unchanged').textContent=review?`Неизменённых частей: ${countUnchangedParts(json())}`:'Подсветить неизменённое';
 }
-function renderReportTabs(){const tabs=$('#report-tabs');tabs.innerHTML=openReports.map((report,index)=>{const title=reportTemplates.find(t=>t.id===report.templateId)?.title??'Заключение';const patient=extractFilenameFields(plain(report.doc)).patient;const label=patient?`${patientSurname(patient)} · ${title}`:`${title} ${index+1}`;return `<div class="report-tab ${report.id===activeReportId?'active':''}"><button class="report-tab-select" data-report-select="${esc(report.id)}" title="${esc(label)}">${report.dirty?'● ':''}${esc(label)}</button><button class="report-tab-close" data-report-close="${esc(report.id)}" aria-label="Закрыть ${esc(label)}" title="Закрыть">×</button></div>`;}).join('')+`<button class="report-tab-add" id="add-report-tab" aria-label="Новое заключение" title="Новое заключение">＋</button>`;}
+function renderReportTabs(){const tabs=$('#report-tabs');tabs.innerHTML=openReports.map((report,index)=>{const title=reportTitle(report.templateId,report.doc);const patient=extractFilenameFields(plain(report.doc)).patient;const label=patient?`${patientSurname(patient)} · ${title}`:`${title} ${index+1}`;return `<div class="report-tab ${report.id===activeReportId?'active':''}"><button class="report-tab-select" data-report-select="${esc(report.id)}" title="${esc(label)}">${report.dirty?'● ':''}${esc(label)}</button><button class="report-tab-close" data-report-close="${esc(report.id)}" aria-label="Закрыть ${esc(label)}" title="Закрыть">×</button></div>`;}).join('')+`<button class="report-tab-add" id="add-report-tab" aria-label="Новое заключение" title="Новое заключение">＋</button>`;}
 function modalityForTemplate(id=activeTemplateId):'mri'|'ct' { return id.startsWith('ct-')?'ct':'mri'; }
 function renderTemplates() { const modality=($('#modality-select') as HTMLSelectElement).value||modalityForTemplate();const choices=areas.filter(a=>a.id.startsWith(modality==='ct'?'ct-':'')&& (modality==='ct'||!a.id.startsWith('ct-')));if(!choices.some(a=>a.id===selectedAreaId))selectedAreaId=choices[0]?.id??'';const areaSelect=$('#area-select') as HTMLSelectElement;areaSelect.innerHTML=choices.map(a=>`<option value="${esc(a.id)}">${esc(a.title)}</option>`).join('');areaSelect.value=selectedAreaId;$('#template-list').innerHTML=reportTemplates.filter(t=>t.areaId===selectedAreaId).map(t=>`<button class="template-card ${t.id===activeTemplateId?'selected':''}" data-template="${esc(t.id)}"><span class="template-icon">▤</span><span><strong>${esc(t.title)}</strong><small>${esc(t.description)}${overrides[t.id]?' · Изменённый шаблон':''}</small></span>${t.id===activeTemplateId?'<span class="check">✓</span>':''}</button>`).join(''); }
 let blockFilter='all';
@@ -304,7 +306,7 @@ function filename(suffix:string){
  const doctor=parsed.doctor||usable(fields.find(f=>f.id===DOCTOR_FIELD_ID))||settings.doctor;
  const patient=parsed.patient||usable(fields.find(f=>f.id===PATIENT_FIELD_ID||f.id.endsWith('.patient')||f.id==='base.1'));
  const reportDate=parsed.date||usable(fields.find(f=>f.id.endsWith('.reportdate')))||new Date().toLocaleDateString('ru-RU');
- const title=reportTemplates.find(t=>t.id===activeTemplateId)?.title??'МРТ';
+ const title=reportTitle(activeTemplateId,json());
  return buildReportFilename({number,doctor,patient,template:title,date:reportDate},suffix as '.docx'|'.pdf',new Date().toLocaleDateString('ru-RU'));
 }
 const pendingWordSaves=new Map<string,{id:string;snapshot:string}>();
