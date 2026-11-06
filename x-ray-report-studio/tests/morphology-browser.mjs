@@ -20,6 +20,11 @@ try {
  await page.locator('.proof-grammar').filter({hasText:/^щели$/}).click();
  await page.locator('.proof-popup [data-correction]').filter({hasText:/^щель$/}).click();
  assert.match(await page.locator('.report-content').innerText(),/Суставная щель нерезко сужена/);
+ await page.locator('.report-content').fill('Проверка вставки: ');
+ await page.locator('#insert-size').click();
+ const inserted=await page.locator('.report-content').innerText();
+ for(const label of ['фронтальный','сагиттальный','вертикальный'])assert.ok(inserted.includes(label),label);
+ assert.equal(await page.locator('.report-content mark[data-color="#ffff00"]').count(),3);
  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
  console.log('PASS: offline browser whole-text morphology and correction, no external requests.');
 } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
