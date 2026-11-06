@@ -106,3 +106,28 @@ test('issue count is bounded and each suggested replacement addresses its origin
   const replaced = text.slice(0, first.start) + first.suggestions[0] + text.slice(first.end);
   assert.ok(replaced.startsWith('Исследование не выявило изменений.'));
 });
+
+test('medical genitive plural agreement catches singular modifiers without flagging correct phrases', async()=>{
+ const text='Высота остального межпозвонковых дисков не изменена, сигнал от остальных дисков по Т2 не снижен.';
+ const issues=await check(text);
+ const issue=issues.find(item=>item.id.startsWith('grammar.number-agreement'));
+ assert.ok(issue);
+ assert.equal(issue.text,'остального');
+ assert.deepEqual(issue.suggestions,['остальных']);
+ assert.equal(text.slice(issue.start,issue.end),'остального');
+ for(const phrase of ['Высота остальных межпозвонковых дисков не изменена.','Высота остального межпозвонкового диска не изменена.','Сигнал от данного очага.']){
+  assert.equal((await check(phrase)).some(item=>item.id.startsWith('grammar.number-agreement')),false,phrase);
+ }
+ const other=await check('Сигнал от данного суставов и этого дисков.');
+ assert.ok(other.some(issue=>issue.suggestions.includes('данных')));
+ assert.ok(other.some(issue=>issue.suggestions.includes('этих')));
+});
+
+test('medical gender, case and past-tense agreement offer contextual corrections',async()=>{
+ for(const [text,correction] of [['Печень увеличен.','Печень увеличена'],['Почки не расширена.','Почки не расширены'],['В левом почке очаг.','В левой почке'],['Было выполнена томография.','Была выполнена'],['Были проведено исследование.','Было проведено исследование']]){
+  assert.ok((await check(text)).some(issue=>issue.kind==='grammar'&&issue.suggestions.includes(correction)),text);
+ }
+ for(const text of ['Печень увеличена.','Почки не расширены.','В левой почке очаг.','Было выполнено исследование.','Будет проведено исследование.']){
+  assert.equal((await check(text)).some(issue=>issue.id.startsWith('grammar.agreement')),false,text);
+ }
+});
