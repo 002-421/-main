@@ -102,7 +102,8 @@ try {
 let openReports:OpenReport[]=[];
 let activeReportId='';
 let workspaceRecoveryBlocked=false;
-const workspaceRaw=localStorage.getItem(KEYS.workspace);
+let workspaceRaw:string|null=null;
+try { workspaceRaw=localStorage.getItem(KEYS.workspace); } catch { recoveryError=true;workspaceRecoveryBlocked=true; }
 if(workspaceRaw!==null){
   try {
     const stored=JSON.parse(workspaceRaw);
@@ -122,7 +123,7 @@ if(workspaceRaw!==null){
     // Never silently replace a damaged workspace with a new empty one.
     // Keep the original bytes before allowing any subsequent autosave.
     try {
-      const backupKey=KEYS.workspace+'.recovery.'+Date.now();
+      const backupKey=KEYS.workspace+'.recovery.'+Date.now()+'.'+crypto.randomUUID();
       localStorage.setItem(backupKey,workspaceRaw);
     } catch { workspaceRecoveryBlocked=true; }
     if(!workspaceRecoveryBlocked && Array.isArray((error as {validReports?:OpenReport[]}).validReports))
