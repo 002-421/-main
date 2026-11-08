@@ -105,6 +105,7 @@ try{
  console.log('PASS: visible theme toggle changes and restores dark mode while keeping the report paper white.');
 
  for (const areaId of [...new Set(reportTemplates.map(template=>template.areaId))]) {
+  await page.locator('#modality-select').selectOption(areaId.startsWith('ct-')?'ct':'mri');
   await page.locator('#area-select').selectOption(areaId);
   for (const template of reportTemplates.filter(item=>item.areaId===areaId)) {
    await page.locator(`[data-template="${template.id}"]`).click();
