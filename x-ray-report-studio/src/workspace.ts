@@ -101,19 +101,41 @@ try {
 } catch { recoveryError=true; }
 let openReports:OpenReport[]=[];
 let activeReportId='';
-try {
-  const stored=read<any>(KEYS.workspace,null);
-  if(Array.isArray(stored?.reports)) for(const item of stored.reports.slice(0,12)) {
-    if(!item||typeof item.id!=='string'||typeof item.templateId!=='string'||!reportTemplates.some(t=>t.id===item.templateId))continue;
-    const doc=validateDraft({format:'mri-report-studio',version:draftVersion,templateId:item.templateId,profile:'custom',doc:item.doc,customModules:[]}).doc;
-    openReports.push({id:item.id,templateId:item.templateId,doc,dirty:Boolean(item.dirty)});
+let workspaceRecoveryBlocked=false;
+const workspaceRaw=localStorage.getItem(KEYS.workspace);
+if(workspaceRaw!==null){
+  try {
+    const stored=JSON.parse(workspaceRaw);
+    if(!stored || !Array.isArray(stored.reports)) throw new Error('Invalid workspace structure');
+    let invalidReports=0;
+    for(const item of stored.reports.slice(0,12)){
+      try {
+        if(!item||typeof item.id!=='string'||typeof item.templateId!=='string'||!reportTemplates.some(t=>t.id===item.templateId))throw new Error('Invalid report metadata');
+        const doc=validateDraft({format:'mri-report-studio',version:draftVersion,templateId:item.templateId,profile:'custom',doc:item.doc,customModules:[]}).doc;
+        openReports.push({id:item.id,templateId:item.templateId,doc,dirty:Boolean(item.dirty)});
+      } catch { invalidReports++; }
+    }
+    if(stored.reports.length>12)invalidReports+=stored.reports.length-12;
+    if(invalidReports)throw Object.assign(new Error('Some workspace reports are invalid'),{validReports:openReports});
+  } catch(error){
+    recoveryError=true;
+    // Never silently replace a damaged workspace with a new empty one.
+    // Keep the original bytes before allowing any subsequent autosave.
+    try {
+      const backupKey=KEYS.workspace+'.recovery.'+Date.now();
+      localStorage.setItem(backupKey,workspaceRaw);
+    } catch { workspaceRecoveryBlocked=true; }
+    if(!workspaceRecoveryBlocked && Array.isArray((error as {validReports?:OpenReport[]}).validReports))
+      openReports=(error as {validReports:OpenReport[]}).validReports;
   }
-  if(openReports.length){
-    activeReportId=openReports.some(r=>r.id===stored.activeId)?stored.activeId:openReports[0].id;
-    const active=openReports.find(r=>r.id===activeReportId)!;initial=active.doc;activeTemplateId=active.templateId;
-    selectedAreaId=reportTemplates.find(t=>t.id===activeTemplateId)!.areaId;changedSinceOpen=active.dirty;
-  }
-} catch { openReports=[];activeReportId=''; }
+}
+if(openReports.length){
+  const stored=read<{activeId?:string}>(KEYS.workspace,{});
+  activeReportId=openReports.some(r=>r.id===stored.activeId)?stored.activeId!:openReports[0].id;
+  const active=openReports.find(r=>r.id===activeReportId)!;
+  initial=active.doc;activeTemplateId=active.templateId;
+  selectedAreaId=reportTemplates.find(t=>t.id===activeTemplateId)!.areaId;changedSinceOpen=active.dirty;
+}
 if(!openReports.length){activeReportId=crypto.randomUUID();openReports=[{id:activeReportId,templateId:activeTemplateId,doc:initial,dirty:false}];}
 
 $('#app').innerHTML=`<div class="shell">
@@ -156,7 +178,7 @@ const json=()=>editor.getJSON() as RichNode;
 function restore(doc:RichNode) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(doc));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
 function toast(message:string,error=false) { $('.toast')?.remove();const t=document.createElement('div');t.className=`toast${error?' error':''}`;t.role=error?'alert':'status';t.textContent=message;document.body.append(t);setTimeout(()=>t.remove(),5000); }
 function syncActiveReport(){const active=openReports.find(r=>r.id===activeReportId);if(active){active.doc=json();active.templateId=activeTemplateId;active.dirty=changedSinceOpen;}}
-function saveLocal() { if(templateMode)return;try{syncActiveReport();localStorage.setItem(KEYS.draft,JSON.stringify({format:'mri-report-studio',version:draftVersion,profile:profileForTemplate(),templateId:activeTemplateId,doc:json(),customModules:[]}));localStorage.setItem(KEYS.workspace,JSON.stringify({activeId:activeReportId,reports:openReports}));$('#save-state').textContent='Сохранено на компьютере';}catch{ $('#save-state').textContent='Не сохранено';toast('Не удалось сохранить локальный черновик. Сохраните документ Word.',true); } }
+function saveLocal() { if(templateMode)return;if(workspaceRecoveryBlocked){$('#save-state').textContent='Не сохранено';toast('Не удалось создать резервную копию повреждённого рабочего пространства. Сохраните документ в Word.',true);return;}try{syncActiveReport();localStorage.setItem(KEYS.draft,JSON.stringify({format:'mri-report-studio',version:draftVersion,profile:profileForTemplate(),templateId:activeTemplateId,doc:json(),customModules:[]}));localStorage.setItem(KEYS.workspace,JSON.stringify({activeId:activeReportId,reports:openReports}));$('#save-state').textContent='Сохранено на компьютере';}catch{ $('#save-state').textContent='Не сохранено';toast('Не удалось сохранить локальный черновик. Сохраните документ Word.',true); } }
 function profileForTemplate() { const area=reportTemplates.find(t=>t.id===activeTemplateId)?.areaId;return area==='head'?'brain':'custom'; }
 function reportTitle(id:string,doc:RichNode){const template=reportTemplates.find(t=>t.id===id);return template?titleWithStudySide(template.title,overrides[id]??template.doc,doc):'Исследование';}
 function renderCounts() {
