@@ -114,6 +114,7 @@ try{
  }
  console.log('PASS: all 55 source templates across six zones render nonempty content.');
 
+ await page.locator('[data-template="head-gm"]').click();
  const patientHint=await field(patientId).innerText();
  const selectedTemplateTitle=await page.locator('.template-card.selected strong').textContent();
  await field(patientId).evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,0);range.setEnd(node,1);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
