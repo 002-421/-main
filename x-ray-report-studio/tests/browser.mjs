@@ -222,6 +222,7 @@ try{
    return backups.map(key=>localStorage.getItem(key));
  });
  assert.ok(recovered.includes(recoveryFixture.raw),'corrupted workspace is backed up verbatim before overwrite');
+ await page.locator('.report-tab-select').first().click();
  await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');
  await page.reload();await page.locator('.report-content').waitFor();
  assert.equal(await page.locator('.report-tab').count(),recoveryFixture.count,'recovered tabs persist across restart');
