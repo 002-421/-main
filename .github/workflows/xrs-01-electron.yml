@@ -35,6 +35,8 @@ jobs:
         run: npm test
       - name: Install Chromium for workspace recovery tests
         run: npx playwright-core install --with-deps chromium
+      - name: Document tab isolation regression
+        run: npm run test:tab-isolation
       - name: Workspace recovery browser tests
         run: npm run test:workspace-recovery
       - name: Install Xvfb
