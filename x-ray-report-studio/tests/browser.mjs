@@ -165,7 +165,7 @@ try{
  assert.match(clip.text,/Тестовый Пациент/);assert.match(clip.html,/Arial/);
  const pdfPath=path.join(output,'v3-native.pdf');
  await application.evaluate(({dialog},filePath)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath});},pdfPath);
- await page.locator('#export-pdf').click();await page.locator('#preview-save-pdf').click();if(await page.locator('#confirm-pdf').count())await page.locator('#confirm-pdf').click();
+ await page.locator('#export-pdf').click();await page.locator('#preview-save-pdf').click();if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
  await page.getByRole('status').filter({hasText:'PDF сохранён'}).waitFor({timeout:30000});
  assert.equal((await readFile(pdfPath)).subarray(0,5).toString(),'%PDF-');
  console.log('PASS: formatted clipboard and actual desktop PDF export.');
