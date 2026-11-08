@@ -86,10 +86,11 @@ try{
  await page.locator('#calculator').click();await waitForCalculatorKeyboardFocus();await page.keyboard.type('1/0=');assert.equal(await page.locator('#calculator-display').textContent(),'Ошибка');await page.keyboard.press('Escape');
  console.log('PASS: calculator handles decimal input, keyboard operations and division by zero without changing the report.');
 
- await page.evaluate(()=>{const target='0,0 см';const walker=document.createTreeWalker(document.querySelector('.report-content'),NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){const offset=node.textContent.indexOf(target);if(offset<0)continue;const range=document.createRange();range.setStart(node,offset);range.setEnd(node,offset+target.length);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);node.parentElement.closest('[contenteditable]').focus();return;}throw new Error('Highlighted measurement not found');});
- await page.keyboard.insertText('0,25 см');
- const editedMeasurement=page.getByText('0,25 см',{exact:true}).first();await editedMeasurement.waitFor();
- assert.notEqual(await editedMeasurement.evaluate(el=>el.closest('mark')?.getAttribute('data-color')),'#ffff00');
+ await page.evaluate(()=>{const target='0,0';const walker=document.createTreeWalker(document.querySelector('.report-content'),NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){const offset=node.textContent.indexOf(target);if(offset<0)continue;const mark=node.parentElement.closest('mark[data-color="#ffff00"]');if(!mark)continue;const editor=node.parentElement.closest('[contenteditable]');editor.focus();const range=document.createRange();range.setStart(node,offset);range.setEnd(node,offset+target.length);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);return;}throw new Error('Highlighted measurement not found');});
+ await page.keyboard.type('0,25');
+ const editedMeasurement=page.locator('.report-content p').filter({hasText:'максимальная размерами'}).first();await page.waitForFunction(()=>[...document.querySelectorAll('.report-content p')].some(el=>el.textContent?.includes('максимальная размерами 0,25 см')));
+ assert.match(await editedMeasurement.innerText(),/максимальная размерами 0,25 см/);
+ assert.equal(await editedMeasurement.locator('mark[data-color="#ffff00"]').count(),0,'the edited value is no longer yellow-highlighted');
  await page.keyboard.press('Control+z');assert.match(await page.locator('.report-content').innerText(),/справа 0,0 см, слева 0,0 см/);
  console.log('PASS: editing a yellow template measurement removes the yellow fill and Undo restores it.');
 
