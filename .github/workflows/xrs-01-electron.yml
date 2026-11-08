@@ -42,6 +42,7 @@ jobs:
       - name: Electron integration tests
         run: |
           set -o pipefail
+          mkdir -p test-output
           xvfb-run --auto-servernum --server-args='-screen 0 1600x1200x24' npm run test:browser 2>&1 | tee test-output/electron-integration.log
       - name: Upload Electron failure diagnostics
         if: failure()
