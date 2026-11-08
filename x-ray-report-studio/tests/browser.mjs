@@ -114,6 +114,8 @@ try{
  }
  console.log('PASS: all 55 source templates across six zones render nonempty content.');
 
+ await page.locator('#modality-select').selectOption('mri');
+ await page.locator('#area-select').selectOption('head');
  await page.locator('[data-template="head-gm"]').click();
  const patientHint=await field(patientId).innerText();
  const selectedTemplateTitle=await page.locator('.template-card.selected strong').textContent();
