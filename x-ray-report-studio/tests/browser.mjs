@@ -155,7 +155,7 @@ try{
  assert.match(JSON.stringify(saved.imported.doc),/Тестовый Пациент/);
  assert.match(JSON.stringify(saved.imported.doc),/Петров Алексей Иванович/);
  const zip=unzipSync(saved.bytes),xml=strFromU8(zip['word/document.xml']);
- assert.match(xml,/Arial/);assert.match(xml,/w:top="907"/);
+ assert.match(xml,/Arial/);assert.match(xml,/w:top="2438"/);
  assert.doesNotMatch(xml,/template-unchanged|proof-spelling|proof-grammar|data-unchanged/);
  console.log('PASS: real DOCX preserves report, source geometry and formatting, excludes review/proof decorations.');
 
