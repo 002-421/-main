@@ -1,0 +1,43 @@
+name: XRS-01 Electron browser tests
+
+on:
+  pull_request:
+    branches: [codex/mri-report-studio]
+    paths:
+      - 'x-ray-report-studio/**'
+      - '.github/workflows/xrs-01-electron.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  electron-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: x-ray-report-studio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: x-ray-report-studio/package-lock.json
+      - name: Install dependencies and checksum-verified Electron
+        run: |
+          npm ci
+          npm run desktop:install
+      - name: TypeScript check and production build
+        run: npm run build
+      - name: Unit tests
+        run: npm test
+      - name: Install Chromium for workspace recovery tests
+        run: npx playwright-core install --with-deps chromium
+      - name: Workspace recovery browser tests
+        run: npm run test:workspace-recovery
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install --yes xvfb
+      - name: Electron integration tests
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1600x1200x24' npm run test:browser

@@ -123,8 +123,13 @@ if(workspaceRaw!==null){
     // Never silently replace a damaged workspace with a new empty one.
     // Keep the original bytes before allowing any subsequent autosave.
     try {
-      const backupKey=KEYS.workspace+'.recovery.'+Date.now()+'.'+crypto.randomUUID();
-      localStorage.setItem(backupKey,workspaceRaw);
+      const recoveryPrefix=KEYS.workspace+'.recovery.';
+      const alreadyBackedUp=Object.keys(localStorage).some(key=>key.startsWith(recoveryPrefix)&&localStorage.getItem(key)===workspaceRaw);
+      if(!alreadyBackedUp){
+        const backupKey=recoveryPrefix+Date.now()+'.'+crypto.randomUUID();
+        localStorage.setItem(backupKey,workspaceRaw);
+        if(localStorage.getItem(backupKey)!==workspaceRaw)throw new Error('Workspace recovery backup verification failed');
+      }
     } catch { workspaceRecoveryBlocked=true; }
     if(!workspaceRecoveryBlocked && Array.isArray((error as {validReports?:OpenReport[]}).validReports))
       openReports=(error as {validReports:OpenReport[]}).validReports;

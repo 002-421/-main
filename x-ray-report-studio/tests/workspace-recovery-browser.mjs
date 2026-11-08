@@ -9,7 +9,7 @@ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const origin=`http://127.0.0.1:${server.address().port}`;
 let browser;
 try{
- browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
+ browser=await chromium.launch({...process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{},headless:true,args:['--no-sandbox']});
  const context=await browser.newContext(),page=await context.newPage(),errors=[];
  page.on('pageerror',error=>errors.push(error.message));
  await page.addInitScript(()=>{const add=EventTarget.prototype.addEventListener;EventTarget.prototype.addEventListener=function(type,listener,options){if(this===window&&type==='beforeunload')return;return add.call(this,type,listener,options);};});
@@ -68,6 +68,9 @@ try{
  assert.equal(await page.evaluate(key=>localStorage.getItem(key),workspaceKey),blockedRaw,'backup failure prevents overwriting the damaged workspace');
  await page.reload();await page.locator('.report-content').waitFor();
  assert.ok((await page.evaluate(key=>Object.keys(localStorage).filter(item=>item.startsWith(`${key}.recovery.`)).map(item=>localStorage.getItem(item)),workspaceKey)).includes(blockedRaw),'recovery retries after backup storage becomes writable');
+ const uniqueBackupCount=await page.evaluate(key=>Object.keys(localStorage).filter(item=>item.startsWith(`${key}.recovery.`)).length,workspaceKey);
+ await page.reload();await page.locator('.report-content').waitFor();
+ assert.equal(await page.evaluate(key=>Object.keys(localStorage).filter(item=>item.startsWith(`${key}.recovery.`)).length,workspaceKey),uniqueBackupCount,'repeated launches reuse an identical backup instead of accumulating copies');
 
  const normalPage=await context.newPage();normalPage.on('pageerror',error=>errors.push(error.message));
  await normalPage.goto(origin);await normalPage.locator('.report-content').waitFor();
