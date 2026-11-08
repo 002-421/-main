@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { _electron, chromium } from 'playwright-core';
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { importOwnDocx } from '../src/docx.ts';
@@ -41,6 +41,13 @@ async function saveWord(name){
 async function placeAtParagraphStart(locator){await locator.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});}
 async function reloadWithWorkspaceFixture(raw){await page.evaluate(({key,value})=>{localStorage.setItem(key,value);const original=Storage.prototype.setItem;Storage.prototype.setItem=function(name,next){if(name===key)return;return original.call(this,name,next);};},{key:'mri-report-studio.workspace.v1',value:raw});await page.reload();}
 const yellowZeroSummary=()=>page.evaluate(()=>[...document.querySelectorAll('.report-content mark[data-color="#ffff00"]')].map(mark=>({text:(mark.textContent??'').replace(/\u00a0/g,' ').trim(),visible:!!mark.getClientRects().length,html:mark.outerHTML})));
+async function captureStartupDom(){
+ const snapshot=await page.evaluate(()=>({title:document.title,documentName:document.querySelector('#document-name')?.textContent,selectedTemplate:document.querySelector('.template-card.selected strong')?.textContent,storageKeys:Object.keys(localStorage),reportText:document.querySelector('.report-content')?.innerText,reportHTML:document.querySelector('.report-content')?.outerHTML,marks:[...document.querySelectorAll('.report-content mark')].map(mark=>({text:(mark.textContent??'').replace(/\u00a0/g,' ').trim(),color:mark.getAttribute('data-color'),visible:!!mark.getClientRects().length,html:mark.outerHTML}))}));snapshot.rendererErrors=errors;
+ await writeFile(path.join(output,'electron-startup-dom.json'),JSON.stringify(snapshot,null,2));
+ await writeFile(path.join(output,'electron-startup-dom.html'),`<!doctype html><meta charset="utf-8"><title>Electron startup DOM</title>${snapshot.reportHTML??'<p>.report-content отсутствует</p>'}`);
+ await page.screenshot({path:path.join(output,'electron-startup-dom.png'),fullPage:true});
+ console.log('Electron startup DOM:',JSON.stringify({...snapshot,reportHTML:snapshot.reportHTML?.slice(0,12000)},null,2));
+}
 async function waitForYellowZero(){
  const yellowMarks=page.locator('.report-content mark[data-color="#ffff00"]');
  try{
@@ -66,8 +73,9 @@ try{
  assert.match(await page.locator('.report-content').innerText(),/22,1, после 60 лет 22,6-26,0/);
  assert.match(await page.locator('.report-content').innerText(),/справа 0,0 см, слева 0,0 см/);
  assert.ok(await page.locator('#line-height').count(),'line spacing control is visible');assert.equal(await page.locator('[data-align="justify"]').textContent(),'По ширине');
- const initialYellowZeros=(await yellowZeroSummary()).filter(mark=>mark.text.startsWith('0,0'));console.log('Initial visible yellow zero fields:',JSON.stringify(initialYellowZeros));assert.ok(initialYellowZeros.length>0,'the initial template contains a visible yellow 0,0 placeholder');
- const yellowZero=await waitForYellowZero();await yellowZero.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.setStart(el.firstChild,1);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.insertText('1,2');
+ await captureStartupDom();
+ const yellowZero=await waitForYellowZero(),initialYellowZeros=(await yellowZeroSummary()).filter(mark=>mark.text.startsWith('0,0'));console.log('Initial visible yellow zero fields:',JSON.stringify(initialYellowZeros));assert.ok(initialYellowZeros.length>0,'the initial template contains a visible yellow 0,0 placeholder');
+ await yellowZero.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.setStart(el.firstChild,1);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.insertText('1,2');
  const remainingYellowZeros=(await yellowZeroSummary()).filter(mark=>mark.text.startsWith('0,0'));assert.equal(remainingYellowZeros.length,initialYellowZeros.length-1,'typing replaces one yellow numeric placeholder while retaining its unit');await page.keyboard.press('Control+z');assert.equal((await yellowZeroSummary()).filter(mark=>mark.text.startsWith('0,0')).length,initialYellowZeros.length,'Undo restores the yellow 0,0 field');
  for(const suffix of ['number','patient','birthdate'])await assertFirstTypingReplacesHint(`head-gm.${suffix}`);
  assert.equal(await page.evaluate(()=>typeof window.desktop.exportPDF),'function');
@@ -270,7 +278,12 @@ try{
  assert.deepEqual(errors,[]);
  await page.screenshot({path:path.join(output,'v3-desktop.png')});
  console.log('PASS: rich selection library save and local report persistence.');
-}catch(error){await page.screenshot({path:path.join(output,'v3-failed.png')});console.error('Renderer errors:',errors);throw error;}finally{await application.close();}
+}catch(error){
+ const detail=error instanceof Error?(error.stack??error.message):String(error),annotation=detail.replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A').replaceAll(':','%3A').replaceAll(',','%2C');
+ await page.screenshot({path:path.join(output,'v3-failed.png')});console.error('Renderer errors:',errors);console.error('Electron integration first failure:',detail);process.stdout.write(`::error title=Electron integration first failure::${annotation}\n`);
+ if(process.env.GITHUB_STEP_SUMMARY)await appendFile(process.env.GITHUB_STEP_SUMMARY,`## Electron integration failure\n\n\`\`\`text\n${detail}\n\`\`\`\n`);
+ throw error;
+}finally{await application.close();}
 
 const server=createServer(async(_request,response)=>{response.setHeader('Content-Type','text/html;charset=utf-8');response.end(await readFile(path.join(root,'dist/index.html')));});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
