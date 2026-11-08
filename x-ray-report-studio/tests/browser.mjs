@@ -33,6 +33,7 @@ async function saveWord(name){
  await page.locator('#save-docx').click();
  assert.ok(await page.locator('.paged-preview-frame iframe, .preview-page').count(),'paginated preview opens before Word export');
  await page.locator('#preview-save-word').click();
+ if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
  for(let i=0;i<200;i++){
   try{if((await stat(filePath)).size>0){const bytes=await readFile(filePath);const imported=await importOwnDocx(bytes);if(imported)return {filePath,bytes,imported};}}catch{}
   await new Promise(r=>setTimeout(r,50));
