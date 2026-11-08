@@ -7,7 +7,7 @@ import { openStickyNote } from './sticky-note';
 import { addReportSeparators } from './report-separators';
 const prepareInlineDocument = (doc: RichNode, trackOriginal = true) => prepareInlineDocumentBase(addReportSeparators(doc), trackOriginal);
 import packageInfo from '../package.json' with { type: 'json' };
-import { TextSelection } from '@tiptap/pm/state';
+import { EditorState, TextSelection } from '@tiptap/pm/state';
 import DOMPurify from 'dompurify';
 import { makeEditor } from './editor';
 import { prepareInlineDocument as prepareInlineDocumentBase, initializeTemplateTracking, promoteInlineTemplate, resetInlineTemplate, collectInlineFields, countUnchangedParts, setReviewHighlights } from './inline-fields';
@@ -181,7 +181,7 @@ editor.on('selectionUpdate',()=>{ savedSelection=editor.state.selection;editor.v
 editor.on('update',()=>{if(!suppress){changedSinceOpen=true;const active=openReports.find(r=>r.id===activeReportId);if(active){active.doc=editor.getJSON() as RichNode;active.templateId=activeTemplateId;active.dirty=true;}clearTimeout(timer);if(!templateMode){$('#save-state').textContent='Сохраняется…';timer=setTimeout(saveLocal,450);}else $('#save-state').textContent='Шаблон изменён';renderCounts();renderReportTabs();}});
 editor.on('transaction',updateRibbon);
 const json=()=>editor.getJSON() as RichNode;
-function restore(doc:RichNode) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(doc));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
+function restore(doc:RichNode) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(doc));/* Replacing the document alone maps the old undo stack onto its new contents. Reinitialize plugin state so Undo cannot carry edits between reports and templates. */const state=EditorState.create({schema:editor.schema,doc:editor.state.doc,selection:editor.state.selection,storedMarks:editor.state.storedMarks,plugins:editor.extensionManager.plugins});editor.view.updateState(state);}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
 function toast(message:string,error=false) { $('.toast')?.remove();const t=document.createElement('div');t.className=`toast${error?' error':''}`;t.role=error?'alert':'status';t.textContent=message;document.body.append(t);setTimeout(()=>t.remove(),5000); }
 function syncActiveReport(){const active=openReports.find(r=>r.id===activeReportId);if(active){active.doc=json();active.templateId=activeTemplateId;active.dirty=changedSinceOpen;}}
 function saveLocal() { if(templateMode)return;if(workspaceRecoveryBlocked){$('#save-state').textContent='Не сохранено';toast('Не удалось создать резервную копию повреждённого рабочего пространства. Сохраните документ в Word.',true);return;}try{syncActiveReport();localStorage.setItem(KEYS.draft,JSON.stringify({format:'mri-report-studio',version:draftVersion,profile:profileForTemplate(),templateId:activeTemplateId,doc:json(),customModules:[]}));localStorage.setItem(KEYS.workspace,JSON.stringify({activeId:activeReportId,reports:openReports}));$('#save-state').textContent='Сохранено на компьютере';}catch{ $('#save-state').textContent='Не сохранено';toast('Не удалось сохранить локальный черновик. Сохраните документ Word.',true); } }
