@@ -127,7 +127,7 @@ try{
  assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
  assert.match(await page.locator('.report-tab.active .report-tab-select').textContent(),/Тестовый ·/);
  assert.ok(await page.locator('.report-tab.active .report-tab-select').evaluate(el=>el.scrollWidth<=el.clientWidth),'the patient surname is visible in the active report tab');
- assert.equal(await page.locator('#document-name').textContent(),selectedTemplateTitle);
+ assert.equal(await page.locator('#document-name').textContent(),`Тестовый П. · ${selectedTemplateTitle}`);
  assert.equal(await field(patientId).getAttribute('data-filled'),'true');
  await page.keyboard.press('Control+z');assert.equal(await field(patientId).innerText(),patientHint);
  await page.keyboard.press('Control+Shift+z');assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
