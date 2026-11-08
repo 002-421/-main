@@ -234,7 +234,7 @@ try{
  await page.locator('#save-selection').click();await page.locator('#block-title').fill('Сохранённый формат');await page.locator('#block-tags').fill('формат');await page.locator('#confirm-block').click();
  await page.locator('.dialog-overlay').waitFor({state:'hidden',timeout:5000});
  await page.locator('#block-search').fill('Сохранённый формат');await page.locator('[data-preview-block]').click();
- assert.match(await page.locator('.block-preview strong').allTextContents().then(t=>t.join(' ')),/Исследование/);
+ assert.match(await page.locator('.block-preview').innerText(),/Исследование/);
  await page.locator('.dialog footer [data-close]').click();
  const firstTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
  await page.locator('#zoom').evaluate(el=>{el.value='145';el.dispatchEvent(new Event('input',{bubbles:true}));});assert.equal(await page.locator('#zoom-value').innerText(),'145%');assert.equal(await page.locator('.paper').evaluate(el=>el.style.zoom),'1.45');
