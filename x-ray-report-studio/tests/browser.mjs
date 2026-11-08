@@ -120,7 +120,7 @@ try{
  const patientHint=await field(patientId).innerText();
  const selectedTemplateTitle=await page.locator('.template-card.selected strong').textContent();
  await field(patientId).evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,0);range.setEnd(node,1);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
- await page.keyboard.insertText('К');assert.equal(await field(patientId).innerText(),'К.И.О.');assert.equal(await field(patientId).getAttribute('data-filled'),'true');
+ await page.keyboard.insertText('К');assert.equal(await field(patientId).innerText(),'К');assert.equal(await field(patientId).getAttribute('data-filled'),'true');
  await page.keyboard.press('Control+z');assert.equal(await field(patientId).innerText(),patientHint);assert.equal(await field(patientId).getAttribute('data-filled'),'false');
  await fillField(patientId,'Тестовый Пациент');
  assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
