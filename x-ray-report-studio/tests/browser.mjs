@@ -207,6 +207,25 @@ try{
  await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await page.reload();await page.locator('.report-content').waitFor();
  assert.match(await page.locator('.report-content').innerText(),/Исследование\. Очаг не выявлен\./);
  await page.locator('#new-report').click();const persistedTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');await fillField(patientId,'Сохранённое второе заключение');await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await page.reload();await page.locator('.report-content').waitFor();assert.equal(await page.locator('.report-tab').count(),2);assert.equal(await field(patientId).innerText(),'Сохранённое второе заключение');assert.equal(await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select'),persistedTab);
+ // XRS-01: a corrupted tab must not discard the valid workspace.
+ const recoveryFixture=await page.evaluate(()=>{
+   const key='mri-report-studio.workspace.v1';
+   const original=JSON.parse(localStorage.getItem(key));
+   const corrupted={...original,reports:[...original.reports,{id:'damaged-report',templateId:original.reports[0].templateId,doc:{type:'invalid'},dirty:true}]};
+   localStorage.setItem(key,JSON.stringify(corrupted));
+   return {count:original.reports.length,raw:JSON.stringify(corrupted)};
+ });
+ await page.reload();await page.locator('.report-content').waitFor();
+ assert.equal(await page.locator('.report-tab').count(),recoveryFixture.count,'valid tabs survive one damaged report');
+ const recovered=await page.evaluate(()=>{
+   const backups=Object.keys(localStorage).filter(key=>key.startsWith('mri-report-studio.workspace.v1.recovery.'));
+   return backups.map(key=>localStorage.getItem(key));
+ });
+ assert.ok(recovered.includes(recoveryFixture.raw),'corrupted workspace is backed up verbatim before overwrite');
+ await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');
+ await page.reload();await page.locator('.report-content').waitFor();
+ assert.equal(await page.locator('.report-tab').count(),recoveryFixture.count,'recovered tabs persist across restart');
+ console.log('PASS: XRS-01 retains valid tabs and backs up a damaged workspace.');
  await page.locator('#modality-select').selectOption('ct');const ctTemplate=page.locator('[data-template]').first(),ctTemplateId=await ctTemplate.getAttribute('data-template');await ctTemplate.click();if(await page.locator('#confirm-new').count())await page.locator('#confirm-new').click();for(const suffix of ['number','patient','birthdate'])await assertFirstTypingReplacesHint(`${ctTemplateId}.${suffix}`);
  assert.deepEqual(errors,[]);
  await page.screenshot({path:path.join(output,'v3-desktop.png')});
