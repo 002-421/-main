@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { _electron, chromium } from 'playwright-core';
-import { mkdtemp, mkdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { importOwnDocx } from '../src/docx.ts';
@@ -40,6 +40,19 @@ async function saveWord(name){
 }
 async function placeAtParagraphStart(locator){await locator.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});}
 async function reloadWithWorkspaceFixture(raw){await page.evaluate(({key,value})=>{localStorage.setItem(key,value);const original=Storage.prototype.setItem;Storage.prototype.setItem=function(name,next){if(name===key)return;return original.call(this,name,next);};},{key:'mri-report-studio.workspace.v1',value:raw});await page.reload();}
+async function waitForYellowZero(){
+ const yellowZero=page.locator('.report-content mark[data-color="#ffff00"]').filter({hasText:/^0,0\s*см$/i}).first();
+ try{await yellowZero.waitFor({state:'visible'});return yellowZero;}catch(error){
+  try{
+   const diagnostic=await page.evaluate(()=>({title:document.title,documentName:document.querySelector('#document-name')?.textContent,selectedTemplate:document.querySelector('.template-card.selected strong')?.textContent,storageKeys:Object.keys(localStorage),reportText:document.querySelector('.report-content')?.innerText,reportHTML:document.querySelector('.report-content')?.outerHTML,marks:[...document.querySelectorAll('.report-content mark')].map(mark=>({text:mark.textContent,color:mark.getAttribute('data-color'),visible:!!mark.getClientRects().length,html:mark.outerHTML}))}));diagnostic.rendererErrors=errors;
+   await writeFile(path.join(output,'electron-yellow-placeholder-diagnostic.json'),JSON.stringify(diagnostic,null,2));
+   await writeFile(path.join(output,'electron-yellow-placeholder-diagnostic.html'),`<!doctype html><meta charset="utf-8"><title>Electron yellow placeholder diagnostic</title>${diagnostic.reportHTML??'<p>.report-content отсутствует</p>'}`);
+   await page.screenshot({path:path.join(output,'electron-yellow-placeholder-diagnostic.png'),fullPage:true});
+   console.error('Yellow placeholder diagnostic:',JSON.stringify({...diagnostic,reportHTML:diagnostic.reportHTML?.slice(0,12000)},null,2));
+  }catch(diagnosticError){console.error('Failed to save Electron failure diagnostics:',diagnosticError);}
+  throw error;
+ }
+}
 try{
  await page.locator('.report-content').waitFor();
  assert.equal(await page.locator('.report-content').count(),1);
@@ -48,7 +61,7 @@ try{
  assert.match(await page.locator('.report-content').innerText(),/22,1, после 60 лет 22,6-26,0/);
  assert.match(await page.locator('.report-content').innerText(),/справа 0,0 см, слева 0,0 см/);
  assert.ok(await page.locator('#line-height').count(),'line spacing control is visible');assert.equal(await page.locator('[data-align="justify"]').textContent(),'По ширине');
- const yellowZero=page.locator('.report-content mark[data-color="#ffff00"]').filter({hasText:/^0,0$/}).first();await yellowZero.waitFor();await yellowZero.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.setStart(el.firstChild,1);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.insertText('1,2');assert.equal(await page.locator('.report-content mark[data-color="#ffff00"]').filter({hasText:/^0,0$/}).count(),5,'typing into a yellow zero replaces the entire 0,0 hint and removes its fill');await page.keyboard.press('Control+z');
+ const yellowZero=await waitForYellowZero();await yellowZero.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.setStart(el.firstChild,1);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.insertText('1,2');assert.equal(await page.locator('.report-content mark[data-color="#ffff00"]').filter({hasText:/^0,0\s*см$/i}).count(),5,'typing into a yellow zero replaces the entire numeric placeholder while retaining its unit');await page.keyboard.press('Control+z');
  for(const suffix of ['number','patient','birthdate'])await assertFirstTypingReplacesHint(`head-gm.${suffix}`);
  assert.equal(await page.evaluate(()=>typeof window.desktop.exportPDF),'function');
  console.log('PASS: one document editor, no right inspector, source placeholders.');

@@ -40,4 +40,14 @@ jobs:
       - name: Install Xvfb
         run: sudo apt-get update && sudo apt-get install --yes xvfb
       - name: Electron integration tests
-        run: xvfb-run --auto-servernum --server-args='-screen 0 1600x1200x24' npm run test:browser
+        run: |
+          set -o pipefail
+          xvfb-run --auto-servernum --server-args='-screen 0 1600x1200x24' npm run test:browser 2>&1 | tee test-output/electron-integration.log
+      - name: Upload Electron failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-01-electron-failure-diagnostics
+          path: x-ray-report-studio/test-output/electron-*
+          if-no-files-found: warn
+          retention-days: 7
