@@ -104,6 +104,7 @@ try{
  assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
  console.log('PASS: visible theme toggle changes and restores dark mode while keeping the report paper white.');
 
+ await newReport();
  for (const areaId of [...new Set(reportTemplates.map(template=>template.areaId))]) {
   await page.locator('#modality-select').selectOption(areaId.startsWith('ct-')?'ct':'mri');
   await page.locator('#area-select').selectOption(areaId);
@@ -124,8 +125,8 @@ try{
  await page.keyboard.press('Control+z');assert.equal(await field(patientId).innerText(),patientHint);assert.equal(await field(patientId).getAttribute('data-filled'),'false');
  await fillField(patientId,'Тестовый Пациент');
  assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
- assert.match(await page.locator('.report-tab-select').first().textContent(),/Тестовый ·/);
- assert.ok(await page.locator('.report-tab-select').first().evaluate(el=>el.scrollWidth<=el.clientWidth),'the patient surname is visible in the report tab');
+ assert.match(await page.locator('.report-tab.active .report-tab-select').textContent(),/Тестовый ·/);
+ assert.ok(await page.locator('.report-tab.active .report-tab-select').evaluate(el=>el.scrollWidth<=el.clientWidth),'the patient surname is visible in the active report tab');
  assert.equal(await page.locator('#document-name').textContent(),selectedTemplateTitle);
  assert.equal(await field(patientId).getAttribute('data-filled'),'true');
  await page.keyboard.press('Control+z');assert.equal(await field(patientId).innerText(),patientHint);
