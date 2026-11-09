@@ -16,12 +16,13 @@ test('Windows packager reads and writes JSON as UTF-8 regardless of system encod
  assert.match(source,/write_text\(collect_licenses\(\),\s*encoding=['"]utf-8['"]\)/);
 
  const python=process.platform==='win32'?'python':'python3';
+ const expectedVersion=JSON.parse(await readFile(path.join(root,'package.json'),'utf8')).version;
  const result=spawnSync(python,['-c',"import json,sys; print(json.loads(open(sys.argv[1], encoding='utf-8').read())['version'])",path.join(root,'package.json')],{
   encoding:'utf8',
   env:{...process.env,PYTHONUTF8:'0',PYTHONCOERCECLOCALE:'0',LC_ALL:'C',LANG:'C'},
  });
  assert.equal(result.status,0,result.stderr);
- assert.equal(result.stdout.trim(),'0.4.52');
+ assert.equal(result.stdout.trim(),expectedVersion);
 });
 
 test('portable package copies every Electron CommonJS module and its local require dependencies',async()=>{
