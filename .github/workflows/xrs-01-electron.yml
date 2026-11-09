@@ -46,11 +46,18 @@ jobs:
           set -o pipefail
           mkdir -p test-output
           xvfb-run --auto-servernum --server-args='-screen 0 1600x1200x24' npm run test:browser 2>&1 | tee test-output/electron-integration.log
+      - name: Electron Undo/Redo scroll regression
+        run: |
+          set -o pipefail
+          mkdir -p test-output
+          xvfb-run --auto-servernum --server-args='-screen 0 1600x1200x24' npm run test:undo-scroll 2>&1 | tee test-output/undo-scroll.log
       - name: Upload Electron failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: xrs-01-electron-failure-diagnostics
-          path: x-ray-report-studio/test-output/electron-*
+          path: |
+            x-ray-report-studio/test-output/electron-*
+            x-ray-report-studio/test-output/undo-scroll.log
           if-no-files-found: warn
           retention-days: 7
