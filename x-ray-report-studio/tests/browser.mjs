@@ -10,13 +10,10 @@ import { unzipSync, strFromU8 } from 'fflate';
 const root=process.cwd(), output=path.join(root,'test-output');
 await mkdir(output,{recursive:true});
 const userData=await mkdtemp(path.join(output,'electron-v3-'));
+const electronOptions={...(process.env.ELECTRON_PATH?{executablePath:process.env.ELECTRON_PATH}:{}),args:['.',`--user-data-dir=${userData}`,'--no-sandbox','--ozone-platform=headless','--disable-gpu'],cwd:root,env:{...process.env,XDG_CACHE_HOME:'/workspace/.cache',XDG_CONFIG_HOME:'/workspace/.config'}};
 const errors=[];
-const application=await _electron.launch({
- ...(process.env.ELECTRON_PATH?{executablePath:process.env.ELECTRON_PATH}:{}),
- args:['.',`--user-data-dir=${userData}`,'--no-sandbox','--ozone-platform=headless','--disable-gpu'],cwd:root,
- env:{...process.env,XDG_CACHE_HOME:'/workspace/.cache',XDG_CONFIG_HOME:'/workspace/.config'},
-});
-const page=await application.firstWindow();
+let application=await _electron.launch(electronOptions);
+let page=await application.firstWindow();
 await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0]?.setSize(1500,1000));
 page.on('pageerror',error=>errors.push(error.message));
 const patientId='head-gm.patient', doctorId='HEAD.BASE.2.FIELD.0043';
@@ -270,7 +267,26 @@ try{
  await assertTabState('restart after closing B',firstTab,'Исследование. Очаг не выявлен.',secondPatient);
  assert.match(await page.locator('.report-content').innerText(),/Исследование\. Очаг не выявлен\./);
  await page.keyboard.press('Control+z');await page.keyboard.press('Control+y');await page.locator('[data-command="undo"]').click();await page.locator('[data-command="redo"]').click();assert.equal(await field(patientId).innerText(),'Тестовый Пациент','Undo/Redo after restart starts with an empty history for the active report');
- await page.locator('#new-report').click();const persistedTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');await fillField(patientId,'Сохранённое второе заключение');await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await page.reload();await page.locator('.report-content').waitFor();assert.equal(await page.locator('.report-tab').count(),tabsBeforeReload+1,'the newly added tab is persisted alongside existing tabs');assert.equal(await field(patientId).innerText(),'Сохранённое второе заключение');assert.equal(await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select'),persistedTab);
+ await page.locator('#new-report').click();const restartTabA=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');await page.locator('[data-tab="templates"]').click();await page.locator('#area-select').selectOption('abdomen');await page.locator('[data-template="abdomen-bp"]').click();const restartPatientA=await page.locator('[data-template-field]').evaluateAll(fields=>fields.map(element=>element.getAttribute('data-field-id')).find(id=>id?.endsWith('.patient')));assert.ok(restartPatientA,'the BП report exposes its own patient field');await fillField(restartPatientA,'Палкин Алексей Васильевич');
+ await page.locator('#new-report').click();const restartTabB=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');await page.locator('[data-tab="templates"]').click();await page.locator('#area-select').selectOption('joints');await page.locator('[data-template="joints-gs"]').click();const restartPatientB=await page.locator('[data-template-field]').evaluateAll(fields=>fields.map(element=>element.getAttribute('data-field-id')).find(id=>id?.endsWith('.patient')));assert.ok(restartPatientB,'the ГС report exposes its own patient field');await fillField(restartPatientB,'Петров Алексей Васильевич');
+ await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await page.reload();await page.locator('.report-content').waitFor();assert.equal(await page.locator('.report-tab').count(),tabsBeforeReload+2,'both synthetic reports persist alongside the existing report');await assertTabState('page reload restores B (ГС / Петров)',restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');await page.locator(`[data-report-select="${restartTabA}"]`).click();await assertTabState('page reload restores A (БП / Палкин)',restartTabA,'Палкин Алексей Васильевич','Петров Алексей Васильевич');await page.locator(`[data-report-select="${restartTabB}"]`).click();
+ // A page reload does not destroy Electron's main process. Close the actual app and relaunch it against the same userData directory to test persisted workspace/history isolation.
+ await application.close();application=await _electron.launch(electronOptions);page=await application.firstWindow();page.on('pageerror',error=>errors.push(error.message));await page.locator('.report-content').waitFor();
+ assert.equal(await page.locator('.report-tab').count(),tabsBeforeReload+2,'closing and relaunching Electron restores both synthetic reports');
+ await assertTabState('real Electron restart restores B (ГС / Петров)',restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+ await page.locator(`[data-report-select="${restartTabA}"]`).click();await assertTabState('real Electron restart restores A (БП / Палкин)',restartTabA,'Палкин Алексей Васильевич','Петров Алексей Васильевич');
+ await page.locator(`[data-report-select="${restartTabB}"]`).click();
+ for(let index=0;index<3;index++){
+  await page.keyboard.press('Control+z');await assertTabState(`real restart keyboard Undo ${index+1}`,restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+  await page.keyboard.press('Control+y');await assertTabState(`real restart keyboard Redo ${index+1}`,restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+  await page.locator('[data-command="undo"]').click();await assertTabState(`real restart toolbar Undo ${index+1}`,restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+  await page.locator('[data-command="redo"]').click();await assertTabState(`real restart toolbar Redo ${index+1}`,restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+ }
+ await page.locator(`[data-report-select="${restartTabA}"]`).click();await assertTabState('real restart A-to-B-to-A',restartTabA,'Палкин Алексей Васильевич','Петров Алексей Васильевич');
+ await page.locator(`[data-report-select="${restartTabB}"]`).click();await assertTabState('real restart A-to-B-to-A-to-B',restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+ await application.close();application=await _electron.launch(electronOptions);page=await application.firstWindow();page.on('pageerror',error=>errors.push(error.message));await page.locator('.report-content').waitFor();
+ await assertTabState('second real Electron restart B',restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+ await page.locator(`[data-report-select="${restartTabA}"]`).click();await assertTabState('second real Electron restart A',restartTabA,'Палкин Алексей Васильевич','Петров Алексей Васильевич');
  // XRS-01: recovery preserves healthy tabs, active id, dirty flags and templates at every workspace size.
  for(const size of [1,5,12]){
   const fixture=await page.evaluate(size=>{
