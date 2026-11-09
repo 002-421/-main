@@ -141,7 +141,7 @@ try{
  await page.keyboard.press('Control+Shift+z');assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
  const second=page.locator('[data-template-field][data-filled="false"]').first();
  const secondId=await second.getAttribute('data-field-id');await selectField(secondId);
- await page.evaluate(()=>{const transfer=new DataTransfer();transfer.setData('text/plain','Проверка вставки');document.querySelector('.report-content').dispatchEvent(new ClipboardEvent('paste',{clipboardData:transfer,bubbles:true,cancelable:true}));});
+ await application.evaluate(({clipboard},text)=>clipboard.writeText(text),'Проверка вставки');await page.keyboard.press('Control+V');
  assert.equal(await field(secondId).innerText(),'Проверка вставки');
  console.log('PASS: prompt text supports partial editing, full replacement and paste; Undo/Redo restores field state.');
 
