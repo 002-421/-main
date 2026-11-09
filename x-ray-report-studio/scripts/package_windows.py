@@ -56,8 +56,8 @@ subprocess.run([
 app = destination / 'resources/app'
 (app / 'electron').mkdir(parents=True)
 (app / 'dist').mkdir()
-for filename in ['main.cjs', 'preload.cjs', 'update-install.cjs', 'startup-diagnostics.cjs']:
-    shutil.copy2(ROOT / 'electron' / filename, app / 'electron' / filename)
+for module in sorted((ROOT / 'electron').glob('*.cjs')):
+    shutil.copy2(module, app / 'electron' / module.name)
 shutil.copy2(ROOT / 'dist/index.html', app / 'dist/index.html')
 shutil.copy2(ROOT / 'public/x-ray-report-studio.ico', app / 'dist/x-ray-report-studio.ico')
 (app / 'package.json').write_text(json.dumps({

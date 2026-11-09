@@ -38,12 +38,39 @@ jobs:
         run: npm run build
       - name: Package portable Windows x64 application
         run: python scripts/package_windows.py
-      - name: Verify portable archive
+      - name: Verify packaged Electron modules and archive
         shell: pwsh
         run: |
           $archive = 'release/X-ray_Report_Studio_Windows_x64.zip'
           if (!(Test-Path $archive)) { throw "Portable archive missing: $archive" }
-          python -c "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert any(p.endswith('/X-ray Report Studio.exe') for p in z.namelist()), 'portable executable missing from archive'" $archive
+          $moduleDirectory = 'release/X-ray Report Studio/resources/app/electron'
+          $sourceModules = Get-ChildItem electron -Filter '*.cjs' | ForEach-Object { $_.Name }
+          foreach ($module in $sourceModules) {
+            if (!(Test-Path (Join-Path $moduleDirectory $module))) { throw "Packaged Electron module missing: $module" }
+          }
+          python -c "import sys,zipfile; names=set(zipfile.ZipFile(sys.argv[1]).namelist()); prefix='X-ray Report Studio/resources/app/electron/'; required=[prefix+n for n in sys.argv[2:]]; missing=[n for n in required if n not in names]; assert not missing, 'missing packaged modules: '+repr(missing); assert any(p.endswith('/X-ray Report Studio.exe') for p in names), 'portable executable missing from archive'" $archive @sourceModules
+      - name: Smoke test portable app with an isolated temporary profile
+        shell: pwsh
+        run: |
+          $profile = Join-Path $env:RUNNER_TEMP 'xrs-01-smoke-profile'
+          $env:MRI_REPORT_STUDIO_DICTIONARY_DIR = Join-Path $env:RUNNER_TEMP 'xrs-01-smoke-dictionary'
+          $executable = Join-Path $PWD 'release/X-ray Report Studio/X-ray Report Studio.exe'
+          $process = Start-Process -FilePath $executable -ArgumentList @("--user-data-dir=$profile", '--no-sandbox', '--disable-gpu') -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(50)
+            $ready = $false
+            do {
+              $process.Refresh()
+              if ($process.HasExited) { throw "Portable app exited during startup with code $($process.ExitCode)" }
+              $logs = Get-ChildItem (Join-Path $profile 'logs') -Filter 'startup-*.log' -ErrorAction SilentlyContinue
+              if ($logs -and (Select-String -Path $logs.FullName -SimpleMatch '"event":"renderer-ready"' -Quiet)) { $ready = $true; break }
+              Start-Sleep -Seconds 1
+            } while ((Get-Date) -lt $deadline)
+            if (!$ready) { throw 'Portable app did not report renderer-ready within 50 seconds.' }
+          } finally {
+            $process.Refresh()
+            if (!$process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: xrs-01-windows-x64-portable
