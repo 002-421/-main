@@ -8,6 +8,7 @@ import { addReportSeparators } from './report-separators';
 const prepareInlineDocument = (doc: RichNode, trackOriginal = true) => prepareInlineDocumentBase(addReportSeparators(doc), trackOriginal);
 import packageInfo from '../package.json' with { type: 'json' };
 import { TextSelection } from '@tiptap/pm/state';
+import { history, redoDepth, undoDepth } from '@tiptap/pm/history';
 import DOMPurify from 'dompurify';
 import { makeEditor } from './editor';
 import { prepareInlineDocument as prepareInlineDocumentBase, initializeTemplateTracking, promoteInlineTemplate, resetInlineTemplate, collectInlineFields, countUnchangedParts, setReviewHighlights } from './inline-fields';
@@ -101,19 +102,47 @@ try {
 } catch { recoveryError=true; }
 let openReports:OpenReport[]=[];
 let activeReportId='';
-try {
-  const stored=read<any>(KEYS.workspace,null);
-  if(Array.isArray(stored?.reports)) for(const item of stored.reports.slice(0,12)) {
-    if(!item||typeof item.id!=='string'||typeof item.templateId!=='string'||!reportTemplates.some(t=>t.id===item.templateId))continue;
-    const doc=validateDraft({format:'mri-report-studio',version:draftVersion,templateId:item.templateId,profile:'custom',doc:item.doc,customModules:[]}).doc;
-    openReports.push({id:item.id,templateId:item.templateId,doc,dirty:Boolean(item.dirty)});
+let workspaceRecoveryBlocked=false;
+let workspaceRaw:string|null=null;
+try { workspaceRaw=localStorage.getItem(KEYS.workspace); } catch { recoveryError=true;workspaceRecoveryBlocked=true; }
+if(workspaceRaw!==null){
+  try {
+    const stored=JSON.parse(workspaceRaw);
+    if(!stored || !Array.isArray(stored.reports)) throw new Error('Invalid workspace structure');
+    let invalidReports=0;
+    for(const item of stored.reports.slice(0,12)){
+      try {
+        if(!item||typeof item.id!=='string'||typeof item.templateId!=='string'||!reportTemplates.some(t=>t.id===item.templateId))throw new Error('Invalid report metadata');
+        const doc=validateDraft({format:'mri-report-studio',version:draftVersion,templateId:item.templateId,profile:'custom',doc:item.doc,customModules:[]}).doc;
+        openReports.push({id:item.id,templateId:item.templateId,doc,dirty:Boolean(item.dirty)});
+      } catch { invalidReports++; }
+    }
+    if(stored.reports.length>12)invalidReports+=stored.reports.length-12;
+    if(invalidReports)throw Object.assign(new Error('Some workspace reports are invalid'),{validReports:openReports});
+  } catch(error){
+    recoveryError=true;
+    // Never silently replace a damaged workspace with a new empty one.
+    // Keep the original bytes before allowing any subsequent autosave.
+    try {
+      const recoveryPrefix=KEYS.workspace+'.recovery.';
+      const alreadyBackedUp=Object.keys(localStorage).some(key=>key.startsWith(recoveryPrefix)&&localStorage.getItem(key)===workspaceRaw);
+      if(!alreadyBackedUp){
+        const backupKey=recoveryPrefix+Date.now()+'.'+crypto.randomUUID();
+        localStorage.setItem(backupKey,workspaceRaw);
+        if(localStorage.getItem(backupKey)!==workspaceRaw)throw new Error('Workspace recovery backup verification failed');
+      }
+    } catch { workspaceRecoveryBlocked=true; }
+    if(!workspaceRecoveryBlocked && Array.isArray((error as {validReports?:OpenReport[]}).validReports))
+      openReports=(error as {validReports:OpenReport[]}).validReports;
   }
-  if(openReports.length){
-    activeReportId=openReports.some(r=>r.id===stored.activeId)?stored.activeId:openReports[0].id;
-    const active=openReports.find(r=>r.id===activeReportId)!;initial=active.doc;activeTemplateId=active.templateId;
-    selectedAreaId=reportTemplates.find(t=>t.id===activeTemplateId)!.areaId;changedSinceOpen=active.dirty;
-  }
-} catch { openReports=[];activeReportId=''; }
+}
+if(openReports.length){
+  const stored=read<{activeId?:string}>(KEYS.workspace,{});
+  activeReportId=openReports.some(r=>r.id===stored.activeId)?stored.activeId!:openReports[0].id;
+  const active=openReports.find(r=>r.id===activeReportId)!;
+  initial=active.doc;activeTemplateId=active.templateId;
+  selectedAreaId=reportTemplates.find(t=>t.id===activeTemplateId)!.areaId;changedSinceOpen=active.dirty;
+}
 if(!openReports.length){activeReportId=crypto.randomUUID();openReports=[{id:activeReportId,templateId:activeTemplateId,doc:initial,dirty:false}];}
 
 $('#app').innerHTML=`<div class="shell">
@@ -145,6 +174,7 @@ applyTheme();
 function renderBrand() { $('#brand-image').innerHTML='<span class="brand-text"><strong>X-ray <em>Report</em> Studio</strong></span>'; }
 renderBrand();
 const editor=makeEditor($('#editor'),initial,{getPersonalWords:()=>personalWords,onProofStatus:status=>{const el=document.querySelector('#proof-status');if(el)el.textContent=status.error?`Проверка: ${status.error}`:!status.enabled?'Проверка выключена':status.checking?'Проверка текста…':status.count?`Замечаний: ${status.count} · нажмите подчёркнутый текст`:'Орфография и базовая грамматика: замечаний нет';}});
+editor.view.dom.addEventListener('keydown',event=>{const key=event as KeyboardEvent,modified=key.ctrlKey||key.metaKey,undo=modified&&(key.code==='KeyZ'||key.key.toLowerCase()==='z')&&!key.shiftKey,redo=(key.ctrlKey&&(key.code==='KeyY'||key.key.toLowerCase()==='y'))||(key.metaKey&&key.shiftKey&&(key.code==='KeyZ'||key.key.toLowerCase()==='z'));if((undo&&undoDepth(editor.state)===0)||(redo&&redoDepth(editor.state)===0)){key.preventDefault();key.stopPropagation();}},true);
 async function loadSharedDictionary(){if(!window.desktop)return;try{const stored=await window.desktop.dictionaryLoad();sharedDictionaryAvailable=stored.shared;personalWords=[...new Set([...personalWords,...stored.words])].slice(0,20000);localStorage.setItem(KEYS.dictionary,JSON.stringify(personalWords));if(personalWords.length)await window.desktop.dictionaryMergeSave(personalWords);refreshProofreading(editor);}catch{sharedDictionaryAvailable=false;}}
 void loadSharedDictionary();
 setLiveProofreading(editor,settings.liveProof);
@@ -153,10 +183,10 @@ editor.on('selectionUpdate',()=>{ savedSelection=editor.state.selection;editor.v
 editor.on('update',()=>{if(!suppress){changedSinceOpen=true;const active=openReports.find(r=>r.id===activeReportId);if(active){active.doc=editor.getJSON() as RichNode;active.templateId=activeTemplateId;active.dirty=true;}clearTimeout(timer);if(!templateMode){$('#save-state').textContent='Сохраняется…';timer=setTimeout(saveLocal,450);}else $('#save-state').textContent='Шаблон изменён';renderCounts();renderReportTabs();}});
 editor.on('transaction',updateRibbon);
 const json=()=>editor.getJSON() as RichNode;
-function restore(doc:RichNode) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(doc));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
+function restore(doc:RichNode) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(doc));/* Replacing the document alone maps the old undo stack onto its new contents. Remove and re-add the history plugin in separate states to reset it. */const plugins=editor.state.plugins,withoutHistory=editor.state.reconfigure({plugins:plugins.filter(plugin=>!String((plugin as unknown as {key?:string}).key??'').startsWith('history$'))});editor.view.updateState(withoutHistory);editor.view.updateState(withoutHistory.reconfigure({plugins:[...withoutHistory.plugins,history()]}));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
 function toast(message:string,error=false) { $('.toast')?.remove();const t=document.createElement('div');t.className=`toast${error?' error':''}`;t.role=error?'alert':'status';t.textContent=message;document.body.append(t);setTimeout(()=>t.remove(),5000); }
 function syncActiveReport(){const active=openReports.find(r=>r.id===activeReportId);if(active){active.doc=json();active.templateId=activeTemplateId;active.dirty=changedSinceOpen;}}
-function saveLocal() { if(templateMode)return;try{syncActiveReport();localStorage.setItem(KEYS.draft,JSON.stringify({format:'mri-report-studio',version:draftVersion,profile:profileForTemplate(),templateId:activeTemplateId,doc:json(),customModules:[]}));localStorage.setItem(KEYS.workspace,JSON.stringify({activeId:activeReportId,reports:openReports}));$('#save-state').textContent='Сохранено на компьютере';}catch{ $('#save-state').textContent='Не сохранено';toast('Не удалось сохранить локальный черновик. Сохраните документ Word.',true); } }
+function saveLocal() { if(templateMode)return;if(workspaceRecoveryBlocked){$('#save-state').textContent='Не сохранено';toast('Не удалось создать резервную копию повреждённого рабочего пространства. Сохраните документ в Word.',true);return;}try{syncActiveReport();localStorage.setItem(KEYS.draft,JSON.stringify({format:'mri-report-studio',version:draftVersion,profile:profileForTemplate(),templateId:activeTemplateId,doc:json(),customModules:[]}));localStorage.setItem(KEYS.workspace,JSON.stringify({activeId:activeReportId,reports:openReports}));$('#save-state').textContent='Сохранено на компьютере';}catch{ $('#save-state').textContent='Не сохранено';toast('Не удалось сохранить локальный черновик. Сохраните документ Word.',true); } }
 function profileForTemplate() { const area=reportTemplates.find(t=>t.id===activeTemplateId)?.areaId;return area==='head'?'brain':'custom'; }
 function reportTitle(id:string,doc:RichNode){const template=reportTemplates.find(t=>t.id===id);return template?titleWithStudySide(template.title,overrides[id]??template.doc,doc):'Исследование';}
 function renderCounts() {

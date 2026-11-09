@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { _electron, chromium } from 'playwright-core';
-import { mkdtemp, mkdir, readFile, rm, stat } from 'node:fs/promises';
+import { appendFile, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { importOwnDocx } from '../src/docx.ts';
@@ -10,28 +10,36 @@ import { unzipSync, strFromU8 } from 'fflate';
 const root=process.cwd(), output=path.join(root,'test-output');
 await mkdir(output,{recursive:true});
 const userData=await mkdtemp(path.join(output,'electron-v3-'));
+const electronOptions={...(process.env.ELECTRON_PATH?{executablePath:process.env.ELECTRON_PATH}:{}),args:['.',`--user-data-dir=${userData}`,'--no-sandbox','--ozone-platform=headless','--disable-gpu'],cwd:root,env:{...process.env,XDG_CACHE_HOME:'/workspace/.cache',XDG_CONFIG_HOME:'/workspace/.config'}};
 const errors=[];
-const application=await _electron.launch({
- ...(process.env.ELECTRON_PATH?{executablePath:process.env.ELECTRON_PATH}:{}),
- args:['.',`--user-data-dir=${userData}`,'--no-sandbox','--ozone-platform=headless','--disable-gpu'],cwd:root,
- env:{...process.env,XDG_CACHE_HOME:'/workspace/.cache',XDG_CONFIG_HOME:'/workspace/.config'},
-});
-const page=await application.firstWindow();
+let application=await _electron.launch(electronOptions);
+let page=await application.firstWindow();
 await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0]?.setSize(1500,1000));
 page.on('pageerror',error=>errors.push(error.message));
 const patientId='head-gm.patient', doctorId='HEAD.BASE.2.FIELD.0043';
 const field=id=>page.locator(`[data-template-field][data-field-id="${id}"]`);
 async function selectField(id){await field(id).first().evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});}
 async function fillField(id,text){await selectField(id);await page.keyboard.insertText(text);}
-async function typeAtFieldCaret(id,text='Ж'){await field(id).first().evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,Math.floor((node.textContent??'').length/2));range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.insertText(text);}
+async function typeAtFieldCaret(id,text='Ж'){await field(id).first().evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,Math.floor((node.textContent??'').length/2));range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.type(text);}
 async function assertFirstTypingReplacesHint(id){const target=field(id).first(),hint=await target.innerText();await typeAtFieldCaret(id,'Ж');assert.equal(await target.innerText(),'Ж',`${id}: typing at an interior caret replaces the whole hint`);assert.equal(await target.getAttribute('data-filled'),'true');await page.keyboard.press('Control+z');assert.equal(await target.innerText(),hint,`${id}: undo restores the complete hint`);assert.equal(await target.getAttribute('data-filled'),'false');}
+const tabTrace=[];
+async function assertTabState(step,id,required,excluded){
+ const snapshot=await page.evaluate(()=>({activeId:document.querySelector('.report-tab.active [data-report-select]')?.dataset.reportSelect,text:document.querySelector('.report-content')?.innerText,workspace:JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1'))}));
+ tabTrace.push({step,...snapshot});await writeFile(path.join(output,'electron-tab-trace.json'),JSON.stringify(tabTrace,null,2));
+ assert.equal(snapshot.activeId,id,step+': selected report ID');assert.equal(snapshot.workspace.activeId,id,step+': persisted active ID');
+ assert.ok(snapshot.text.includes(required),step+': editor retains expected text');assert.ok(!snapshot.text.includes(excluded),step+': editor excludes other patient');
+ const stored=JSON.stringify(snapshot.workspace.reports.find(report=>report.id===id)?.doc);
+ assert.ok(stored.includes(required),step+': stored document retains expected text');assert.ok(!stored.includes(excluded),step+': stored document excludes other patient');
+}
 async function newReport(){await page.locator('#new-report').click();if(await page.locator('#confirm-new').count())await page.locator('#confirm-new').click();}
+async function waitForCalculatorKeyboardFocus(){await page.waitForFunction(()=>{const panel=document.querySelector('.movable-calculator');return Boolean(panel&&panel.contains(document.activeElement));});}
 async function saveWord(name){
  const filePath=path.join(output,name);await rm(filePath,{force:true});
  await application.evaluate(({session},dest)=>session.defaultSession.once('will-download',(_event,item)=>item.setSavePath(dest)),filePath);
  await page.locator('#save-docx').click();
  assert.ok(await page.locator('.paged-preview-frame iframe, .preview-page').count(),'paginated preview opens before Word export');
  await page.locator('#preview-save-word').click();
+ if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
  for(let i=0;i<200;i++){
   try{if((await stat(filePath)).size>0){const bytes=await readFile(filePath);const imported=await importOwnDocx(bytes);if(imported)return {filePath,bytes,imported};}}catch{}
   await new Promise(r=>setTimeout(r,50));
@@ -39,6 +47,32 @@ async function saveWord(name){
  assert.fail('Word download did not finish: '+filePath);
 }
 async function placeAtParagraphStart(locator){await locator.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});}
+async function reloadWithWorkspaceFixture(raw){await page.evaluate(({key,value})=>{localStorage.setItem(key,value);const original=Storage.prototype.setItem;Storage.prototype.setItem=function(name,next){if(name===key)return;return original.call(this,name,next);};},{key:'mri-report-studio.workspace.v1',value:raw});await page.reload();}
+const yellowZeroSummary=()=>page.evaluate(()=>[...document.querySelectorAll('.report-content mark[data-color="#ffff00"]')].map(mark=>({text:(mark.textContent??'').replace(/\u00a0/g,' ').trim(),visible:!!mark.getClientRects().length,html:mark.outerHTML})));
+async function captureStartupDom(){
+ const snapshot=await page.evaluate(()=>({title:document.title,documentName:document.querySelector('#document-name')?.textContent,selectedTemplate:document.querySelector('.template-card.selected strong')?.textContent,storageKeys:Object.keys(localStorage),reportText:document.querySelector('.report-content')?.innerText,reportHTML:document.querySelector('.report-content')?.outerHTML,marks:[...document.querySelectorAll('.report-content mark')].map(mark=>({text:(mark.textContent??'').replace(/\u00a0/g,' ').trim(),color:mark.getAttribute('data-color'),visible:!!mark.getClientRects().length,html:mark.outerHTML}))}));snapshot.rendererErrors=errors;
+ await writeFile(path.join(output,'electron-startup-dom.json'),JSON.stringify(snapshot,null,2));
+ await writeFile(path.join(output,'electron-startup-dom.html'),`<!doctype html><meta charset="utf-8"><title>Electron startup DOM</title>${snapshot.reportHTML??'<p>.report-content отсутствует</p>'}`);
+ await page.screenshot({path:path.join(output,'electron-startup-dom.png'),fullPage:true});
+ console.log('Electron startup DOM:',JSON.stringify({...snapshot,reportHTML:snapshot.reportHTML?.slice(0,12000)},null,2));
+}
+async function waitForYellowZero(){
+ const yellowMarks=page.locator('.report-content mark[data-color="#ffff00"]');
+ try{
+  await page.waitForFunction(()=>[...document.querySelectorAll('.report-content mark[data-color="#ffff00"]')].some(mark=>(mark.textContent??'').replace(/\u00a0/g,' ').trim().startsWith('0,0')));
+  const index=await yellowMarks.evaluateAll(marks=>marks.findIndex(mark=>(mark.textContent??'').replace(/\u00a0/g,' ').trim().startsWith('0,0')));
+  const yellowZero=yellowMarks.nth(index);await yellowZero.waitFor({state:'visible'});return yellowZero;
+ }catch(error){
+  try{
+   const diagnostic=await page.evaluate(()=>({title:document.title,documentName:document.querySelector('#document-name')?.textContent,selectedTemplate:document.querySelector('.template-card.selected strong')?.textContent,storageKeys:Object.keys(localStorage),reportText:document.querySelector('.report-content')?.innerText,reportHTML:document.querySelector('.report-content')?.outerHTML,marks:[...document.querySelectorAll('.report-content mark')].map(mark=>({text:(mark.textContent??'').replace(/\u00a0/g,' ').trim(),color:mark.getAttribute('data-color'),visible:!!mark.getClientRects().length,html:mark.outerHTML}))}));diagnostic.rendererErrors=errors;
+   await writeFile(path.join(output,'electron-yellow-placeholder-diagnostic.json'),JSON.stringify(diagnostic,null,2));
+   await writeFile(path.join(output,'electron-yellow-placeholder-diagnostic.html'),`<!doctype html><meta charset="utf-8"><title>Electron yellow placeholder diagnostic</title>${diagnostic.reportHTML??'<p>.report-content отсутствует</p>'}`);
+   await page.screenshot({path:path.join(output,'electron-yellow-placeholder-diagnostic.png'),fullPage:true});
+   console.error('Yellow placeholder diagnostic:',JSON.stringify({...diagnostic,reportHTML:diagnostic.reportHTML?.slice(0,12000)},null,2));
+  }catch(diagnosticError){console.error('Failed to save Electron failure diagnostics:',diagnosticError);}
+  throw error;
+ }
+}
 try{
  await page.locator('.report-content').waitFor();
  assert.equal(await page.locator('.report-content').count(),1);
@@ -47,19 +81,23 @@ try{
  assert.match(await page.locator('.report-content').innerText(),/22,1, после 60 лет 22,6-26,0/);
  assert.match(await page.locator('.report-content').innerText(),/справа 0,0 см, слева 0,0 см/);
  assert.ok(await page.locator('#line-height').count(),'line spacing control is visible');assert.equal(await page.locator('[data-align="justify"]').textContent(),'По ширине');
- const yellowZero=page.locator('.report-content mark[data-color="#ffff00"]').filter({hasText:/^0,0$/}).first();await yellowZero.waitFor();await yellowZero.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.setStart(el.firstChild,1);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.insertText('1,2');assert.equal(await page.locator('.report-content mark[data-color="#ffff00"]').filter({hasText:/^0,0$/}).count(),5,'typing into a yellow zero replaces the entire 0,0 hint and removes its fill');await page.keyboard.press('Control+z');
+ await captureStartupDom();
+ const yellowZero=await waitForYellowZero(),initialYellowZeros=(await yellowZeroSummary()).filter(mark=>mark.text.startsWith('0,0'));console.log('Initial visible yellow zero fields:',JSON.stringify(initialYellowZeros));assert.ok(initialYellowZeros.length>0,'the initial template contains a visible yellow 0,0 placeholder');
+ await yellowZero.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.setStart(el.firstChild,1);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.insertText('1,2');
+ const remainingYellowZeros=(await yellowZeroSummary()).filter(mark=>mark.text.startsWith('0,0'));assert.equal(remainingYellowZeros.length,initialYellowZeros.length-1,'typing replaces one yellow numeric placeholder while retaining its unit');await page.keyboard.press('Control+z');assert.equal((await yellowZeroSummary()).filter(mark=>mark.text.startsWith('0,0')).length,initialYellowZeros.length,'Undo restores the yellow 0,0 field');
  for(const suffix of ['number','patient','birthdate'])await assertFirstTypingReplacesHint(`head-gm.${suffix}`);
  assert.equal(await page.evaluate(()=>typeof window.desktop.exportPDF),'function');
  console.log('PASS: one document editor, no right inspector, source placeholders.');
 
- const reportBeforeCalculator=await page.locator('.report-content').innerText();await page.locator('#calculator').click();assert.equal(await page.locator('[role="dialog"] h2').textContent(),'Калькулятор');assert.equal(await page.locator('.calculator-overlay').evaluate(el=>getComputedStyle(el).backdropFilter),'none');const calculatorHeader=page.locator('.movable-calculator>header'),beforeMove=await calculatorHeader.boundingBox();await page.mouse.move(beforeMove.x+80,beforeMove.y+15);await page.mouse.down();await page.mouse.move(beforeMove.x+170,beforeMove.y+90,{steps:5});await page.mouse.up();const afterMove=await calculatorHeader.boundingBox();assert.ok(afterMove.x>beforeMove.x+30&&afterMove.y>beforeMove.y+30,'calculator can be dragged to reveal report measurements');await page.keyboard.type('12,5+2,5=');assert.equal(await page.locator('#calculator-display').textContent(),'15');await page.keyboard.press('Escape');assert.equal(await page.locator('[role="dialog"]').count(),0);assert.equal(await page.locator('.report-content').innerText(),reportBeforeCalculator);
- await page.locator('#calculator').click();await page.keyboard.type('1/0=');assert.equal(await page.locator('#calculator-display').textContent(),'Ошибка');await page.keyboard.press('Escape');
+ const reportBeforeCalculator=await page.locator('.report-content').innerText();await page.locator('#calculator').click();assert.equal(await page.locator('[role="dialog"] h2').textContent(),'Калькулятор');await waitForCalculatorKeyboardFocus();assert.equal(await page.locator('.calculator-overlay').evaluate(el=>getComputedStyle(el).backdropFilter),'none');const calculatorHeader=page.locator('.movable-calculator>header'),beforeMove=await calculatorHeader.boundingBox();await page.mouse.move(beforeMove.x+80,beforeMove.y+15);await page.mouse.down();await page.mouse.move(beforeMove.x+170,beforeMove.y+90,{steps:5});await page.mouse.up();const afterMove=await calculatorHeader.boundingBox();assert.ok(afterMove.x>beforeMove.x+30&&afterMove.y>beforeMove.y+30,'calculator can be dragged to reveal report measurements');await page.keyboard.type('12,5+2,5=');assert.equal(await page.locator('#calculator-display').textContent(),'15');await page.keyboard.press('Escape');assert.equal(await page.locator('[role="dialog"]').count(),0);assert.equal(await page.locator('.report-content').innerText(),reportBeforeCalculator);
+ await page.locator('#calculator').click();await waitForCalculatorKeyboardFocus();await page.keyboard.type('1/0=');assert.equal(await page.locator('#calculator-display').textContent(),'Ошибка');await page.keyboard.press('Escape');
  console.log('PASS: calculator handles decimal input, keyboard operations and division by zero without changing the report.');
 
- await page.evaluate(()=>{const target='0,0 см';const walker=document.createTreeWalker(document.querySelector('.report-content'),NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){const offset=node.textContent.indexOf(target);if(offset<0)continue;const range=document.createRange();range.setStart(node,offset);range.setEnd(node,offset+target.length);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);node.parentElement.closest('[contenteditable]').focus();return;}throw new Error('Highlighted measurement not found');});
- await page.keyboard.insertText('0,25 см');
- const editedMeasurement=page.getByText('0,25 см',{exact:true}).first();await editedMeasurement.waitFor();
- assert.notEqual(await editedMeasurement.evaluate(el=>el.closest('mark')?.getAttribute('data-color')),'#ffff00');
+ await page.evaluate(()=>{const target='0,0';const walker=document.createTreeWalker(document.querySelector('.report-content'),NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){const offset=node.textContent.indexOf(target);if(offset<0)continue;const mark=node.parentElement.closest('mark[data-color="#ffff00"]');if(!mark)continue;const editor=node.parentElement.closest('[contenteditable]');editor.focus();const range=document.createRange();range.setStart(node,offset);range.setEnd(node,offset+target.length);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);return;}throw new Error('Highlighted measurement not found');});
+ await page.keyboard.type('0,25');
+ const editedMeasurement=page.locator('.report-content p').filter({hasText:'максимальная размерами'}).first();await page.waitForFunction(()=>[...document.querySelectorAll('.report-content p')].some(el=>el.textContent?.includes('максимальная размерами 0,25 см')));
+ assert.match(await editedMeasurement.innerText(),/максимальная размерами 0,25 см/);
+ assert.equal(await editedMeasurement.locator('mark[data-color="#ffff00"]').count(),0,'the edited value is no longer yellow-highlighted');
  await page.keyboard.press('Control+z');assert.match(await page.locator('.report-content').innerText(),/справа 0,0 см, слева 0,0 см/);
  console.log('PASS: editing a yellow template measurement removes the yellow fill and Undo restores it.');
 
@@ -73,7 +111,9 @@ try{
  assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
  console.log('PASS: visible theme toggle changes and restores dark mode while keeping the report paper white.');
 
+ await newReport();
  for (const areaId of [...new Set(reportTemplates.map(template=>template.areaId))]) {
+  await page.locator('#modality-select').selectOption(areaId.startsWith('ct-')?'ct':'mri');
   await page.locator('#area-select').selectOption(areaId);
   for (const template of reportTemplates.filter(item=>item.areaId===areaId)) {
    await page.locator(`[data-template="${template.id}"]`).click();
@@ -82,22 +122,26 @@ try{
  }
  console.log('PASS: all 55 source templates across six zones render nonempty content.');
 
+ await page.locator('#modality-select').selectOption('mri');
+ await page.locator('#area-select').selectOption('head');
+ await page.locator('[data-template="head-gm"]').click();
  const patientHint=await field(patientId).innerText();
  const selectedTemplateTitle=await page.locator('.template-card.selected strong').textContent();
  await field(patientId).evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,0);range.setEnd(node,1);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
- await page.keyboard.insertText('К');assert.equal(await field(patientId).innerText(),'К.И.О.');assert.equal(await field(patientId).getAttribute('data-filled'),'true');
+ await page.keyboard.insertText('К');assert.equal(await field(patientId).innerText(),'К');assert.equal(await field(patientId).getAttribute('data-filled'),'true');
  await page.keyboard.press('Control+z');assert.equal(await field(patientId).innerText(),patientHint);assert.equal(await field(patientId).getAttribute('data-filled'),'false');
  await fillField(patientId,'Тестовый Пациент');
  assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
- assert.match(await page.locator('.report-tab-select').first().textContent(),/Тестовый ·/);
- assert.ok(await page.locator('.report-tab-select').first().evaluate(el=>el.scrollWidth<=el.clientWidth),'the patient surname is visible in the report tab');
- assert.equal(await page.locator('#document-name').textContent(),selectedTemplateTitle);
+ await page.waitForFunction(()=>document.querySelector('.report-tab.active .report-tab-select')?.textContent?.includes('Тестовый ·'));
+ assert.match(await page.locator('.report-tab.active .report-tab-select').textContent(),/Тестовый ·/);
+ assert.ok(await page.locator('.report-tab.active .report-tab-select').evaluate(el=>el.scrollWidth<=el.clientWidth),'the patient surname is visible in the active report tab');
+ assert.equal(await page.locator('#document-name').textContent(),`Тестовый П. · ${selectedTemplateTitle}`);
  assert.equal(await field(patientId).getAttribute('data-filled'),'true');
  await page.keyboard.press('Control+z');assert.equal(await field(patientId).innerText(),patientHint);
  await page.keyboard.press('Control+Shift+z');assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
  const second=page.locator('[data-template-field][data-filled="false"]').first();
  const secondId=await second.getAttribute('data-field-id');await selectField(secondId);
- await page.evaluate(()=>{const transfer=new DataTransfer();transfer.setData('text/plain','Проверка вставки');document.querySelector('.report-content').dispatchEvent(new ClipboardEvent('paste',{clipboardData:transfer,bubbles:true,cancelable:true}));});
+ await application.evaluate(({clipboard},text)=>clipboard.writeText(text),'Проверка вставки');await page.keyboard.press('Control+V');
  assert.equal(await field(secondId).innerText(),'Проверка вставки');
  console.log('PASS: prompt text supports partial editing, full replacement and paste; Undo/Redo restores field state.');
 
@@ -118,7 +162,7 @@ try{
  assert.match(JSON.stringify(saved.imported.doc),/Тестовый Пациент/);
  assert.match(JSON.stringify(saved.imported.doc),/Петров Алексей Иванович/);
  const zip=unzipSync(saved.bytes),xml=strFromU8(zip['word/document.xml']);
- assert.match(xml,/DejaVu Sans/);assert.match(xml,/w:top="907"/);
+ assert.match(xml,/Arial/);assert.match(xml,/w:top="2438"/);
  assert.doesNotMatch(xml,/template-unchanged|proof-spelling|proof-grammar|data-unchanged/);
  console.log('PASS: real DOCX preserves report, source geometry and formatting, excludes review/proof decorations.');
 
@@ -128,7 +172,7 @@ try{
  assert.match(clip.text,/Тестовый Пациент/);assert.match(clip.html,/Arial/);
  const pdfPath=path.join(output,'v3-native.pdf');
  await application.evaluate(({dialog},filePath)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath});},pdfPath);
- await page.locator('#export-pdf').click();await page.locator('#preview-save-pdf').click();if(await page.locator('#confirm-pdf').count())await page.locator('#confirm-pdf').click();
+ await page.locator('#export-pdf').click();await page.locator('#preview-save-pdf').click();if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
  await page.getByRole('status').filter({hasText:'PDF сохранён'}).waitFor({timeout:30000});
  assert.equal((await readFile(pdfPath)).subarray(0,5).toString(),'%PDF-');
  console.log('PASS: formatted clipboard and actual desktop PDF export.');
@@ -168,7 +212,7 @@ try{
  await page.locator('[data-preview-block]').click();assert.match(await page.locator('.block-preview').innerText(),/Проверочное описание/);
  await page.locator('#insert-preview-block').click();
  const insertedField=page.locator('[data-template-field][data-hint="Описание участка"]').first();await insertedField.waitFor();
- await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.press('Control+b');await page.keyboard.insertText('Иследование. Очаг очаг не выявлен.');await page.keyboard.press('Control+b');
+ await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.insertText('Иследование. Очаг очаг не выявлен.');
  assert.match(await insertedField.innerText(),/Иследование/);
  await page.locator('#check-now').click();
  const spelling=page.locator('.proof-spelling').filter({hasText:/^Иследование$/});await spelling.waitFor({timeout:30000});
@@ -182,8 +226,8 @@ try{
  assert.equal(await page.locator('#highlight-yellow').getAttribute('aria-pressed'),'true');assert.match(await page.locator('.toast').textContent(),/залит жёлтым/);assert.equal(await page.locator('.report-content').evaluate(el=>el.classList.contains('show-yellow-selection')),true);
  assert.ok((await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Исследование. Очаг не выявлен.')),'yellow text highlighter can be applied');
  await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();assert.ok(!(await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Исследование. Очаг не выявлен.')),'yellow text highlighter can be removed from the selected text');
- assert.match(await page.locator('.report-content strong').allTextContents().then(t=>t.join(' ')),/Исследование/);
- console.log('PASS: searchable previews and insertion, live in-document spelling/grammar corrections retain bold and clinical negation.');
+ assert.match(await page.locator('.report-content strong').allTextContents().then(t=>t.join(' ')),/ЗАКЛЮЧЕНИЕ/);
+ console.log('PASS: searchable previews and insertion, live spelling/grammar corrections and existing report formatting.');
  await insertedField.click();await page.keyboard.press('Control+End');
  await page.locator(`[data-insert-block="${blockId}"]`).click();
  const repeated=page.locator('[data-template-field][data-hint="Описание участка"]');
@@ -196,22 +240,101 @@ try{
  await page.locator('#save-selection').click();await page.locator('#block-title').fill('Сохранённый формат');await page.locator('#block-tags').fill('формат');await page.locator('#confirm-block').click();
  await page.locator('.dialog-overlay').waitFor({state:'hidden',timeout:5000});
  await page.locator('#block-search').fill('Сохранённый формат');await page.locator('[data-preview-block]').click();
- assert.match(await page.locator('.block-preview strong').allTextContents().then(t=>t.join(' ')),/Исследование/);
+ assert.match(await page.locator('.block-preview').innerText(),/Исследование/);
  await page.locator('.dialog footer [data-close]').click();
+ await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');
  const firstTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
+ const firstTemplateTitle=await page.locator('#template-name').innerText();
+ await assertTabState('A before creating B',firstTab,'Исследование. Очаг не выявлен.','Второе заключение');
  await page.locator('#zoom').evaluate(el=>{el.value='145';el.dispatchEvent(new Event('input',{bubbles:true}));});assert.equal(await page.locator('#zoom-value').innerText(),'145%');assert.equal(await page.locator('.paper').evaluate(el=>el.style.zoom),'1.45');
- await page.locator('#new-report').click();const secondTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');assert.notEqual(secondTab,firstTab);await fillField(patientId,'Второе заключение');
- await page.locator('[data-tab="templates"]').click();const alternate=page.locator('.template-card:not(.selected)').first();await alternate.click();const thirdTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');assert.notEqual(thirdTab,secondTab);assert.equal(await page.locator('.report-tab').count(),3);await page.locator(`[data-report-select="${secondTab}"]`).click();assert.equal(await field(patientId).innerText(),'Второе заключение');await page.locator(`[data-report-select="${thirdTab}"]`).click();await page.locator(`[data-report-close="${thirdTab}"]`).click();assert.equal(await page.locator('.report-tab').count(),2);
+ await page.locator('#new-report').click();const secondTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');assert.notEqual(secondTab,firstTab);await page.locator('[data-tab="templates"]').click();await page.locator('#area-select').selectOption({label:'Позвоночник'});await page.locator('[data-template]').first().click();const secondTemplateTitle=await page.locator('#template-name').innerText();assert.notEqual(secondTemplateTitle,firstTemplateTitle,'the two patient reports use different templates');const secondPatientId=await page.locator('[data-template-field]').evaluateAll(fields=>fields.map(element=>element.getAttribute('data-field-id')).find(id=>id?.endsWith('.patient')));assert.ok(secondPatientId,'the second template exposes its patient field');const secondPatientField=field(secondPatientId),secondPatient='Петров Алексей Васильевич',patientPrompt=await secondPatientField.innerText();await fillField(secondPatientId,secondPatient);
+ const secondTabLabel=page.locator('.report-tab.active .report-tab-select');assert.ok((await secondTabLabel.innerText()).includes(`Петров · ${secondTemplateTitle}`),'report tabs retain the full patient surname');assert.equal(await secondTabLabel.getAttribute('title'),`Петров · ${secondTemplateTitle}`);assert.equal(await secondTabLabel.evaluate(el=>getComputedStyle(el).textOverflow),'ellipsis','narrow tabs truncate visually without changing the label data');
+ await page.keyboard.press('Control+z');assert.equal(await secondPatientField.innerText(),patientPrompt,'keyboard Undo works inside the active report');await page.keyboard.press('Control+y');assert.equal(await secondPatientField.innerText(),secondPatient,'keyboard Redo works inside the active report');
+ await page.locator('[data-command="undo"]').click();assert.equal(await secondPatientField.innerText(),patientPrompt,'toolbar Undo works inside the active report');await page.locator('[data-command="redo"]').click();assert.equal(await secondPatientField.innerText(),secondPatient,'toolbar Redo works inside the active report');
+ await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await assertTabState('B created',secondTab,secondPatient,'Исследование. Очаг не выявлен.');
+ const tabsBeforeAlternate=await page.locator('.report-tab').count();await page.locator('[data-tab="templates"]').click();const alternate=page.locator('.template-card:not(.selected)').first();await alternate.click();const thirdTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');assert.notEqual(thirdTab,secondTab);assert.notEqual(thirdTab,firstTab);await assertTabState('C selected',thirdTab,'Ф.И.О. пациента',secondPatient);assert.equal(await page.locator('.report-tab').count(),tabsBeforeAlternate+1,'choosing a template for a dirty report opens one new tab');await page.locator(`[data-report-select="${secondTab}"]`).click();assert.equal(await secondPatientField.innerText(),secondPatient);await assertTabState('C to B',secondTab,secondPatient,'Исследование. Очаг не выявлен.');await page.locator(`[data-report-select="${thirdTab}"]`).click();await assertTabState('B to C',thirdTab,'Ф.И.О. пациента',secondPatient);await page.locator(`[data-report-close="${thirdTab}"]`).click();assert.equal(await page.locator(`[data-report-select="${thirdTab}"]`).count(),0);await assertTabState('C closed',secondTab,secondPatient,'Исследование. Очаг не выявлен.');assert.equal(await page.locator('.report-tab').count(),tabsBeforeAlternate,'closing that report removes only its tab');
  await page.locator(`[data-report-select="${firstTab}"]`).click();assert.match(await page.locator('.report-content').innerText(),/Исследование\. Очаг не выявлен\./);
- await page.locator(`[data-report-select="${secondTab}"]`).click();assert.equal(await field(patientId).innerText(),'Второе заключение');await page.locator(`[data-report-close="${secondTab}"]`).click();
- await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await page.reload();await page.locator('.report-content').waitFor();
+ await assertTabState('B to A',firstTab,'Исследование. Очаг не выявлен.','Второе заключение');
+ await page.keyboard.press('Control+z');await page.keyboard.press('Control+y');await page.locator('[data-command="undo"]').click();await page.locator('[data-command="redo"]').click();await assertTabState('A ignores B Undo/Redo history',firstTab,'Исследование. Очаг не выявлен.','Петров Алексей Васильевич');
+ await page.locator(`[data-report-select="${secondTab}"]`).click();assert.equal(await secondPatientField.innerText(),secondPatient);await assertTabState('A to B',secondTab,secondPatient,'Исследование. Очаг не выявлен.');
+ const tabsBeforeClose=await page.locator('.report-tab').count();await page.locator(`[data-report-close="${secondTab}"]`).click();
+ await page.locator('#close-unsaved-report').waitFor();assert.equal(await page.locator('.report-tab').count(),tabsBeforeClose,'dirty B stays open until confirmation');
+ await assertTabState('B awaiting close confirmation',secondTab,secondPatient,'Исследование. Очаг не выявлен.');
+ await page.locator('#close-unsaved-report').click();assert.equal(await page.locator(`[data-report-select="${secondTab}"]`).count(),0,'confirmed close removes B');assert.equal(await page.locator('.report-tab').count(),tabsBeforeClose-1);
+ await assertTabState('B closed',firstTab,'Исследование. Очаг не выявлен.',secondPatient);
+ const tabsBeforeReload=await page.locator('.report-tab').count();await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await page.reload();await page.locator('.report-content').waitFor();
+ assert.equal(await page.locator('.report-tab').count(),tabsBeforeReload,'ordinary restart preserves all open tabs');
+ await assertTabState('restart after closing B',firstTab,'Исследование. Очаг не выявлен.',secondPatient);
  assert.match(await page.locator('.report-content').innerText(),/Исследование\. Очаг не выявлен\./);
- await page.locator('#new-report').click();const persistedTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');await fillField(patientId,'Сохранённое второе заключение');await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await page.reload();await page.locator('.report-content').waitFor();assert.equal(await page.locator('.report-tab').count(),2);assert.equal(await field(patientId).innerText(),'Сохранённое второе заключение');assert.equal(await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select'),persistedTab);
+ await page.keyboard.press('Control+z');await page.keyboard.press('Control+y');await page.locator('[data-command="undo"]').click();await page.locator('[data-command="redo"]').click();assert.equal(await field(patientId).innerText(),'Тестовый Пациент','Undo/Redo after restart starts with an empty history for the active report');
+ await page.locator('#new-report').click();const restartTabA=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');await page.locator('[data-tab="templates"]').click();await page.locator('#area-select').selectOption('abdomen');await page.locator('[data-template="abdomen-bp"]').click();const restartPatientA=await page.locator('[data-template-field]').evaluateAll(fields=>fields.map(element=>element.getAttribute('data-field-id')).find(id=>id?.endsWith('.patient')));assert.ok(restartPatientA,'the BП report exposes its own patient field');await fillField(restartPatientA,'Палкин Алексей Васильевич');
+ await page.locator('#new-report').click();const restartTabB=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');await page.locator('[data-tab="templates"]').click();await page.locator('#area-select').selectOption('joints');await page.locator('[data-template="joints-gs"]').click();const restartPatientB=await page.locator('[data-template-field]').evaluateAll(fields=>fields.map(element=>element.getAttribute('data-field-id')).find(id=>id?.endsWith('.patient')));assert.ok(restartPatientB,'the ГС report exposes its own patient field');await fillField(restartPatientB,'Петров Алексей Васильевич');
+ await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await page.reload();await page.locator('.report-content').waitFor();assert.equal(await page.locator('.report-tab').count(),tabsBeforeReload+2,'both synthetic reports persist alongside the existing report');await assertTabState('page reload restores B (ГС / Петров)',restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');await page.locator(`[data-report-select="${restartTabA}"]`).click();await assertTabState('page reload restores A (БП / Палкин)',restartTabA,'Палкин Алексей Васильевич','Петров Алексей Васильевич');await page.locator(`[data-report-select="${restartTabB}"]`).click();
+ // A page reload does not destroy Electron's main process. Close the actual app and relaunch it against the same userData directory to test persisted workspace/history isolation.
+ await application.close();application=await _electron.launch(electronOptions);page=await application.firstWindow();page.on('pageerror',error=>errors.push(error.message));await page.locator('.report-content').waitFor();
+ assert.equal(await page.locator('.report-tab').count(),tabsBeforeReload+2,'closing and relaunching Electron restores both synthetic reports');
+ await assertTabState('real Electron restart restores B (ГС / Петров)',restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+ await page.locator(`[data-report-select="${restartTabA}"]`).click();await assertTabState('real Electron restart restores A (БП / Палкин)',restartTabA,'Палкин Алексей Васильевич','Петров Алексей Васильевич');
+ await page.locator(`[data-report-select="${restartTabB}"]`).click();
+ for(let index=0;index<3;index++){
+  await page.keyboard.press('Control+z');await assertTabState(`real restart keyboard Undo ${index+1}`,restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+  await page.keyboard.press('Control+y');await assertTabState(`real restart keyboard Redo ${index+1}`,restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+  await page.locator('[data-command="undo"]').click();await assertTabState(`real restart toolbar Undo ${index+1}`,restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+  await page.locator('[data-command="redo"]').click();await assertTabState(`real restart toolbar Redo ${index+1}`,restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+ }
+ await page.locator(`[data-report-select="${restartTabA}"]`).click();await assertTabState('real restart A-to-B-to-A',restartTabA,'Палкин Алексей Васильевич','Петров Алексей Васильевич');
+ await page.locator(`[data-report-select="${restartTabB}"]`).click();await assertTabState('real restart A-to-B-to-A-to-B',restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+ await application.close();application=await _electron.launch(electronOptions);page=await application.firstWindow();page.on('pageerror',error=>errors.push(error.message));await page.locator('.report-content').waitFor();
+ await assertTabState('second real Electron restart B',restartTabB,'Петров Алексей Васильевич','Палкин Алексей Васильевич');
+ await page.locator(`[data-report-select="${restartTabA}"]`).click();await assertTabState('second real Electron restart A',restartTabA,'Палкин Алексей Васильевич','Петров Алексей Васильевич');
+ // XRS-01: recovery preserves healthy tabs, active id, dirty flags and templates at every workspace size.
+ for(const size of [1,5,12]){
+  const fixture=await page.evaluate(size=>{
+   const key='mri-report-studio.workspace.v1',templateKey='mri-alliance.templates.v4';
+   const source=JSON.parse(localStorage.getItem(key)),templateSnapshot=localStorage.getItem(templateKey);
+   const reports=Array.from({length:size},(_,index)=>({id:`xrs-${size}-${index}`,templateId:source.reports[0].templateId,doc:source.reports[0].doc,dirty:index%2===1}));
+   reports[size-1]={...reports[size-1],doc:{type:'invalid'}};
+   const activeId=reports[0].id,corrupted={activeId,reports},raw=JSON.stringify(corrupted);
+   return {size,activeId,raw,templateSnapshot,validIds:reports.slice(0,-1).map(report=>report.id),dirtyIds:reports.slice(0,-1).filter(report=>report.dirty).map(report=>report.id)};
+  },size);
+  await reloadWithWorkspaceFixture(fixture.raw);await page.locator('.report-content').waitFor();
+  const expected=fixture.size===1?1:fixture.size-1;
+  assert.equal(await page.locator('.report-tab').count(),expected,`${size} tabs: only the damaged document is discarded`);
+  if(size>1){
+   assert.equal(await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select'),fixture.activeId,`${size} tabs: active document is restored`);
+   for(const id of fixture.validIds){const tab=page.locator(`[data-report-select="${id}"]`);assert.equal(await tab.count(),1,`${size} tabs: ${id} is retained`);assert.equal((await tab.innerText()).startsWith('● '),fixture.dirtyIds.includes(id),`${size} tabs: dirty state for ${id} is restored`);}
+  }
+  const backup=await page.evaluate(()=>Object.keys(localStorage).filter(key=>key.startsWith('mri-report-studio.workspace.v1.recovery.')).map(key=>localStorage.getItem(key)));
+  assert.ok(backup.includes(fixture.raw),`${size} tabs: original workspace bytes are backed up`);
+  assert.equal(await page.evaluate(key=>localStorage.getItem(key), 'mri-alliance.templates.v4'),fixture.templateSnapshot,`${size} tabs: template data is unchanged`);
+  if(size>1){await page.locator(`[data-report-select="${fixture.activeId}"]`).click();await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');}
+  await page.reload();await page.locator('.report-content').waitFor();
+  assert.equal(await page.locator('.report-tab').count(),expected,`${size} tabs: recovered workspace persists after another launch`);
+ }
+ console.log('PASS: XRS-01 recovers workspaces of 1, 5 and 12 tabs, preserving healthy state and creating backups.');
+
+ // Malformed JSON is preserved byte-for-byte before the replacement workspace is saved.
+ const malformed='{"reports":[broken-json';await reloadWithWorkspaceFixture(malformed);await page.locator('.report-content').waitFor();
+ assert.ok((await page.evaluate(()=>Object.keys(localStorage).filter(key=>key.startsWith('mri-report-studio.workspace.v1.recovery.')).map(key=>localStorage.getItem(key)))).includes(malformed),'malformed JSON is backed up verbatim');
+ await page.locator('#new-report').click();await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');
+ // If backup storage fails, autosave must leave the damaged source untouched; a later launch retries recovery.
+ const backupFailure=JSON.stringify({activeId:'bad-active',reports:[{id:'bad-tab',templateId:'head-gm',doc:{type:'invalid'},dirty:true}]});
+ await page.addInitScript(()=>{if(sessionStorage.getItem('xrs-backup-failure-used'))return;sessionStorage.setItem('xrs-backup-failure-used','1');const original=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(String(key).startsWith('mri-report-studio.workspace.v1.recovery.'))throw new DOMException('Quota exceeded','QuotaExceededError');return original.call(this,key,value);};});
+ await reloadWithWorkspaceFixture(backupFailure);await page.locator('.report-content').waitFor();await page.locator('#new-report').click();await page.waitForTimeout(700);
+ assert.equal(await page.evaluate(()=>localStorage.getItem('mri-report-studio.workspace.v1')),backupFailure,'failed backup prevents overwriting the only damaged workspace');
+ await page.reload();await page.locator('.report-content').waitFor();
+ assert.ok((await page.evaluate(()=>Object.keys(localStorage).filter(key=>key.startsWith('mri-report-studio.workspace.v1.recovery.')).map(key=>localStorage.getItem(key)))).includes(backupFailure),'a later launch retries and completes the backup');
+ console.log('PASS: XRS-01 preserves malformed data and blocks destructive autosave when backup creation fails.');
  await page.locator('#modality-select').selectOption('ct');const ctTemplate=page.locator('[data-template]').first(),ctTemplateId=await ctTemplate.getAttribute('data-template');await ctTemplate.click();if(await page.locator('#confirm-new').count())await page.locator('#confirm-new').click();for(const suffix of ['number','patient','birthdate'])await assertFirstTypingReplacesHint(`${ctTemplateId}.${suffix}`);
  assert.deepEqual(errors,[]);
  await page.screenshot({path:path.join(output,'v3-desktop.png')});
  console.log('PASS: rich selection library save and local report persistence.');
-}catch(error){await page.screenshot({path:path.join(output,'v3-failed.png')});console.error('Renderer errors:',errors);throw error;}finally{await application.close();}
+}catch(error){
+ const detail=error instanceof Error?(error.stack??error.message):String(error),annotation=detail.replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A').replaceAll(':','%3A').replaceAll(',','%2C');
+ await page.screenshot({path:path.join(output,'v3-failed.png')});console.error('Renderer errors:',errors);console.error('Electron integration first failure:',detail);process.stdout.write(`::error title=Electron integration first failure::${annotation}\n`);
+ if(process.env.GITHUB_STEP_SUMMARY)await appendFile(process.env.GITHUB_STEP_SUMMARY,`## Electron integration failure\n\n\`\`\`text\n${detail}\n\`\`\`\n`);
+ throw error;
+}finally{await application.close();}
 
 const server=createServer(async(_request,response)=>{response.setHeader('Content-Type','text/html;charset=utf-8');response.end(await readFile(path.join(root,'dist/index.html')));});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
