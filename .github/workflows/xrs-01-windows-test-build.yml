@@ -1,0 +1,52 @@
+name: XRS-01 Windows x64 test build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/xrs-01-workspace-recovery]
+    paths:
+      - 'x-ray-report-studio/**'
+      - '.github/workflows/xrs-01-windows-test-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xrs-01-windows-test-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-portable:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: x-ray-report-studio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: x-ray-report-studio/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build application
+        run: npm run build
+      - name: Package portable Windows x64 application
+        run: python scripts/package_windows.py
+      - name: Verify portable archive
+        shell: pwsh
+        run: |
+          $archive = 'release/X-ray_Report_Studio_Windows_x64.zip'
+          if (!(Test-Path $archive)) { throw "Portable archive missing: $archive" }
+          python -c "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert any(p.endswith('/X-ray Report Studio.exe') for p in z.namelist()), 'portable executable missing from archive'" $archive
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xrs-01-windows-x64-portable
+          path: x-ray-report-studio/release/X-ray_Report_Studio_Windows_x64.zip
+          if-no-files-found: error
+          retention-days: 14
