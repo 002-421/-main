@@ -13,7 +13,7 @@ CACHE = ROOT / '.runtime-cache'
 RELEASE = ROOT / 'release'
 CACHE.mkdir(exist_ok=True)
 RELEASE.mkdir(exist_ok=True)
-version = json.loads((ROOT / 'node_modules/electron/package.json').read_text())['version']
+version = json.loads((ROOT / 'node_modules/electron/package.json').read_text(encoding='utf-8'))['version']
 artifact = f'electron-v{version}-win32-x64.zip'
 base = f'https://github.com/electron/electron/releases/download/v{version}'
 
@@ -62,8 +62,8 @@ shutil.copy2(ROOT / 'dist/index.html', app / 'dist/index.html')
 shutil.copy2(ROOT / 'public/x-ray-report-studio.ico', app / 'dist/x-ray-report-studio.ico')
 (app / 'package.json').write_text(json.dumps({
     'name': 'x-ray-report-studio', 'productName': 'X-ray Report Studio',
-    'version': json.loads((ROOT / 'package.json').read_text())['version'], 'main': 'electron/main.cjs', 'private': True,
-}, indent=2))
+    'version': json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))['version'], 'main': 'electron/main.cjs', 'private': True,
+}, indent=2), encoding='utf-8')
 shutil.copy2(ROOT / 'README_RU.txt', destination / 'ПРОЧИТАЙТЕ.txt')
 
 (destination / 'THIRD_PARTY_LICENSES.txt').write_text(collect_licenses(), encoding='utf-8')
