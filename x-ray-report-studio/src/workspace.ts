@@ -211,9 +211,9 @@ function runHistoryCommand(direction:'undo'|'redo'){
    const range=document.createRange();range.setStart(selection.focusNode,selection.focusOffset);range.collapse(true);const rect=range.getBoundingClientRect();if(rect.height||rect.width)caret={top:rect.top,bottom:rect.bottom};
   }
   const position=caret??editor.view.coordsAtPos(editor.state.selection.head);
-  const viewport=canvas.getBoundingClientRect(),margin=12;
-  if(position.top<viewport.top)canvas.scrollTop+=position.top-(viewport.top+margin);
-  else if(position.bottom>viewport.bottom)canvas.scrollTop+=position.bottom-(viewport.bottom-margin);
+  const viewport=canvas.getBoundingClientRect(),margin=12,visibilityTolerance=2;
+  if(position.top<viewport.top-visibilityTolerance)canvas.scrollTop+=position.top-(viewport.top+margin);
+  else if(position.bottom>viewport.bottom+visibilityTolerance)canvas.scrollTop+=position.bottom-(viewport.bottom-margin);
  }catch{/* Some non-text selections do not expose a measurable caret. */}
 }
 document.addEventListener('keydown',event=>{const key=event as KeyboardEvent,target=key.target instanceof Element?key.target:null,editingOutsideReport=Boolean(target?.closest('input,textarea,select,[contenteditable="true"]')&&!target.closest('.report-content')),modified=key.ctrlKey||key.metaKey,undo=modified&&(key.code==='KeyZ'||key.key.toLowerCase()==='z')&&!key.shiftKey,redo=(key.ctrlKey&&(key.code==='KeyY'||key.key.toLowerCase()==='y'||key.shiftKey&&(key.code==='KeyZ'||key.key.toLowerCase()==='z')))||(key.metaKey&&key.shiftKey&&(key.code==='KeyZ'||key.key.toLowerCase()==='z'));if(key.isComposing||editingOutsideReport||(!undo&&!redo))return;key.preventDefault();key.stopPropagation();if((undo&&canUndoReport(editor.state))||(redo&&canRedoReport(editor.state)))runHistoryCommand(undo?'undo':'redo');},true);

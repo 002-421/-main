@@ -25,7 +25,9 @@ try{
  await target.click({position:{x:30,y:8}});
  await page.keyboard.insertText('Проверка XRS-03');
  assert.ok((await target.innerText()).includes('Проверка XRS-03'),'text insertion is recorded in the report');
+ await canvas.evaluate(el=>{const selection=getSelection(),box=el.getBoundingClientRect();if(!selection?.focusNode)throw new Error('Expected the synthetic report caret before edge positioning');const range=document.createRange();range.setStart(selection.focusNode,selection.focusOffset);range.collapse(true);const caret=range.getBoundingClientRect();el.scrollTop=Math.max(0,el.scrollTop+caret.bottom-box.bottom+1);});
  let before=await assertCaretVisible();
+ assert.ok(Math.abs(before.caret.bottom-before.viewport.bottom)<=2,`the synthetic caret is placed at the visible lower edge: ${JSON.stringify(before)}`);
  await page.keyboard.press('Control+z');
  assert.equal(await target.innerText(),original,'keyboard Undo restores the original text');
  let after=await assertCaretVisible();
