@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { strToU8, zipSync } from 'fflate';
+import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -16,16 +17,10 @@ const { CURRENT_DATA_CONTRACT } = require('../electron/data-compatibility.cjs');
 const { canRollback } = require('../electron/install-state.cjs');
 
 async function createWindowsShortcut(filename, { target, cwd, icon }) {
-  const script = [
-    '$ErrorActionPreference = "Stop"',
-    '$shell = New-Object -ComObject WScript.Shell',
-    '$link = $shell.CreateShortcut($env:XRS_SHORTCUT_PATH)',
-    '$link.TargetPath = $env:XRS_SHORTCUT_TARGET',
-    '$link.WorkingDirectory = $env:XRS_SHORTCUT_CWD',
-    '$link.IconLocation = $env:XRS_SHORTCUT_ICON',
-    '$link.Save()',
-  ].join('\n');
-  await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+  const testDir = path.dirname(fileURLToPath(import.meta.url));
+  const electronExe = path.join(testDir, '..', 'node_modules', 'electron', 'dist', 'electron.exe');
+  const worker = path.join(testDir, 'windows-shortcut-worker.cjs');
+  await execFileAsync(electronExe, [worker], {
     env: { ...process.env, XRS_SHORTCUT_PATH: filename, XRS_SHORTCUT_TARGET: target, XRS_SHORTCUT_CWD: cwd, XRS_SHORTCUT_ICON: icon },
     windowsHide: true,
   });
@@ -70,10 +65,13 @@ test('Windows paths with spaces and Cyrillic keep old installs, atomically repla
   const newTarget = installed.executable;
   await writeShortcutAtomically({ shortcutPath: shortcut, target: oldTarget, cwd: currentRoot, icon: '', writeShortcutLink: createWindowsShortcut });
   await writeShortcutAtomically({ shortcutPath: shortcut, target: newTarget, cwd: installed.root, icon: '', writeShortcutLink: createWindowsShortcut });
-  const { stdout } = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:XRS_SHORTCUT_PATH); $s.TargetPath'], {
+  const testDir = path.dirname(fileURLToPath(import.meta.url));
+  const electronExe = path.join(testDir, '..', 'node_modules', 'electron', 'dist', 'electron.exe');
+  const worker = path.join(testDir, 'windows-shortcut-worker.cjs');
+  const { stdout } = await execFileAsync(electronExe, [worker], {
     env: { ...process.env, XRS_SHORTCUT_PATH: shortcut }, windowsHide: true,
   });
-  assert.equal(path.resolve(stdout.trim()), path.resolve(newTarget));
+  assert.equal(JSON.parse(stdout).target, newTarget);
 
   const storage = path.join(profile, 'Local Storage', 'leveldb');
   await fs.mkdir(storage, { recursive: true });
