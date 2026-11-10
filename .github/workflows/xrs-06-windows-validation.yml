@@ -77,3 +77,15 @@ jobs:
           path: x-ray-report-studio/test-output/XRS-06-Windows-0.4.54-Test-Kit.zip
           if-no-files-found: error
           retention-days: 14
+      - name: Upload sanitized Windows Electron failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: XRS-06-Windows-Electron-Failure-Diagnostics
+          path: |
+            x-ray-report-studio/test-output/report-history-failure.png
+            x-ray-report-studio/test-output/report-history-failure.json
+            x-ray-report-studio/test-output/undo-scroll-failure.png
+            x-ray-report-studio/test-output/undo-scroll-failure.json
+          if-no-files-found: warn
+          retention-days: 7

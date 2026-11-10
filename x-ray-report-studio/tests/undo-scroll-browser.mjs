@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { _electron } from 'playwright-core';
 
 const root=process.cwd(),userData=await mkdtemp(path.join(os.tmpdir(),'xrs-undo-scroll-'));
 const options={...(process.env.ELECTRON_PATH?{executablePath:process.env.ELECTRON_PATH}:{}),args:['.',`--user-data-dir=${userData}`,'--no-sandbox','--ozone-platform=headless','--disable-gpu'],cwd:root,env:{...process.env,XDG_CACHE_HOME:process.env.XDG_CACHE_HOME??'/tmp/xrs-cache',XDG_CONFIG_HOME:process.env.XDG_CONFIG_HOME??'/tmp/xrs-config'}};
-let app;
+let app,page;
+const rendererErrorNames=[];
 try{
  app=await _electron.launch(options);
- let page=await app.firstWindow();
+ page=await app.firstWindow();
+ page.on('pageerror',error=>rendererErrorNames.push(error.name||'RendererError'));
  await page.locator('.report-content').waitFor();
  const canvas=page.locator('#canvas'),editor=page.locator('.report-content');
  const metrics=()=>page.evaluate(()=>{const scroller=document.querySelector('#canvas'),selection=getSelection(),range=selection?.rangeCount?selection.getRangeAt(0).getBoundingClientRect():null,box=scroller.getBoundingClientRect();return{scrollTop:scroller.scrollTop,scrollHeight:scroller.scrollHeight,clientHeight:scroller.clientHeight,viewport:{top:box.top,bottom:box.bottom},caret:range?{top:range.top,bottom:range.bottom}:null};});
@@ -96,6 +98,13 @@ try{
 
  await page.waitForFunction(()=>document.querySelector('#save-state')?.textContent==='Сохранено на компьютере');
  console.log('PASS: Electron Undo/Redo preserves text and caret scroll after typing, paste, formatting and tab switching; out-of-view caret scrolling is minimal.');
+}catch(error){
+ const output=path.join(root,'test-output');
+ await mkdir(output,{recursive:true});
+ const snapshot=await page?.evaluate(rendererErrors=>{const canvas=document.querySelector('#canvas'),selection=getSelection(),range=selection?.rangeCount?selection.getRangeAt(0):null,rect=range?.getBoundingClientRect(),viewport=canvas?.getBoundingClientRect();return{scrollTop:canvas?.scrollTop??null,scrollHeight:canvas?.scrollHeight??null,clientHeight:canvas?.clientHeight??null,caret:rect?{top:rect.top,bottom:rect.bottom}:null,viewport:viewport?{top:viewport.top,bottom:viewport.bottom}:null,activeTabIndex:[...document.querySelectorAll('.report-tab')].findIndex(tab=>tab.classList.contains('active')),reportCount:document.querySelectorAll('.report-tab').length,paragraphCount:document.querySelectorAll('.report-content p').length,rendererErrors};},rendererErrorNames).catch(()=>null);
+ await page?.screenshot({path:path.join(output,'undo-scroll-failure.png'),fullPage:false}).catch(()=>{});
+ await writeFile(path.join(output,'undo-scroll-failure.json'),JSON.stringify({errorName:error?.name||'Error',errorCode:error?.code||null,snapshot},null,2));
+ throw error;
 }finally{
  if(app)await app.close();
  await rm(userData,{recursive:true,force:true});

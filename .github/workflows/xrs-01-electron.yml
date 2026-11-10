@@ -68,6 +68,10 @@ jobs:
           path: |
             x-ray-report-studio/test-output/electron-*
             x-ray-report-studio/test-output/undo-scroll.log
+            x-ray-report-studio/test-output/undo-scroll-failure.png
+            x-ray-report-studio/test-output/undo-scroll-failure.json
             x-ray-report-studio/test-output/history-browser.log
+            x-ray-report-studio/test-output/report-history-failure.png
+            x-ray-report-studio/test-output/report-history-failure.json
           if-no-files-found: warn
           retention-days: 7
