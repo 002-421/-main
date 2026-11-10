@@ -1,6 +1,8 @@
 name: XRS-05 Windows integration validation
 
 on:
+  push:
+    branches: [codex/xrs-05-integration-validation]
   pull_request:
     branches: [codex/mri-report-studio]
     paths:
