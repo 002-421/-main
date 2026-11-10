@@ -141,9 +141,16 @@ try{
  await page.keyboard.press('Control+Shift+z');assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
  const second=page.locator('[data-template-field][data-filled="false"]').first();
  const secondId=await second.getAttribute('data-field-id');await selectField(secondId);
- await application.evaluate(({clipboard},text)=>clipboard.writeText(text),'Проверка вставки');await page.keyboard.press('Control+V');
- assert.equal(await field(secondId).innerText(),'Проверка вставки');
- console.log('PASS: prompt text supports partial editing, full replacement and paste; Undo/Redo restores field state.');
+ await page.evaluate(id=>{window.__xrsPasteTrace=[];document.querySelector('.report-content')?.addEventListener('paste',event=>{const target=event.target instanceof Element?event.target:null;window.__xrsPasteTrace.push({fieldId:target?.closest('[data-template-field]')?.getAttribute('data-field-id')??null,syntheticPayloadReceived:event.clipboardData?.getData('text/plain')==='Проверка вставки'});},true);},secondId);
+ await application.evaluate(({clipboard},text)=>clipboard.writeText(text),'Проверка вставки');
+ const clipboardText=await application.evaluate(({clipboard})=>clipboard.readText());assert.equal(clipboardText,'Проверка вставки','Electron clipboard contains the synthetic test payload');
+ const pasteStarted=Date.now();await page.keyboard.press('Control+V');
+ let pasteDiagnostic;
+ try{await page.waitForFunction(({id,text})=>document.querySelector(`[data-field-id="${id}"]`)?.textContent===text,{id:secondId,text:'Проверка вставки'},{timeout:2000});pasteDiagnostic=await page.evaluate(id=>({fieldFilled:document.querySelector(`[data-field-id="${id}"]`)?.getAttribute('data-filled'),pasteEvents:window.__xrsPasteTrace??[]}),secondId);}
+ catch(error){const diagnostic=await page.evaluate(id=>({fieldId:id,fieldFilled:document.querySelector(`[data-field-id="${id}"]`)?.getAttribute('data-filled'),fieldLength:document.querySelector(`[data-field-id="${id}"]`)?.textContent?.length,activeElementTag:document.activeElement?.tagName,activeElementEditable:document.activeElement?.closest('[contenteditable]')!==null,selectionLength:getSelection()?.toString().length,pasteEvents:window.__xrsPasteTrace??[]}),secondId);await writeFile(path.join(output,'electron-paste-diagnostic.json'),JSON.stringify({clipboardText,diagnostic},null,2));console.error('Synthetic clipboard diagnostic:',JSON.stringify({clipboardText,diagnostic}));throw error;}
+ assert.equal(await field(secondId).innerText(),'Проверка вставки');assert.equal(await field(secondId).getAttribute('data-filled'),'true');
+ assert.ok(pasteDiagnostic.pasteEvents.some(event=>event.syntheticPayloadReceived),'renderer received the actual synthetic paste event');
+ console.log(`PASS: prompt text supports partial editing, full replacement, and clipboard paste (${Date.now()-pasteStarted} ms).`);
 
  await page.locator('#settings').click();assert.equal(await page.locator('#dictionary-settings').textContent(),'Личный словарь');await page.locator('#dictionary-settings').click();assert.equal(await page.locator('[role="dialog"] h2').textContent(),'Личный словарь');assert.match(await page.locator('#personal-words').inputValue(),/нормометрии/);assert.match(await page.locator('#personal-words').inputValue(),/дорзальных/);await page.locator('[role="dialog"] [data-close]').first().click();
  await page.locator('#settings').click();await page.locator('#doctor-name').fill('Иванова Мария Петровна');await page.locator('#apply-doctor-now').check();await page.locator('#save-settings').click();
