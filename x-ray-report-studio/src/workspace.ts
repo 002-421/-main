@@ -203,9 +203,17 @@ function runHistoryCommand(direction:'undo'|'redo'){
  // enough to bring that caret into view.
  canvas.scrollTop=scrollTop;
  try{
-  const caret=editor.view.coordsAtPos(editor.state.selection.head),viewport=canvas.getBoundingClientRect(),margin=12;
-  if(caret.top<viewport.top)canvas.scrollTop+=caret.top-(viewport.top+margin);
-  else if(caret.bottom>viewport.bottom)canvas.scrollTop+=caret.bottom-(viewport.bottom-margin);
+  // Measure the actual DOM focus point first. coordsAtPos can differ by a few
+  // pixels from the browser's rendered caret near wrapped lines, which can
+  // cause a needless scroll even though the caret is already visible.
+  const selection=window.getSelection();let caret:{top:number;bottom:number}|undefined;
+  if(selection?.focusNode&&editor.view.dom.contains(selection.focusNode)){
+   const range=document.createRange();range.setStart(selection.focusNode,selection.focusOffset);range.collapse(true);const rect=range.getBoundingClientRect();if(rect.height||rect.width)caret={top:rect.top,bottom:rect.bottom};
+  }
+  const position=caret??editor.view.coordsAtPos(editor.state.selection.head);
+  const viewport=canvas.getBoundingClientRect(),margin=12;
+  if(position.top<viewport.top)canvas.scrollTop+=position.top-(viewport.top+margin);
+  else if(position.bottom>viewport.bottom)canvas.scrollTop+=position.bottom-(viewport.bottom-margin);
  }catch{/* Some non-text selections do not expose a measurable caret. */}
 }
 document.addEventListener('keydown',event=>{const key=event as KeyboardEvent,target=key.target instanceof Element?key.target:null,editingOutsideReport=Boolean(target?.closest('input,textarea,select,[contenteditable="true"]')&&!target.closest('.report-content')),modified=key.ctrlKey||key.metaKey,undo=modified&&(key.code==='KeyZ'||key.key.toLowerCase()==='z')&&!key.shiftKey,redo=(key.ctrlKey&&(key.code==='KeyY'||key.key.toLowerCase()==='y'||key.shiftKey&&(key.code==='KeyZ'||key.key.toLowerCase()==='z')))||(key.metaKey&&key.shiftKey&&(key.code==='KeyZ'||key.key.toLowerCase()==='z'));if(key.isComposing||editingOutsideReport||(!undo&&!redo))return;key.preventDefault();key.stopPropagation();if((undo&&canUndoReport(editor.state))||(redo&&canRedoReport(editor.state)))runHistoryCommand(undo?'undo':'redo');},true);
@@ -222,7 +230,7 @@ const json=()=>editor.getJSON() as RichNode;
 function restore(doc:RichNode,history:unknown,view?:unknown) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(doc));restoreReportHistory(editor.view,sanitizeReportHistory(history,settings.historyDepth));}finally{suppress=false;}restoreReportView(view);savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
 function toast(message:string,error=false) { $('.toast')?.remove();const t=document.createElement('div');t.className=`toast${error?' error':''}`;t.role=error?'alert':'status';t.textContent=message;document.body.append(t);setTimeout(()=>t.remove(),5000); }
 function readReportView(value:unknown):StoredReportView|undefined {if(!value||typeof value!=='object'||Array.isArray(value))return;const view=value as Record<string,unknown>;if(!view.selection||typeof view.selection!=='object'||Array.isArray(view.selection)||typeof view.scrollTop!=='number'||!Number.isFinite(view.scrollTop)||view.scrollTop<0||view.scrollTop>100000)return;return{selection:view.selection as Record<string,unknown>,scrollTop:view.scrollTop};}
-function restoreReportView(value:unknown){const view=readReportView(value);if(view){try{editor.view.dispatch(editor.state.tr.setSelection(Selection.fromJSON(editor.state.doc,view.selection)).setMeta('addToHistory',false));}catch{/* Invalid or stale view state cannot affect the document or its history. */}}$('#canvas').scrollTop=view?.scrollTop??0;}
+function restoreReportView(value:unknown){const view=readReportView(value);let selection:Selection|undefined;if(view){try{selection=Selection.fromJSON(editor.state.doc,view.selection);editor.view.dispatch(editor.state.tr.setSelection(selection).setMeta('addToHistory',false));}catch{/* Invalid or stale view state cannot affect the document or its history. */}}$('#canvas').scrollTop=view?.scrollTop??0;if(view&&selection)requestAnimationFrame(()=>{editor.view.focus();$('#canvas').scrollTop=view.scrollTop;});}
 function syncActiveReport(){const active=openReports.find(r=>r.id===activeReportId);if(active){active.doc=json();active.templateId=activeTemplateId;active.dirty=changedSinceOpen;historyByReport[active.id]={fingerprint:documentFingerprint(active.doc),history:getReportHistory(editor.state),view:{selection:editor.state.selection.toJSON() as Record<string,unknown>,scrollTop:$('#canvas').scrollTop}};}}
 function saveLocal():boolean {
  if(templateMode)return false;

@@ -9,6 +9,7 @@ const historyKey='mri-report-studio.undo-history.v1';
 const options={...(process.env.ELECTRON_PATH?{executablePath:process.env.ELECTRON_PATH}:{}),args:['.',`--user-data-dir=${profile}`,'--no-sandbox','--ozone-platform=headless','--disable-gpu'],cwd:root,env:{...process.env,XDG_CACHE_HOME:process.env.XDG_CACHE_HOME??'/tmp/xrs-cache',XDG_CONFIG_HOME:process.env.XDG_CONFIG_HOME??'/tmp/xrs-config'}};
 let app,page;
 const rendererErrorNames=[];
+let diagnosticStage='startup';
 async function launch(){app=await _electron.launch(options);page=await app.firstWindow();page.on('pageerror',error=>rendererErrorNames.push(error.name||'RendererError'));await page.locator('.report-content').waitFor();return page;}
 async function save(page){await page.waitForFunction(()=>document.querySelector('#save-state')?.textContent?.includes('Сохранено'));}
 async function placeCaretInParagraph(page,paragraphIndex,offset=14){
@@ -21,16 +22,24 @@ async function typeInParagraph(page,paragraphIndex,text){
  await page.keyboard.insertText(text);
 }
 async function currentParagraphIndex(page){return page.evaluate(()=>{const selection=getSelection();const paragraph=selection?.anchorNode instanceof Element?selection.anchorNode.closest('.report-content p'):selection?.anchorNode?.parentElement?.closest('.report-content p');return paragraph?[...document.querySelectorAll('.report-content p')].indexOf(paragraph):-1;});}
+async function markAndScrollView(page,marker){
+ await typeInParagraph(page,12,marker);
+ await page.keyboard.press('Control+z');
+ await page.keyboard.press('Control+y');
+ await page.locator('#canvas').evaluate((canvas,target)=>{const paragraph=document.querySelectorAll('.report-content p')[target],rect=paragraph.getBoundingClientRect(),box=canvas.getBoundingClientRect();canvas.scrollTop+=rect.top-box.top-canvas.clientHeight/3;},12);
+ await page.waitForTimeout(550);
+ return{scrollTop:await page.locator('#canvas').evaluate(canvas=>canvas.scrollTop),paragraph:await currentParagraphIndex(page)};
+}
 async function captureFailure(error){
  await mkdir(path.join(root,'test-output'),{recursive:true});
  const snapshot=await page?.evaluate(rendererErrors=>{
-  const canvas=document.querySelector('#canvas'),selection=getSelection(),active=document.querySelector('.report-tab.active'),paragraph=selection?.anchorNode instanceof Element?selection.anchorNode.closest('.report-content p'):selection?.anchorNode?.parentElement?.closest('.report-content p');
+  const canvas=document.querySelector('#canvas'),selection=getSelection(),active=document.querySelector('.report-tab.active'),paragraph=selection?.anchorNode instanceof Element?selection.anchorNode.closest('.report-content p'):selection?.anchorNode?.parentElement?.closest('.report-content p'),activeElement=document.activeElement,workspace=JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1')||'{}'),history=JSON.parse(localStorage.getItem('mri-report-studio.undo-history.v1')||'{}'),activeHistory=history[workspace.activeId];
   let caret=null;
   if(selection?.rangeCount&&paragraph){const range=selection.getRangeAt(0).cloneRange();range.selectNodeContents(paragraph);range.setEnd(selection.anchorNode,selection.anchorOffset);caret={paragraph:[...document.querySelectorAll('.report-content p')].indexOf(paragraph),offset:range.toString().length,collapsed:selection.isCollapsed};}
-  return{reportCount:document.querySelectorAll('.report-tab').length,activeTabIndex:active?[...document.querySelectorAll('.report-tab')].indexOf(active):-1,paragraphCount:document.querySelectorAll('.report-content p').length,scrollTop:canvas?.scrollTop??null,scrollHeight:canvas?.scrollHeight??null,clientHeight:canvas?.clientHeight??null,caret,historyDepth:JSON.parse(localStorage.getItem('mri-alliance.settings.v3')||'{}').historyDepth??null,rendererErrors};
+  return{reportCount:document.querySelectorAll('.report-tab').length,activeTabIndex:active?[...document.querySelectorAll('.report-tab')].indexOf(active):-1,paragraphCount:document.querySelectorAll('.report-content p').length,scrollTop:canvas?.scrollTop??null,scrollHeight:canvas?.scrollHeight??null,clientHeight:canvas?.clientHeight??null,caret,domSelection:{rangeCount:selection?.rangeCount??0,anchorNode:selection?.anchorNode?.nodeName??null,anchorOffset:selection?.anchorOffset??null},activeElement:{tag:activeElement?.tagName??null,id:activeElement?.id??null,className:typeof activeElement?.className==='string'?activeElement.className:null,contenteditable:activeElement?.getAttribute('contenteditable')??null},workspaceActiveId:workspace.activeId,activeHistoryView:activeHistory?.view?{scrollTop:activeHistory.view.scrollTop,selectionType:activeHistory.view.selection?.type,anchor:activeHistory.view.selection?.anchor,head:activeHistory.view.selection?.head}:null,historyDepth:JSON.parse(localStorage.getItem('mri-alliance.settings.v3')||'{}').historyDepth??null,rendererErrors};
  },rendererErrorNames).catch(()=>null);
  await page?.screenshot({path:path.join(root,'test-output/report-history-failure.png'),fullPage:false}).catch(()=>{});
- await writeFile(path.join(root,'test-output/report-history-failure.json'),JSON.stringify({errorName:error?.name||'Error',errorCode:error?.code||null,snapshot},null,2));
+ await writeFile(path.join(root,'test-output/report-history-failure.json'),JSON.stringify({stage:diagnosticStage,errorName:error?.name||'Error',errorCode:error?.code||null,errorMessage:error?.message||String(error),snapshot},null,2));
 }
 try{
  page=await launch();
@@ -40,6 +49,7 @@ try{
  await patientField.evaluate(el=>{el.closest('[contenteditable]')?.focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection?.removeAllRanges();selection?.addRange(range);});
  await page.keyboard.insertText('СверхдлиннаяСинтетическаяФамилия Тест Пациент');
  await save(page);
+ assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'patient surname appears after initial entry');
  const paragraphCount=await editor.locator('p').count();
  assert.ok(paragraphCount>20,'the synthetic protocol spans multiple pages');
  const targetParagraph=page.locator('.report-content p').nth(12);
@@ -58,7 +68,8 @@ try{
  assert.ok((await targetParagraph.innerText()).includes('XRS06_SYNTHETIC_A'),'Redo restores the inserted text');
  const afterRedo=await page.locator('#canvas').evaluate(element=>element.scrollTop);
  assert.ok(Math.abs(afterRedo-scrollBeforeRedo)<80,`Redo keeps the viewport near the edit: ${scrollBeforeRedo} -> ${afterRedo}`);
- for(const index of [1,12,paragraphCount-4]){
+ assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'patient surname survives the first Undo/Redo pair');
+ for(const index of [5,12,paragraphCount-4]){
   const paragraph=page.locator('.report-content p').nth(index),original=await paragraph.innerText();
   await paragraph.evaluate((el,scrollOffset)=>{const canvas=document.querySelector('#canvas'),rect=el.getBoundingClientRect(),box=canvas.getBoundingClientRect();canvas.scrollTop+=rect.top-box.top-scrollOffset;},Math.floor((await page.locator('#canvas').evaluate(el=>el.clientHeight))/3));
   await typeInParagraph(page,index,`XRS06_POSITION_${index}`);
@@ -74,6 +85,7 @@ try{
   assert.equal(await currentParagraphIndex(page),index,`Redo restores the cursor at report position ${index}`);
   const redoState=await page.locator('#canvas').evaluate(el=>el.scrollTop);
   assert.ok(Math.abs(redoState-undoState.scrollTop)<80,`Redo preserves the nearby viewport at report position ${index}`);
+  assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),`patient surname survives the position ${index} Undo/Redo pair`);
  }
  const selectionParagraph=page.locator('.report-content p').nth(12),selectionBefore=await selectionParagraph.innerText();
  const selectedText=await selectionParagraph.evaluate(el=>{const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT),node=walker.nextNode();if(!node)throw new Error('Synthetic paragraph has no text to select');const length=Math.min(8,node.textContent.length);const range=document.createRange();range.setStart(node,2);range.setEnd(node,Math.min(2+length,node.textContent.length));getSelection().removeAllRanges();getSelection().addRange(range);return range.toString();});
@@ -81,9 +93,11 @@ try{
  await page.keyboard.press('Control+z');
  assert.equal(await selectionParagraph.innerText(),selectionBefore,'Undo restores text replaced through a selection');
  assert.equal(await page.evaluate(()=>getSelection()?.toString()),selectedText,'Undo restores the original selection range');
+ assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'patient surname survives selection Undo');
  await page.keyboard.press('Control+y');
  assert.ok((await selectionParagraph.innerText()).includes('XRS06_REPLACEMENT'),'Redo reapplies the selection replacement');
  await save(page);
+ assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'patient surname survives A-document edits before opening report B');
  let aId=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
  let stored=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),historyKey);
  assert.ok(stored[aId]?.history.undo.length,'the per-report operation history is persisted locally');
@@ -101,10 +115,6 @@ try{
  }
  assert.deepEqual(depthValues,['100','250','500','1000'],'each doctor setting can be selected and saved');
 
- await placeCaretInParagraph(page,12,18);
- const reportAView=await page.locator('#canvas').evaluate((canvas,target)=>{const paragraph=document.querySelectorAll('.report-content p')[target],rect=paragraph.getBoundingClientRect(),box=canvas.getBoundingClientRect();canvas.scrollTop+=rect.top-box.top-canvas.clientHeight/3;return canvas.scrollTop;},12);
- await page.waitForTimeout(550);
- const reportAParagraph=await currentParagraphIndex(page);
  await page.locator('#new-report').click();
  await page.locator('.report-tab').nth(1).waitFor();
  const bId=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
@@ -118,12 +128,13 @@ try{
  await page.keyboard.insertText('СверхдлиннаяСинтетическаяФамилия Тест Пациент');
  await typeInParagraph(page,12,'XRS06_SYNTHETIC_B');
  await save(page);
+ assert.ok((await page.locator('.report-tab-select').nth(1).getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'patient surname is present in report B before switching');
  await page.locator(`[data-report-select="${aId}"]`).click();
- await page.waitForFunction(({expectedScroll,expectedParagraph})=>{const canvas=document.querySelector('#canvas'),selection=getSelection(),paragraph=selection?.anchorNode instanceof Element?selection.anchorNode.closest('.report-content p'):selection?.anchorNode?.parentElement?.closest('.report-content p');return Math.abs(canvas.scrollTop-expectedScroll)<2&&paragraph&&[...document.querySelectorAll('.report-content p')].indexOf(paragraph)===expectedParagraph;},{expectedScroll:reportAView,expectedParagraph:reportAParagraph});
  assert.ok((await editor.innerText()).includes('XRS06_SYNTHETIC_A'),'switching restores report A content before its history action');
  assert.equal(await page.locator('[data-command="redo"]').isEnabled(),false,'fresh report A has no redo action');
  await page.keyboard.press('Control+z');
- assert.ok(!(await editor.innerText()).includes('XRS06_SYNTHETIC_A'),'Undo after switching back uses report A history');
+ assert.ok(!(await editor.innerText()).includes('XRS06_REPLACEMENT'),'Undo after switching back uses report A history');
+ assert.ok((await editor.innerText()).includes('XRS06_SYNTHETIC_A'),'Undo affects only the latest operation in report A');
  assert.ok(!(await editor.innerText()).includes('XRS06_SYNTHETIC_B'),'report B text never enters report A');
  await save(page);
  stored=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),historyKey);
@@ -133,28 +144,53 @@ try{
  await page.keyboard.press('Control+y');
  assert.ok((await editor.innerText()).includes('XRS06_SYNTHETIC_A'),'Redo remains report-local after switching');
  await save(page);
- await placeCaretInParagraph(page,12,18);
- await page.locator('#canvas').evaluate((canvas,target)=>{const paragraph=document.querySelectorAll('.report-content p')[target],rect=paragraph.getBoundingClientRect(),box=canvas.getBoundingClientRect();canvas.scrollTop+=rect.top-box.top-canvas.clientHeight/3;},12);
- await page.waitForTimeout(550);
- const viewBeforeRestart=await page.evaluate(()=>{const canvas=document.querySelector('#canvas'),selection=getSelection(),paragraph=selection?.anchorNode instanceof Element?selection.anchorNode.closest('.report-content p'):selection?.anchorNode?.parentElement?.closest('.report-content p');return{scrollTop:canvas.scrollTop,paragraph:paragraph?[...document.querySelectorAll('.report-content p')].indexOf(paragraph):-1};});
+ diagnosticStage='persist report A view';
+ const reportAView=await markAndScrollView(page,'XRS06_VIEW_A');
+ assert.equal(reportAView.paragraph,12,'real editing and Undo/Redo place report A cursor in paragraph 12');
+ await save(page);
+ diagnosticStage='persist report B view';
+ await page.locator(`[data-report-select="${bId}"]`).click();
+ const reportBView=await markAndScrollView(page,'XRS06_VIEW_B');
+ assert.equal(reportBView.paragraph,12,'real editing and Undo/Redo place report B cursor in paragraph 12');
+ await save(page);
+ await page.locator(`[data-report-select="${aId}"]`).click();
+ await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>resolve())));
+ const restoredAView=await page.evaluate(()=>{const canvas=document.querySelector('#canvas'),selection=getSelection(),paragraph=selection?.anchorNode instanceof Element?selection.anchorNode.closest('.report-content p'):selection?.anchorNode?.parentElement?.closest('.report-content p');return{scrollTop:canvas.scrollTop,paragraph:paragraph?[...document.querySelectorAll('.report-content p')].indexOf(paragraph):-1};});
+ assert.equal(restoredAView.paragraph,12,`tab switch restores report A caret: ${JSON.stringify(restoredAView)}`);
+ assert.ok(Math.abs(restoredAView.scrollTop-reportAView.scrollTop)<2,`tab switch restores report A scroll: ${JSON.stringify({expected:reportAView,restored:restoredAView})}`);
+ await page.locator(`[data-report-select="${bId}"]`).click();
+ await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>resolve())));
+ const restoredBView=await page.evaluate(()=>{const canvas=document.querySelector('#canvas'),selection=getSelection(),paragraph=selection?.anchorNode instanceof Element?selection.anchorNode.closest('.report-content p'):selection?.anchorNode?.parentElement?.closest('.report-content p');return{scrollTop:canvas.scrollTop,paragraph:paragraph?[...document.querySelectorAll('.report-content p')].indexOf(paragraph):-1};});
+ assert.equal(restoredBView.paragraph,12,`tab switch restores report B caret: ${JSON.stringify(restoredBView)}`);
+ assert.ok(Math.abs(restoredBView.scrollTop-reportBView.scrollTop)<2,`tab switch restores report B scroll: ${JSON.stringify({expected:reportBView,restored:restoredBView})}`);
+ await page.locator(`[data-report-select="${aId}"]`).click();
+ assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'patient surname survives switching back from report B');
+ const viewBeforeRestart=reportAView;
  stored=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),historyKey);
  assert.equal(stored[aId]?.view?.scrollTop,viewBeforeRestart.scrollTop,'the active report view is persisted with local history');
  assert.equal(stored[aId]?.view?.selection?.anchor,stored[aId]?.view?.selection?.head,'the saved cursor is collapsed at the expected report location');
  await app.close();
  page=await launch();
  assert.equal(await page.locator('.report-tab').count(),2,'both synthetic report tabs restore after a normal full restart');
+ assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'synthetic patient name survives normal application restart');
  await page.waitForFunction(({expectedScroll,expectedParagraph})=>{const canvas=document.querySelector('#canvas'),selection=getSelection(),paragraph=selection?.anchorNode instanceof Element?selection.anchorNode.closest('.report-content p'):selection?.anchorNode?.parentElement?.closest('.report-content p');return Math.abs(canvas.scrollTop-expectedScroll)<2&&paragraph&&[...document.querySelectorAll('.report-content p')].indexOf(paragraph)===expectedParagraph;},{expectedScroll:viewBeforeRestart.scrollTop,expectedParagraph:viewBeforeRestart.paragraph});
  stored=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),historyKey);
  assert.ok(stored[aId]?.history.undo.length&&stored[bId]?.history.undo.length,'each report keeps its own serialized history across restart');
  await page.keyboard.press('Control+z');
- assert.ok(!(await page.locator('.report-content').innerText()).includes('XRS06_SYNTHETIC_A'),'Undo after restart acts on report A');
+ assert.ok(!(await page.locator('.report-content').innerText()).includes('XRS06_VIEW_A'),'Undo after restart uses report A history');
+ assert.ok((await page.locator('.report-content').innerText()).includes('XRS06_SYNTHETIC_A'),'report A content remains intact while its view operation is undone');
  await page.keyboard.press('Control+y');
- assert.ok((await page.locator('.report-content').innerText()).includes('XRS06_SYNTHETIC_A'),'Redo after restart restores report A');
+ assert.ok((await page.locator('.report-content').innerText()).includes('XRS06_VIEW_A'),'Redo after restart restores report A view operation');
  await page.locator(`[data-report-select="${bId}"]`).click();
+ await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>resolve())));
+ const restartedBView=await page.evaluate(()=>{const canvas=document.querySelector('#canvas'),selection=getSelection(),paragraph=selection?.anchorNode instanceof Element?selection.anchorNode.closest('.report-content p'):selection?.anchorNode?.parentElement?.closest('.report-content p');return{scrollTop:canvas.scrollTop,paragraph:paragraph?[...document.querySelectorAll('.report-content p')].indexOf(paragraph):-1};});
+ assert.equal(restartedBView.paragraph,12,`restart restores report B caret: ${JSON.stringify(restartedBView)}`);
+ assert.ok(Math.abs(restartedBView.scrollTop-reportBView.scrollTop)<2,`restart restores report B scroll: ${JSON.stringify({expected:reportBView,restored:restartedBView})}`);
  await page.keyboard.press('Control+z');
- assert.ok(!(await page.locator('.report-content').innerText()).includes('XRS06_SYNTHETIC_B'),'Undo after restart acts independently on report B');
+ assert.ok(!(await page.locator('.report-content').innerText()).includes('XRS06_VIEW_B'),'Undo after restart uses report B history independently');
+ assert.ok((await page.locator('.report-content').innerText()).includes('XRS06_SYNTHETIC_B'),'report B content remains intact while its view operation is undone');
  await page.keyboard.press('Control+y');
- assert.ok((await page.locator('.report-content').innerText()).includes('XRS06_SYNTHETIC_B'),'Redo after restart restores report B');
+ assert.ok((await page.locator('.report-content').innerText()).includes('XRS06_VIEW_B'),'Redo after restart restores report B view operation');
  await page.locator(`[data-report-select="${aId}"]`).click();
  await save(page);
  await page.evaluate(()=>{
@@ -165,6 +201,7 @@ try{
 
  page=await launch();
  assert.equal(await page.locator('.report-tab').count(),2,'both report documents survive a restart with corrupt history');
+ assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'synthetic patient name survives history recovery');
  assert.ok((await page.locator('.report-content').innerText()).includes('XRS06_SYNTHETIC_A'),'report text survives history corruption');
  const recoveredHistory=await page.evaluate(key=>{try{return JSON.parse(localStorage.getItem(key)||'{}');}catch{return {}; }},historyKey);
  assert.deepEqual(recoveredHistory,{},'corrupt operation history is ignored independently from document content');
@@ -187,8 +224,9 @@ try{
  }
  assert.deepEqual(counts,[4,5,12],'1/4/5/12-tab workspace sizes are supported');
  const tabs=page.locator('.report-tab-select');
- assert.ok((await tabs.first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'tab tooltip retains the full synthetic patient surname and protocol title');
- assert.ok((await tabs.first().innerText()).includes('СверхдлиннаяСинтетическаяФамилия'),'tab displays the full surname instead of shortening it');
+ const firstTitle=await tabs.first().getAttribute('title'),firstLabel=await tabs.first().innerText();
+ assert.ok(firstTitle?.includes('СверхдлиннаяСинтетическаяФамилия'),`tab tooltip retains the full synthetic patient surname and protocol title: ${JSON.stringify({firstTitle,firstLabel})}`);
+ assert.ok(firstLabel.includes('СверхдлиннаяСинтетическаяФамилия'),`tab displays the full surname instead of shortening it: ${JSON.stringify({firstTitle,firstLabel})}`);
  const tabWidths=await tabs.evaluateAll(elements=>elements.slice(0,12).map(button=>({scrollWidth:button.scrollWidth,clientWidth:button.clientWidth})));
  assert.ok(tabWidths.every(item=>item.scrollWidth<=item.clientWidth+1),`all tab names fit their naturally sized controls without clipping: ${JSON.stringify(tabWidths)}`);
  const samePatientLabels=await tabs.evaluateAll(elements=>elements.map(element=>element.innerText).filter(label=>label.includes('СверхдлиннаяСинтетическаяФамилия')));
