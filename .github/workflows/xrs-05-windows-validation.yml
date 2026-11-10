@@ -68,9 +68,35 @@ jobs:
       - name: Workspace recovery browser tests
         run: npm run test:workspace-recovery
       - name: Electron editor, DOCX/PDF and template integration
-        run: npm run test:browser
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path test-output | Out-Null
+          npm run test:browser 2>&1 | Tee-Object -FilePath test-output/windows-electron-integration.log
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
+            $lines = Get-Content test-output/windows-electron-integration.log
+            $failedTest = $lines | Where-Object { $_ -match '^✖ |^FAIL:' } | Select-Object -First 1
+            $errorType = $lines | Where-Object { $_ -match '^\s*(AssertionError|TypeError|ReferenceError|SyntaxError|Error)( \[[^]]+\])?:' } | Select-Object -First 1
+            $stackFrame = $lines | Where-Object { $_ -match '^\s+at .+\.(?:mjs|cjs):\d+:\d+' } | Select-Object -First 1
+            $summary = (@($failedTest, ($errorType -replace '^\s*', ''), ($stackFrame -replace '^\s*', '')) | Where-Object { $_ }) -join '; '
+            Write-Output "::error title=Electron integration diagnostic::$summary"
+            exit $exitCode
+          }
       - name: Electron Undo/Redo scroll regression
-        run: npm run test:undo-scroll
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path test-output | Out-Null
+          npm run test:undo-scroll 2>&1 | Tee-Object -FilePath test-output/windows-undo-scroll.log
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
+            $lines = Get-Content test-output/windows-undo-scroll.log
+            $failedTest = $lines | Where-Object { $_ -match '^✖ |^FAIL:' } | Select-Object -First 1
+            $errorType = $lines | Where-Object { $_ -match '^\s*(AssertionError|TypeError|ReferenceError|SyntaxError|Error)( \[[^]]+\])?:' } | Select-Object -First 1
+            $stackFrame = $lines | Where-Object { $_ -match '^\s+at .+\.(?:mjs|cjs):\d+:\d+' } | Select-Object -First 1
+            $summary = (@($failedTest, ($errorType -replace '^\s*', ''), ($stackFrame -replace '^\s*', '')) | Where-Object { $_ }) -join '; '
+            Write-Output "::error title=Electron Undo/Redo diagnostic::$summary"
+            exit $exitCode
+          }
       - name: Build isolated Windows test kit
         run: npm run package:windows-test-kit
       - name: Upload isolated Windows test kit
@@ -86,5 +112,15 @@ jobs:
         with:
           name: XRS-05-Windows-test-diagnostic
           path: x-ray-report-studio/test-output/windows-unit-tests.log
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Upload Windows Electron diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: XRS-05-Windows-electron-diagnostics
+          path: |
+            x-ray-report-studio/test-output/windows-electron-integration.log
+            x-ray-report-studio/test-output/windows-undo-scroll.log
           if-no-files-found: ignore
           retention-days: 7
