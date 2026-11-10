@@ -345,7 +345,10 @@ try{
 
 const server=createServer(async(_request,response)=>{response.setHeader('Content-Type','text/html;charset=utf-8');response.end(await readFile(path.join(root,'dist/index.html')));});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true});
+const chromiumOptions={headless:true};
+if(process.env.CHROMIUM_PATH)chromiumOptions.executablePath=process.env.CHROMIUM_PATH;
+else if(process.platform==='linux')chromiumOptions.executablePath='/usr/bin/chromium';
+const browser=await chromium.launch(chromiumOptions);
 try{
  const browserPage=await browser.newPage({viewport:{width:1500,height:1050}});const requests=[];browserPage.on('request',request=>requests.push(request.url()));
  await browserPage.goto(`http://127.0.0.1:${server.address().port}`);await browserPage.locator('.report-content').waitFor();
