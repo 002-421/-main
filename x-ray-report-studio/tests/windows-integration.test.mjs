@@ -71,7 +71,11 @@ test('Windows paths with spaces and Cyrillic keep old installs, atomically repla
   const { stdout } = await execFileAsync(electronExe, [worker], {
     env: { ...process.env, XRS_SHORTCUT_PATH: shortcut }, windowsHide: true,
   });
-  assert.equal(JSON.parse(stdout).target, newTarget);
+  const actualTarget = JSON.parse(stdout).target;
+  if (typeof actualTarget !== 'string'
+      || path.resolve(actualTarget).toLocaleLowerCase('en-US') !== path.resolve(newTarget).toLocaleLowerCase('en-US')) {
+    throw new Error(`Synthetic shortcut target mismatch: expected ${newTarget}; actual ${actualTarget ?? '<missing>'}.`);
+  }
 
   const storage = path.join(profile, 'Local Storage', 'leveldb');
   await fs.mkdir(storage, { recursive: true });
