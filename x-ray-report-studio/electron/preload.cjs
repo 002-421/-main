@@ -7,7 +7,10 @@ contextBridge.exposeInMainWorld('desktop', {
   exportPDF: filename => ipcRenderer.invoke('report:export-pdf', filename),
   previewPDF: () => ipcRenderer.invoke('report:preview-pdf'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
-  installUpdate: force => ipcRenderer.invoke('updates:install', force === true),
+  installUpdate: () => ipcRenderer.invoke('updates:install'),
+  rollbackInfo: () => ipcRenderer.invoke('updates:rollback-info'),
+  rollbackToPreviousVersion: () => ipcRenderer.invoke('updates:rollback'),
+  openUpdateBackups: () => ipcRenderer.invoke('updates:open-backups'),
   openUpdateLog: () => ipcRenderer.invoke('updates:open-log'),
   onUpdateProgress: callback => {
     ipcRenderer.removeAllListeners('updates:progress');
