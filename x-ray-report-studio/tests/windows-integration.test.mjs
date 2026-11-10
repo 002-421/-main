@@ -25,15 +25,11 @@ async function createWindowsShortcut(filename, { target, cwd, icon }) {
     '$link.IconLocation = $env:XRS_SHORTCUT_ICON',
     '$link.Save()',
   ].join('\n');
-  const scriptPath = path.join(path.dirname(filename), 'create-shortcut.ps1');
-  await fs.writeFile(scriptPath, script, 'utf8');
-  try {
-    await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], {
-      env: { ...process.env, XRS_SHORTCUT_PATH: filename, XRS_SHORTCUT_TARGET: target, XRS_SHORTCUT_CWD: cwd, XRS_SHORTCUT_ICON: icon },
-      windowsHide: true,
-    });
-    return true;
-  } finally { await fs.unlink(scriptPath).catch(() => {}); }
+  await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+    env: { ...process.env, XRS_SHORTCUT_PATH: filename, XRS_SHORTCUT_TARGET: target, XRS_SHORTCUT_CWD: cwd, XRS_SHORTCUT_ICON: icon },
+    windowsHide: true,
+  });
+  return true;
 }
 
 test('Windows paths with spaces and Cyrillic keep old installs, atomically replace shortcuts and verify a profile backup', { skip: process.platform !== 'win32' }, async t => {
