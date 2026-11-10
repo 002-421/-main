@@ -1,0 +1,65 @@
+name: XRS-05 Windows integration validation
+
+on:
+  pull_request:
+    branches: [codex/mri-report-studio]
+    paths:
+      - 'x-ray-report-studio/**'
+      - '.github/workflows/xrs-05-windows-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-integration:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: x-ray-report-studio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: x-ray-report-studio/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build application
+        run: npm run build
+      - name: Unit tests
+        run: npm test
+      - name: Validate Windows installer PowerShell syntax
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/install_windows.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+          Write-Host 'install_windows.ps1 parsed without errors.'
+      - name: Windows filesystem, shortcut, backup and rollback tests
+        run: npm run test:windows-integration
+      - name: Install Chromium for browser regression tests
+        run: npx playwright-core install chromium
+      - name: Document tab isolation regression
+        run: npm run test:tab-isolation
+      - name: Workspace recovery browser tests
+        run: npm run test:workspace-recovery
+      - name: Electron editor, DOCX/PDF and template integration
+        run: npm run test:browser
+      - name: Electron Undo/Redo scroll regression
+        run: npm run test:undo-scroll
+      - name: Build isolated Windows test kit
+        run: npm run package:windows-test-kit
+      - name: Upload isolated Windows test kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: XRS-05-Windows-Test-Kit
+          path: x-ray-report-studio/test-output/XRS-05-Windows-Test-Kit.zip
+          if-no-files-found: error
+          retention-days: 7

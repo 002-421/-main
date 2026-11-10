@@ -1,9 +1,11 @@
 const { app, BrowserWindow, ipcMain, dialog, clipboard, ClipboardItem, session, shell } = require('electron');
 const path = require('node:path');
+const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
 const https = require('node:https');
 const os = require('node:os');
 const crypto = require('node:crypto');
+const { pathToFileURL, fileURLToPath } = require('node:url');
 const { installUpdateArchive, verifySha256, writeShortcutAtomically } = require('./update-install.cjs');
 const { activateRendererUpdate, isUsableRenderer, smokeTestInstalledApp } = require('./live-update.cjs');
 const { createUserDataBackup } = require('./user-data-backup.cjs');
@@ -12,6 +14,19 @@ const { isUpdateAvailable } = require('./update-version.cjs');
 const { sanitizeUpdateLogEvent, sanitizeStartupLogEvent } = require('./log-safety.cjs');
 const { summarizeFrame } = require('./startup-diagnostics.cjs');
 const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json';
+const TEST_KIT_MARKER = path.join(process.resourcesPath, 'app', 'xrs-test-mode.json');
+let TEST_KIT_ROOT = '';
+let INVALID_TEST_KIT_LAUNCH = false;
+if (app.isPackaged && fsSync.existsSync(TEST_KIT_MARKER)) {
+  try {
+    const marker = JSON.parse(fsSync.readFileSync(TEST_KIT_MARKER, 'utf8'));
+    const requestedRoot = process.env.XRS_TEST_ROOT ?? '';
+    if (marker.format === 'xrs-isolated-test-kit' && marker.allowLocalUpdateFiles === true) {
+      if (path.isAbsolute(requestedRoot)) TEST_KIT_ROOT = path.resolve(requestedRoot);
+      else INVALID_TEST_KIT_LAUNCH = true;
+    }
+  } catch { INVALID_TEST_KIT_LAUNCH = true; }
+}
 
 // Some Windows display drivers show a blank Electron surface despite the page
 // loading successfully. This text editor is small enough to render in software.
@@ -20,7 +35,11 @@ app.commandLine.appendSwitch('disable-gpu-compositing');
 app.commandLine.appendSwitch('disable-features', 'DirectComposition');
 
 // Keep the existing profile path so the rename preserves drafts and settings.
-if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
+if (TEST_KIT_ROOT) {
+  app.setPath('appData', path.join(TEST_KIT_ROOT, 'AppData'));
+  if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(TEST_KIT_ROOT, 'Profile'));
+  app.setPath('sessionData', path.join(app.getPath('userData'), 'Session Data'));
+} else if (!INVALID_TEST_KIT_LAUNCH && !app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
 app.setName('X-ray Report Studio');
 let mainWindow;
 let rendererUnresponsive = false;
@@ -32,7 +51,9 @@ let startupFailureDialogOpen = false;
 let startupRecoveryAttempted = false;
 const sharedDictionaryDir = process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR
   ? path.resolve(process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR)
-  : path.join(process.env.PUBLIC || path.dirname(app.getPath('appData')), 'Documents', 'MRI Report Studio');
+  : TEST_KIT_ROOT
+    ? path.join(TEST_KIT_ROOT, 'Shared Dictionary')
+    : path.join(process.env.PUBLIC || path.dirname(app.getPath('appData')), 'Documents', 'MRI Report Studio');
 const sharedDictionaryFile = path.join(sharedDictionaryDir, 'dictionary.json');
 const personalDictionaryFile = path.join(app.getPath('userData'), 'dictionary.json');
 let dictionaryQueue = Promise.resolve();
@@ -151,9 +172,10 @@ async function createUpdateLogger() {
 }
 
 function backupRoot() { return path.join(app.getPath('appData'), 'X-ray Report Studio Backups'); }
-function shortcutLocation() { return path.join(app.getPath('desktop'), 'X-ray Report Studio.lnk'); }
+function shortcutLocation() { return TEST_KIT_ROOT ? path.join(TEST_KIT_ROOT, 'Shortcuts', 'X-ray Report Studio.lnk') : path.join(app.getPath('desktop'), 'X-ray Report Studio.lnk'); }
 async function pointShortcutTo(executable, root) {
   const icon = path.join(root, 'resources', 'app', 'dist', 'x-ray-report-studio.ico');
+  await fs.mkdir(path.dirname(shortcutLocation()), { recursive: true });
   await writeShortcutAtomically({
     shortcutPath: shortcutLocation(), target: executable, cwd: root, icon,
     writeShortcutLink: (filename, options) => shell.writeShortcutLink(filename, 'create', options),
@@ -264,7 +286,19 @@ async function renderPdf() {
   } finally { mainWindow.setBackgroundColor('#eef1f5'); }
 }
 
-function downloadBuffer(url, limit, redirects = 0, onProgress = () => {}) {
+async function downloadBuffer(url, limit, redirects = 0, onProgress = () => {}) {
+  const testTarget = new URL(url);
+  if (TEST_KIT_ROOT && testTarget.protocol === 'file:') {
+    const filename = path.resolve(fileURLToPath(testTarget));
+    const updatesRoot = await fs.realpath(path.join(TEST_KIT_ROOT, 'Updates'));
+    const realFilename = await fs.realpath(filename);
+    const relative = path.relative(updatesRoot, realFilename);
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('Недопустимый путь к локальному тестовому обновлению.');
+    const bytes = await fs.readFile(realFilename);
+    if (bytes.length > limit) throw new Error('Файл обновления больше допустимого размера.');
+    onProgress({ loaded: bytes.length, total: bytes.length, percent: 100 });
+    return bytes;
+  }
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error('Слишком много перенаправлений при загрузке обновления.'));
     const target = new URL(url);
@@ -285,19 +319,35 @@ function downloadBuffer(url, limit, redirects = 0, onProgress = () => {}) {
   });
 }
 async function getUpdateManifest() {
-  const manifestUrl = new URL(UPDATE_MANIFEST);
-  manifestUrl.searchParams.set('check', `${Date.now()}-${crypto.randomUUID()}`);
-  const bytes=await downloadBuffer(manifestUrl.toString(), 32_000);
+  let bytes;
+  if (TEST_KIT_ROOT) {
+    bytes = await fs.readFile(path.join(TEST_KIT_ROOT, 'Updates', 'latest.json'));
+  } else {
+    const manifestUrl = new URL(UPDATE_MANIFEST);
+    manifestUrl.searchParams.set('check', `${Date.now()}-${crypto.randomUUID()}`);
+    bytes = await downloadBuffer(manifestUrl.toString(), 32_000);
+  }
   let manifest; try { manifest=JSON.parse(bytes.toString('utf8')); } catch { throw new Error('Файл обновлений повреждён.'); }
   if (!manifest || typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.version)
       || typeof manifest.url !== 'string' || typeof manifest.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(manifest.sha256)
       || (manifest.notes !== undefined && (typeof manifest.notes !== 'string' || manifest.notes.length > 10000))) throw new Error('Файл обновлений содержит некорректные данные.');
-  const artifact=new URL(manifest.url);
-  if (artifact.protocol!=='https:' || !['raw.githubusercontent.com','github.com'].includes(artifact.hostname) || !artifact.pathname.endsWith('/downloads/X-ray_Report_Studio_Windows_Setup.zip')) throw new Error('Недопустимая ссылка на установочный файл.');
-  return { version: manifest.version, currentVersion: activeApplicationVersion, url: manifest.url, sha256: manifest.sha256.toLowerCase(), notes: manifest.notes ?? '', available: isUpdateAvailable(manifest.version, activeApplicationVersion) };
+  let artifactUrl = manifest.url;
+  if (TEST_KIT_ROOT) {
+    if (typeof manifest.url !== 'string' || path.basename(manifest.url) !== manifest.url || !/^XRS_Test_Update_\d+\.\d+\.\d+\.zip$/.test(manifest.url)) throw new Error('Недопустимый файл локального тестового обновления.');
+    artifactUrl = pathToFileURL(path.join(TEST_KIT_ROOT, 'Updates', manifest.url)).toString();
+  } else {
+    const artifact=new URL(manifest.url);
+    if (artifact.protocol!=='https:' || !['raw.githubusercontent.com','github.com'].includes(artifact.hostname) || !artifact.pathname.endsWith('/downloads/X-ray_Report_Studio_Windows_Setup.zip')) throw new Error('Недопустимая ссылка на установочный файл.');
+  }
+  return { version: manifest.version, currentVersion: activeApplicationVersion, url: artifactUrl, sha256: manifest.sha256.toLowerCase(), notes: manifest.notes ?? '', available: isUpdateAvailable(manifest.version, activeApplicationVersion) };
 }
 
 app.whenReady().then(async () => {
+  if (INVALID_TEST_KIT_LAUNCH) {
+    dialog.showErrorBox('XRS-05 test kit', 'Запустите эту тестовую копию через Run-Test-App.cmd. Профиль и рабочий ярлык не были открыты.');
+    app.quit();
+    return;
+  }
   const exportSettingsFile = path.join(app.getPath('userData'), 'export-folders.json');
   let lastWordDirectory = '';
   try { const saved = JSON.parse(await fs.readFile(exportSettingsFile, 'utf8')); if (typeof saved.word === 'string' && path.isAbsolute(saved.word)) lastWordDirectory = saved.word; } catch {}

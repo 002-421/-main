@@ -1,8 +1,9 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { CURRENT_DATA_CONTRACT, DATA_SCHEMA_VERSION, applicationSupportsDataContract } = require('./data-compatibility.cjs');
 
-const CURRENT_DATA_SCHEMA = 1;
+const CURRENT_DATA_SCHEMA = DATA_SCHEMA_VERSION;
 
 async function readJson(filename, fallback = null) {
   try { return JSON.parse(await fs.readFile(filename, 'utf8')); }
@@ -18,14 +19,19 @@ async function writeJsonAtomic(filename, value) {
   } finally { await fs.unlink(temporary).catch(() => {}); }
 }
 
-async function ensureDataSchema(filename, version = CURRENT_DATA_SCHEMA) {
+async function ensureDataSchema(filename, version = CURRENT_DATA_SCHEMA, dataContract = CURRENT_DATA_CONTRACT) {
   const current = await readJson(filename, null);
   if (current === null) {
-    const created = { schemaVersion: version, updatedAt: new Date().toISOString() };
+    const created = { schemaVersion: version, dataContract, updatedAt: new Date().toISOString() };
     await writeJsonAtomic(filename, created);
     return created;
   }
   if (!Number.isInteger(current.schemaVersion) || current.schemaVersion < 1) throw new Error('Версия формата пользовательских данных неизвестна.');
+  if (current.dataContract === undefined && current.schemaVersion === version) {
+    const upgraded = { ...current, dataContract };
+    await writeJsonAtomic(filename, upgraded);
+    return upgraded;
+  }
   return current;
 }
 
@@ -40,9 +46,10 @@ function canRollback({ installState, dataState, currentRoot }) {
       || typeof previous.root !== 'string' || typeof previous.executable !== 'string' || !path.isAbsolute(previous.root) || !path.isAbsolute(previous.executable))
     return { available: false, reason: 'Сведения о предыдущей версии неполны.' };
   if (!Number.isInteger(dataState?.schemaVersion) || !Number.isInteger(previous.dataSchemaVersion)
-      || previous.dataSchemaVersion !== dataState.schemaVersion)
+      || previous.dataSchemaVersion !== dataState.schemaVersion
+      || !applicationSupportsDataContract(previous.version, dataState.dataContract, dataState.schemaVersion))
     return { available: false, reason: 'Формат данных изменился и не подтверждён для предыдущей версии.' };
-  return { available: true, currentVersion: current.version, previousVersion: previous.version, previousRoot: previous.root, previousExecutable: previous.executable, dataSchemaVersion: dataState.schemaVersion };
+  return { available: true, currentVersion: current.version, previousVersion: previous.version, previousRoot: previous.root, previousExecutable: previous.executable, dataSchemaVersion: dataState.schemaVersion, dataContract: dataState.dataContract };
 }
 
 module.exports = { CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema, canRollback };
