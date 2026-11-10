@@ -72,8 +72,11 @@ test('Windows paths with spaces and Cyrillic keep old installs, atomically repla
     env: { ...process.env, XRS_SHORTCUT_PATH: shortcut }, windowsHide: true,
   });
   const actualTarget = JSON.parse(stdout).target;
-  if (typeof actualTarget !== 'string'
-      || path.resolve(actualTarget).toLocaleLowerCase('en-US') !== path.resolve(newTarget).toLocaleLowerCase('en-US')) {
+  const canonicalTargets = typeof actualTarget === 'string'
+    ? await Promise.all([fs.realpath(actualTarget), fs.realpath(newTarget)])
+    : [];
+  if (canonicalTargets.length !== 2
+      || canonicalTargets[0].toLocaleLowerCase('en-US') !== canonicalTargets[1].toLocaleLowerCase('en-US')) {
     throw new Error(`Synthetic shortcut target mismatch: expected ${newTarget}; actual ${actualTarget ?? '<missing>'}.`);
   }
 
