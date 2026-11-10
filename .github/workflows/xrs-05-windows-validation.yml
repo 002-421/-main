@@ -32,6 +32,8 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: npm ci
+      - name: Install checksum-verified Windows Electron runtime
+        run: npm run desktop:install
       - name: Build application
         run: npm run build
       - name: Unit tests
