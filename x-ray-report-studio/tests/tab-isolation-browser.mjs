@@ -45,7 +45,7 @@ try {
  for(const [id,own,foreign] of [[a,nameA,nameB],[b,nameB,nameA],[a,nameA,nameB],[b,nameB,nameA]]){
   await page.locator(`[data-report-select="${id}"]`).click();
   await check('switch to '+own,id,own,foreign);
-  await patient().click();await page.keyboard.press('Control+z');await check('Undo after switch',id,own,foreign);
+  await patient().click();await page.keyboard.press('Control+z');await saved();const undone=await page.evaluate(key=>({activeId:document.querySelector('.report-tab.active [data-report-select]').dataset.reportSelect,text:document.querySelector('.report-content').innerText,workspace:JSON.parse(localStorage.getItem(key))}),key);assert.equal(undone.activeId,id,'Undo after switch stays in the selected report');assert.equal(undone.workspace.activeId,id,'Undo after switch persists the selected report');assert.ok(!undone.text.includes(own),'Undo removes the active report’s synthetic patient edit');assert.ok(!undone.text.includes(foreign),'Undo does not expose the other patient in the editor');const ownDoc=JSON.stringify(undone.workspace.reports.find(report=>report.id===id).doc),otherId=id===a?b:a,otherName=id===a?nameB:nameA,otherDoc=JSON.stringify(undone.workspace.reports.find(report=>report.id===otherId).doc);assert.ok(!ownDoc.includes(foreign),'active report remains isolated after Undo');assert.ok(otherDoc.includes(otherName),'Undo leaves the other report unchanged');
   await page.keyboard.press('Control+y');await check('Redo after switch',id,own,foreign);
  }
  await page.locator(`[data-report-close="${b}"]`).click();
@@ -64,10 +64,8 @@ try {
  await restarted.locator('.report-content').waitFor();
  assert.equal(await restarted.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select'),a);
  assert.equal(await restarted.locator('.report-tab').count(),1);
- for(const shortcut of ['Control+z','Control+y']){
-  await restarted.locator('[data-field-id="head-gm.patient"]').click();await restarted.keyboard.press(shortcut);
-  const text=await restarted.locator('.report-content').innerText();assert.ok(text.includes(nameA));assert.ok(!text.includes(nameB));
- }
+ await restarted.locator('[data-field-id="head-gm.patient"]').click();await restarted.keyboard.press('Control+z');let text=await restarted.locator('.report-content').innerText();assert.ok(!text.includes(nameA),'restart restores A Undo history and removes A’s own patient edit');assert.ok(!text.includes(nameB));
+ await restarted.locator('[data-field-id="head-gm.patient"]').click();await restarted.keyboard.press('Control+y');text=await restarted.locator('.report-content').innerText();assert.ok(text.includes(nameA),'restart Redo restores A’s own patient edit');assert.ok(!text.includes(nameB));
  assert.deepEqual(errors,[]);
  console.log('PASS: A/B isolation, A → B → A → B, Undo/Redo, close confirmation and restart; unconfirmed close restores B.');
 } finally {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReportFilename, extractFilenameFields, initials, patientSurname, shortPatientName } from '../src/report-filename.ts';
+import { buildReportFilename, buildReportTabName, extractFilenameFields, initials, patientSurname, shortPatientName } from '../src/report-filename.ts';
 
 test('report filenames use protocol, doctor initials, patient surname and initials, template, and report date', () => {
   assert.equal(initials('Кочетов Сергей Владимирович'), 'КСВ');
@@ -24,4 +24,7 @@ test('report tabs use the full patient surname', () => {
   assert.equal(patientSurname('Лунева И.В.'), 'Лунева');
   assert.equal(patientSurname('Лунева Ирина Викторовна'), 'Лунева');
   assert.equal(patientSurname('дд.мм.гггг'), '');
+  assert.deepEqual(buildReportTabName('Петров Иван Алексеевич','Головной мозг',false,0),{label:'Петров',fullTitle:'Петров · Головной мозг'});
+  assert.deepEqual(buildReportTabName('Петров Иван Алексеевич','Головной мозг',true,0),{label:'Петров · ГОЛ',fullTitle:'Петров · Головной мозг'});
+  assert.deepEqual(buildReportTabName('Петров Иван Алексеевич','ГМ',true,0,'ГМ SD'),{label:'Петров · ГМS',fullTitle:'Петров · ГМ'});
 });

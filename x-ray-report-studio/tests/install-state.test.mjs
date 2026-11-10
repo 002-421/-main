@@ -8,6 +8,13 @@ import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
 const {CURRENT_DATA_SCHEMA,ensureDataSchema,writeJsonAtomic,canRollback}=require('../electron/install-state.cjs');
 const {CURRENT_DATA_CONTRACT}=require('../electron/data-compatibility.cjs');
+const {applicationSupportsDataContract}=require('../electron/data-compatibility.cjs');
+
+test('0.4.54 keeps the existing profile contract because Undo history is optional and stored separately',()=>{
+ assert.equal(applicationSupportsDataContract('0.4.53',CURRENT_DATA_CONTRACT,1),true);
+ assert.equal(applicationSupportsDataContract('0.4.54',CURRENT_DATA_CONTRACT,1),true);
+ assert.equal(applicationSupportsDataContract('0.4.53','xrs-local-undo-history-v1',1),false);
+});
 
 test('install metadata uses atomic replacement and records the stable data schema',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-install-state-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));

@@ -6,6 +6,8 @@ const DATA_SCHEMA_VERSION = 1;
 
 const APPLICATION_DATA_CONTRACTS = Object.freeze({
   '0.4.53': Object.freeze([CURRENT_DATA_CONTRACT]),
+  // Undo history is kept under a separate optional localStorage key. Older readers preserve report documents; the fingerprint check safely drops stale history after an older app edits a report.
+  '0.4.54': Object.freeze([CURRENT_DATA_CONTRACT]),
 });
 
 function applicationSupportsDataContract(applicationVersion, dataContract, schemaVersion = DATA_SCHEMA_VERSION) {

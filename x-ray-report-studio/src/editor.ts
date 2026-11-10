@@ -9,6 +9,7 @@ import { TableKit } from '@tiptap/extension-table';
 import type { RichNode } from './model';
 import { TemplateField, InlineFieldEditing, TemplateReview, SourceFormat, prepareInlineDocument } from './inline-fields';
 import { LiveProofreading, type ProofStatus } from './live-proofreading';
+import { ReportHistory } from './report-history';
 
 export const ReportSection = Node.create({
   name: 'reportSection',
@@ -67,6 +68,7 @@ export function makeEditor(element: HTMLElement, content: RichNode, options: Rep
     element,
     extensions: [
       StarterKit.configure({
+        undoRedo: false,
         heading: { levels: [1, 2, 3] },
         link: { openOnClick: false, autolink: false, defaultProtocol: 'https' },
       }),
@@ -76,7 +78,7 @@ export function makeEditor(element: HTMLElement, content: RichNode, options: Rep
       Superscript,
       Image.configure({ inline: false, allowBase64: true }),
       TableKit.configure({ table: { resizable: true, allowTableNodeSelection: true } }),
-      ReportSection, ReportField, ModuleReference, SourceFormat, TemplateField, InlineFieldEditing, TemplateReview,
+      ReportSection, ReportField, ModuleReference, SourceFormat, TemplateField, InlineFieldEditing, TemplateReview, ReportHistory,
       LiveProofreading.configure({ getPersonalWords: settings.getPersonalWords ?? (() => []), onStatus: settings.onProofStatus }),
     ],
     content: prepareInlineDocument(content),

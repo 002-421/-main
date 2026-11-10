@@ -1,4 +1,4 @@
-"""Build an isolated Windows test kit plus a local synthetic 0.4.54 update."""
+"""Build an isolated Windows 0.4.54 test kit plus a local synthetic update."""
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 import hashlib
@@ -10,8 +10,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT / 'release'
-OUTPUT = ROOT / 'test-output' / 'XRS-05-Windows-Test-Kit'
-ARCHIVE = ROOT / 'test-output' / 'XRS-05-Windows-Test-Kit.zip'
+OUTPUT = ROOT / 'test-output' / 'XRS-06-Windows-0.4.54-Test-Kit'
+ARCHIVE = ROOT / 'test-output' / 'XRS-06-Windows-0.4.54-Test-Kit.zip'
 MARKER = {'format': 'xrs-isolated-test-kit', 'allowLocalUpdateFiles': True}
 
 
@@ -72,7 +72,7 @@ def main():
             'version': test_version,
             'url': update_name,
             'sha256': hashlib.sha256(update_zip.read_bytes()).hexdigest(),
-            'notes': 'Локальное синтетическое обновление для XRS-05. В релизный канал не отправляется.',
+            'notes': f'Локальное синтетическое обновление для XRS-06, версия {current_version}. В релизный канал не отправляется.',
         }
         (update_root / 'latest.json').write_text(json.dumps(update_manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
@@ -94,10 +94,10 @@ if (Test-Path -LiteralPath $shortcut) {
         '@echo off\r\npowershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0Run-Test-App.ps1"\r\n',
         encoding='ascii',
     )
-    (OUTPUT / 'README_XRS05_RU.md').write_text(
-        (ROOT / 'WINDOWS_TEST_GUIDE_RU.md').read_text(encoding='utf-8'), encoding='utf-8')
+    (OUTPUT / 'README_XRS06_RU.md').write_text(
+        (ROOT / 'XRS-06_WINDOWS_TEST_RU.md').read_text(encoding='utf-8'), encoding='utf-8')
     (OUTPUT / 'KIT_INFO.json').write_text(json.dumps({
-        'format': 'xrs-05-windows-test-kit',
+        'format': 'xrs-06-windows-test-kit',
         'appVersion': current_version,
         'syntheticUpdateVersion': test_version,
         'updateManifest': 'Updates/latest.json',
@@ -105,7 +105,7 @@ if (Test-Path -LiteralPath $shortcut) {
         'publicUpdateChannelModified': False,
     }, indent=2) + '\n', encoding='utf-8')
     ARCHIVE.parent.mkdir(parents=True, exist_ok=True)
-    write_zip(OUTPUT, ARCHIVE, 'XRS-05-Windows-Test-Kit')
+    write_zip(OUTPUT, ARCHIVE, 'XRS-06-Windows-0.4.54-Test-Kit')
     print(f'Isolated test kit: {ARCHIVE} ({ARCHIVE.stat().st_size:,} bytes)', flush=True)
 
 

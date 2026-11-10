@@ -41,6 +41,16 @@ export function patientSurname(value = ''): string {
   return /^(?:Ф\.?И\.?О\.?|дд\.мм\.гггг)$/i.test(surname) ? '' : surname;
 }
 
+export function buildReportTabName(patient: string, templateTitle: string, duplicatePatient: boolean, index: number, templateCodeSource = templateTitle): { label: string; fullTitle: string } {
+  const surname = patientSurname(patient);
+  if (!surname) return { label: `${templateTitle} ${index + 1}`, fullTitle: templateTitle };
+  const templateCode = templateCodeSource.replace(/[^a-zа-яё0-9]/giu, '').slice(0, 3).toLocaleUpperCase('ru');
+  return {
+    label: `${surname}${duplicatePatient ? ` · ${templateCode}` : ''}`,
+    fullTitle: `${surname} · ${templateTitle}`,
+  };
+}
+
 export function buildReportFilename(fields: FilenameFields, suffix: '.docx' | '.pdf', fallbackDate: string): string {
   const parts = [fields.number, initials(fields.doctor), shortPatientName(fields.patient), fields.template, fields.date || fallbackDate]
     .map(value => value?.trim() ?? '').filter(Boolean);

@@ -1,8 +1,10 @@
 name: XRS-01 Electron browser tests
 
 on:
+  push:
+    branches: [codex/xrs-06-release-0.4.54]
   pull_request:
-    branches: [codex/mri-report-studio]
+    branches: [codex/mri-report-studio, codex/xrs-05-integration-validation]
     paths:
       - 'x-ray-report-studio/**'
       - '.github/workflows/xrs-01-electron.yml'
@@ -33,6 +35,8 @@ jobs:
         run: npm run build
       - name: Unit tests
         run: npm test
+      - name: Synthetic Undo history memory and storage benchmark
+        run: npm run test:history-benchmark
       - name: Install Chromium for workspace recovery tests
         run: npx playwright-core install --with-deps chromium
       - name: Document tab isolation regression
@@ -51,6 +55,11 @@ jobs:
           set -o pipefail
           mkdir -p test-output
           xvfb-run --auto-servernum --server-args='-screen 0 1600x1200x24' npm run test:undo-scroll 2>&1 | tee test-output/undo-scroll.log
+      - name: Electron Undo/Redo persistence and tab history regression
+        run: |
+          set -o pipefail
+          mkdir -p test-output
+          xvfb-run --auto-servernum --server-args='-screen 0 1600x1200x24' npm run test:history-browser 2>&1 | tee test-output/history-browser.log
       - name: Upload Electron failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -59,5 +68,6 @@ jobs:
           path: |
             x-ray-report-studio/test-output/electron-*
             x-ray-report-studio/test-output/undo-scroll.log
+            x-ray-report-studio/test-output/history-browser.log
           if-no-files-found: warn
           retention-days: 7

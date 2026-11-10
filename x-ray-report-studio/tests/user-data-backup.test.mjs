@@ -8,21 +8,23 @@ import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
 const {createUserDataBackup,verifyUserDataBackup}=require('../electron/user-data-backup.cjs');
 
-test('local update backup contains workspace, templates, settings, stamps and both dictionaries with verified hashes',async t=>{
+test('local update backup includes the Chromium Local Storage database holding report history plus settings and dictionaries',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-backup-test-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
- const data=path.join(root,'Roaming','MRI Report Studio'),shared=path.join(root,'Public','Documents','MRI Report Studio','dictionary.json'),runtime=path.join(root,'Desktop','App_0.4.53'),backups=path.join(root,'Roaming','X-ray Report Studio Backups');
+ const data=path.join(root,'Roaming','MRI Report Studio'),shared=path.join(root,'Public','Documents','MRI Report Studio','dictionary.json'),runtime=path.join(root,'Desktop','App_0.4.54'),backups=path.join(root,'Roaming','X-ray Report Studio Backups');
  await fs.mkdir(path.join(data,'Local Storage','leveldb'),{recursive:true});await fs.mkdir(path.dirname(shared),{recursive:true});await fs.mkdir(runtime,{recursive:true});
  await fs.writeFile(path.join(data,'Local Storage','leveldb','000001.log'),'workspace templates settings stamps');
+ await fs.writeFile(path.join(data,'Local Storage','leveldb','000002.ldb'),'synthetic per-report undo operation history');
  await fs.writeFile(path.join(data,'dictionary.json'),'["слово"]');await fs.writeFile(path.join(data,'export-folders.json'),'{"word":"C:\\\\Отчёты"}');
  await fs.writeFile(path.join(data,'logs','update-private.log'),'diagnostic log must not enter a backup of report content').catch(async()=>{await fs.mkdir(path.join(data,'logs'),{recursive:true});await fs.writeFile(path.join(data,'logs','update-private.log'),'diagnostic log must not enter a backup of report content');});
  await fs.writeFile(shared,'["общий"]');
- const result=await createUserDataBackup({userDataDir:data,sharedDictionaryFile:shared,backupRoot:backups,version:'0.4.53'});
+ const result=await createUserDataBackup({userDataDir:data,sharedDictionaryFile:shared,backupRoot:backups,version:'0.4.54'});
  assert.ok(!result.directory.startsWith(runtime));
  assert.equal(await fs.readFile(path.join(result.directory,'data','profile','Local Storage','leveldb','000001.log'),'utf8'),'workspace templates settings stamps');
+ assert.equal(await fs.readFile(path.join(result.directory,'data','profile','Local Storage','leveldb','000002.ldb'),'utf8'),'synthetic per-report undo operation history');
  assert.equal(await fs.readFile(path.join(result.directory,'data','profile','dictionary.json'),'utf8'),'["слово"]');
  assert.equal(await fs.readFile(path.join(result.directory,'data','shared-dictionary.json'),'utf8'),'["общий"]');
  await assert.rejects(fs.stat(path.join(result.directory,'data','profile','logs')),{code:'ENOENT'});
- assert.deepEqual(await verifyUserDataBackup(result.directory),{files:4,bytes:Buffer.byteLength('workspace templates settings stamps')+Buffer.byteLength('["слово"]')+Buffer.byteLength('["общий"]')+Buffer.byteLength('{"word":"C:\\\\Отчёты"}')});
+ assert.deepEqual(await verifyUserDataBackup(result.directory),{files:5,bytes:Buffer.byteLength('workspace templates settings stamps')+Buffer.byteLength('synthetic per-report undo operation history')+Buffer.byteLength('["слово"]')+Buffer.byteLength('["общий"]')+Buffer.byteLength('{"word":"C:\\\\Отчёты"}')});
 });
 
 test('backup failure preserves earlier usable backup and removes only the incomplete staging directory',async t=>{
