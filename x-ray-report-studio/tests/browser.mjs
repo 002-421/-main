@@ -317,7 +317,7 @@ try{
   assert.equal(await page.locator('.report-tab').count(),expected,`${size} tabs: only the damaged document is discarded`);
   if(size>1){
    assert.equal(await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select'),fixture.activeId,`${size} tabs: active document is restored`);
-   for(const id of fixture.validIds){const tab=page.locator(`[data-report-select="${id}"]`);assert.equal(await tab.count(),1,`${size} tabs: ${id} is retained`);assert.equal((await tab.innerText()).startsWith('● '),fixture.dirtyIds.includes(id),`${size} tabs: dirty state for ${id} is restored`);}
+   for(const id of fixture.validIds){const tab=page.locator(`[data-report-select="${id}"]`);if(await tab.count()!==1){const state=await page.evaluate(()=>({renderedIds:[...document.querySelectorAll('[data-report-select]')].map(el=>el.getAttribute('data-report-select')),storedIds:JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1')||'{}').reports?.map(report=>report.id)??[],activeId:JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1')||'{}').activeId}));assert.equal(await tab.count(),1,`${size} tabs: ${id} is retained; recovery IDs=${JSON.stringify(state)}`);}assert.equal((await tab.innerText()).startsWith('● '),fixture.dirtyIds.includes(id),`${size} tabs: dirty state for ${id} is restored`);}
   }
   const backup=await page.evaluate(()=>Object.keys(localStorage).filter(key=>key.startsWith('mri-report-studio.workspace.v1.recovery.')).map(key=>localStorage.getItem(key)));
   assert.ok(backup.includes(fixture.raw),`${size} tabs: original workspace bytes are backed up`);
