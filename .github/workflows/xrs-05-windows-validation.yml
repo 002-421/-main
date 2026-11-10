@@ -35,7 +35,20 @@ jobs:
       - name: Build application
         run: npm run build
       - name: Unit tests
-        run: npm test
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path test-output | Out-Null
+          npm test 2>&1 | Tee-Object -FilePath test-output/windows-unit-tests.log
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
+            $lines = Get-Content test-output/windows-unit-tests.log
+            $failedTest = $lines | Where-Object { $_ -match '^✖ ' } | Select-Object -First 1
+            $errorType = $lines | Where-Object { $_ -match '^\s*(AssertionError|TypeError|ReferenceError|SyntaxError|Error)( \[[^]]+\])?:' } | Select-Object -First 1
+            $stackFrame = $lines | Where-Object { $_ -match '^\s+at .+\.mjs:\d+:\d+' } | Select-Object -First 1
+            $summary = @($failedTest, ($errorType -replace '^\s*', ''), ($stackFrame -replace '^\s*', '')) -ne '' -join '; '
+            Write-Output "::error title=Windows unit test diagnostic::$summary"
+            exit $exitCode
+          }
       - name: Validate Windows installer PowerShell syntax
         shell: powershell
         run: |
@@ -64,4 +77,12 @@ jobs:
           name: XRS-05-Windows-Test-Kit
           path: x-ray-report-studio/test-output/XRS-05-Windows-Test-Kit.zip
           if-no-files-found: error
+          retention-days: 7
+      - name: Upload Windows unit test diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: XRS-05-Windows-test-diagnostic
+          path: x-ray-report-studio/test-output/windows-unit-tests.log
+          if-no-files-found: ignore
           retention-days: 7
