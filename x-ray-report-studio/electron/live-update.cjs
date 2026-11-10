@@ -1,3 +1,8 @@
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+
 /** Switch the current window to a packaged renderer, rolling back if it fails. */
 async function activateRendererUpdate({ loadFile, installedIndex, previousIndex, waitForReady }) {
   let ready;
@@ -36,4 +41,33 @@ function isUsableRenderer(details, frame) {
     && Number(frame?.distinctSampleColors) >= 8;
 }
 
-module.exports = { activateRendererUpdate, isUsableRenderer };
+async function smokeTestInstalledApp({ executable, timeoutMs = 30000, spawnProcess = spawn }) {
+  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'XRS_Smoke_Profile_'));
+  const resultFile = path.join(profile, 'ready.json');
+  let child;
+  try {
+    child = spawnProcess(executable, [`--user-data-dir=${path.join(profile, 'user-data')}`], {
+      windowsHide: true,
+      stdio: 'ignore',
+      env: { ...process.env, XRS_SMOKE_TEST_RESULT: resultFile },
+    });
+    let exitCode = null;
+    child.once('exit', code => { exitCode = code ?? 1; });
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        const result = JSON.parse(await fs.readFile(resultFile, 'utf8'));
+        if (result.ready === true && /^\d+\.\d+\.\d+$/.test(result.version)) return result;
+        throw new Error('Новая версия не прошла проверку запуска редактора.');
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (exitCode !== null) throw new Error(`Проверка первого запуска завершилась с кодом ${exitCode}.`);
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    throw new Error('Новая версия не запустила редактор за отведённое время.');
+  } finally {
+    if (child && child.exitCode === null && child.signalCode === null) child.kill();
+    await fs.rm(profile, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+module.exports = { activateRendererUpdate, isUsableRenderer, smokeTestInstalledApp };
