@@ -56,7 +56,11 @@ test('Windows paths with spaces and Cyrillic keep old installs, atomically repla
     'X-ray Report Studio Setup/app/electron/main.cjs': strToU8('updated synthetic app'),
     'X-ray Report Studio Setup/app/dist/index.html': strToU8('<html>synthetic update</html>'),
   };
-  const archive = path.join(root, 'synthetic-update.zip');
+  // The production updater stages downloaded archives in the ASCII-named OS temp
+  // directory before calling tar.exe; keep the destination path Unicode below.
+  const archiveDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'xrs05-update-'));
+  t.after(() => fs.rm(archiveDirectory, { recursive: true, force: true }));
+  const archive = path.join(archiveDirectory, 'synthetic-update.zip');
   await fs.writeFile(archive, Buffer.from(zipSync(updatePackage)));
   const installed = await installUpdateArchive({ archive, currentRoot, version: '0.4.54' });
   assert.equal(await fs.readFile(path.join(currentRoot, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'previous synthetic app');
