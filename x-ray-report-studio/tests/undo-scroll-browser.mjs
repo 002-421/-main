@@ -29,12 +29,12 @@ try{
  await page.keyboard.press('Control+z');
  assert.equal(await target.innerText(),original,'keyboard Undo restores the original text');
  let after=await assertCaretVisible();
- assert.ok(Math.abs(after.scrollTop-before.scrollTop)<=2,'keyboard Undo does not scroll when the restored caret is already visible');
+ assert.ok(Math.abs(after.scrollTop-before.scrollTop)<=2,`keyboard Undo does not scroll when the restored caret is already visible: ${JSON.stringify({before,after})}`);
  before=after;
  await page.keyboard.press('Control+y');
  assert.ok((await target.innerText()).includes('Проверка XRS-03'),'keyboard Redo restores inserted text');
  after=await assertCaretVisible();
- assert.ok(Math.abs(after.scrollTop-before.scrollTop)<=2,'keyboard Redo does not scroll when the restored caret is already visible');
+ assert.ok(Math.abs(after.scrollTop-before.scrollTop)<=2,`keyboard Redo does not scroll when the restored caret is already visible: ${JSON.stringify({before,after})}`);
 
  await page.locator('[data-command="undo"]').click();
  assert.equal(await target.innerText(),original,'toolbar Undo restores the text');
@@ -42,7 +42,7 @@ try{
  await page.locator('[data-command="redo"]').click();
  assert.ok((await target.innerText()).includes('Проверка XRS-03'),'toolbar Redo restores inserted text');
  after=await assertCaretVisible();
- assert.ok(Math.abs(after.scrollTop-before.scrollTop)<=2,'toolbar Redo keeps the current viewport when the caret is visible');
+ assert.ok(Math.abs(after.scrollTop-before.scrollTop)<=2,`toolbar Redo keeps the current viewport when the caret is visible: ${JSON.stringify({before,after})}`);
 
  await app.evaluate(({clipboard},text)=>clipboard.writeText(text),'Вставка XRS-03');
  await page.keyboard.press('Control+v');
@@ -51,7 +51,7 @@ try{
  await page.keyboard.press('Control+z');
  assert.ok(!(await target.innerText()).includes('Вставка XRS-03'),'Undo removes the pasted text');
  after=await assertCaretVisible();
- assert.ok(Math.abs(after.scrollTop-before.scrollTop)<=2,'Undo after paste preserves a visible caret position');
+ assert.ok(Math.abs(after.scrollTop-before.scrollTop)<=2,`Undo after paste preserves a visible caret position: ${JSON.stringify({before,after})}`);
  await page.keyboard.press('Control+y');
  assert.ok((await target.innerText()).includes('Вставка XRS-03'),'Redo restores pasted text');
 
@@ -63,7 +63,7 @@ try{
  await page.keyboard.press('Control+z');
  assert.equal(await target.innerText(),beforeFormat,'Undo after formatting retains all report text');
  after=await assertCaretVisible();
- assert.ok(Math.abs(after.scrollTop-formattedScroll)<=2,'Undo after formatting does not jump away from the caret');
+ assert.ok(Math.abs(after.scrollTop-formattedScroll)<=2,`Undo after formatting does not jump away from the caret: ${JSON.stringify({formattedScroll,after})}`);
  await page.keyboard.press('Control+y');
  assert.ok(await target.locator('strong,b').count(),'Redo restores formatting');
 
