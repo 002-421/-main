@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import { chromium } from 'playwright-core';
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+
+const server=createServer(async(_request,response)=>{response.setHeader('Content-Type','text/html;charset=utf-8');response.end(await readFile('dist/index.html'));});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+let browser;
+try {
+  browser=await chromium.launch({headless:true,args:['--no-sandbox'],...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{})});
+  const page=await browser.newPage(),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.addInitScript(()=>{localStorage.setItem('xrs.ai-review.experimental','enabled');const add=EventTarget.prototype.addEventListener;EventTarget.prototype.addEventListener=function(type,listener,options){if(this===window&&type==='beforeunload')return;return add.call(this,type,listener,options);};});
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.locator('#ai-migrate-open').waitFor();
+  await page.locator('#new-report').click();
+  const baseline=await page.evaluate(()=>{const workspace=JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1'));const tab=workspace.reports[0];const p=text=>({type:'paragraph',content:[{type:'text',text}]});const doc={type:'doc',content:[p('Пациент: Вымышленный'),p('Описание: очаг справа 5 мм.'),p('Заключение: очаг справа 5 мм.'),p('Врач: Вымышленный')]};localStorage.setItem('mri-report-studio.workspace.v1',JSON.stringify({activeId:tab.id,reports:[{...tab,doc}]}));return {id:tab.id,doc};});
+  await page.reload();
+  await page.locator('#ai-migrate-open').click();
+  await page.locator('#migration-description').selectOption('1');
+  await page.locator('#migration-conclusion').selectOption('2');
+  await page.locator('#migration-signature').selectOption('3');
+  assert.equal(await page.locator('#migration-preview strong').count(),4);
+  await page.locator('#migration-confirm').check();
+  await page.locator('#migration-apply').click();
+  await page.locator('.dialog-overlay').waitFor({state:'detached'});
+  const state=await page.evaluate(()=>{const data=JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1'));const keys=Object.keys(localStorage).filter(key=>key.startsWith('xrs.ai-review.migration-backup.v1.'));return {doc:data.reports[0].doc,backup:keys.map(key=>JSON.parse(localStorage.getItem(key)))};});
+  assert.deepEqual(state.doc.content.slice(0,4).map(x=>x.attrs.id),['header','description','conclusion','signature']);
+  assert.equal(state.backup.length,1);
+  assert.deepEqual(state.backup[0].doc.content.slice(0,4).map(node=>node.content?.[0]?.text),baseline.doc.content.map(node=>node.content[0].text));
+  await page.reload();
+  await page.locator('#ai-migrate-open').click();
+  assert.match(await page.locator('.dialog-overlay').innerText(),/уже содержит структурные границы/);
+  page.on('dialog',dialog=>dialog.accept());
+  await page.getByText('Восстановить оригинал из последней копии').click();
+  await page.locator('.dialog-overlay').waitFor({state:'detached'});
+  const restored=await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1')).reports[0].doc);
+  assert.deepEqual(restored,state.backup[0].doc);
+  assert.deepEqual(errors,[]);
+  console.log('PASS: manual boundaries, persistent verified backup, restart and restore.');
+} finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}

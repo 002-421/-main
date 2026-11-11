@@ -54,6 +54,30 @@ test('stale source and cross-node ranges are rejected; rejection leaves document
   assert.throws(()=>applyReviewSuggestion(e,s,blocks));
 });
 
+test('one transaction replaces text across formatting runs, preserving neighbours and Undo/Redo',()=>{
+  const mixed=schema.nodes.paragraph.create(null,[schema.text('Очаг ',[schema.marks.bold.create()]),schema.text('справа'),schema.text(' 5 мм.',[schema.marks.bold.create()])]);
+  const doc=document();const parts=[...doc.content.content];parts[1]=section('description',mixed);
+  const e=editor(schema.nodes.doc.create(null,parts));
+  const blocks=new ReportBlockExtractor().extract(e.state.doc.toJSON()),before=e.state.doc.toJSON();
+  const s=suggestion('справа 5','слева 6',5,13);
+  assert.throws(()=>applyReviewSuggestion(e,s,blocks,'tab-a','tab-b'),/другая вкладка/);
+  applyReviewSuggestion(e,s,blocks,'tab-a','tab-a');
+  const after=e.state.doc.toJSON(),runs=after.content[1].content[0].content;
+  assert.equal(e.state.doc.content.child(1).textContent,'Очаг слева 6 мм.');
+  assert.equal(runs[0].text,'Очаг ');assert.deepEqual(runs[0].marks,[{type:'bold'}]);
+  assert.equal(runs.at(-1).text,' мм.');assert.deepEqual(runs.at(-1).marks,[{type:'bold'}]);
+  assert.deepEqual(after.content[0],before.content[0]);assert.deepEqual(after.content[3],before.content[3]);
+  assert.equal(undo(e.state,tr=>e.view.dispatch(tr)),true);assert.deepEqual(e.state.doc.toJSON(),before);
+  assert.equal(redo(e.state,tr=>e.view.dispatch(tr)),true);assert.equal(e.state.doc.content.child(1).textContent,'Очаг слева 6 мм.');
+});
+
+test('cross-paragraph ranges require manual editing',()=>{
+  const doc=document(),parts=[...doc.content.content];parts[1]=schema.nodes.reportSection.create({id:'description'},[paragraph('Очаг справа'),paragraph('5 мм.')]);
+  const e=editor(schema.nodes.doc.create(null,parts)),blocks=new ReportBlockExtractor().extract(e.state.doc.toJSON());
+  const s=suggestion('справа\n5','слева 6',5,13);
+  assert.throws(()=>applyReviewSuggestion(e,s,blocks),/ручного редактирования/);
+});
+
 test('six category filters work with synthetic mock findings without network', async () => {
   const original=globalThis.fetch;let calls=0;globalThis.fetch=()=>{calls++;throw Error('network')};
   try {
