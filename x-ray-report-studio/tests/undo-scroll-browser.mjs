@@ -107,7 +107,10 @@ try{
  await page?.screenshot({path:path.join(output,'undo-scroll-failure.png'),fullPage:false}).catch(()=>{});
  const failureLine=String(error?.stack??'').match(/undo-scroll-browser\.mjs:(\d+):(\d+)/)?.[1]??null;
  const safeFailureMessage=String(error?.message??'Electron integration failure').split('\n',1)[0].split(/:\s*\{/)[0].slice(0,240);
- await writeFile(path.join(output,'undo-scroll-failure.json'),JSON.stringify({errorName:error?.name||'Error',errorCode:error?.code||null,failureLine,safeFailureMessage,snapshot},null,2));
+ const diagnostic={errorName:error?.name||'Error',errorCode:error?.code||null,failureLine,safeFailureMessage,snapshot};
+ const annotation=JSON.stringify(diagnostic).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A');
+ process.stdout.write(`::error title=Undo/Redo synthetic diagnostics::${annotation}\n`);
+ await writeFile(path.join(output,'undo-scroll-failure.json'),JSON.stringify(diagnostic,null,2));
  throw error;
 }finally{
  if(app)await app.close();
