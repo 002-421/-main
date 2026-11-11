@@ -18,11 +18,20 @@ function Get-XrsFullPath([string]$Path) {
     catch { throw 'A selected path is invalid.' }
 }
 
+function Get-XrsPathSeparators {
+    return [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+}
+
 function Test-XrsPathWithin([string]$Path, [string]$Root) {
-    $fullPath = (Get-XrsFullPath $Path).TrimEnd('\')
-    $fullRoot = (Get-XrsFullPath $Root).TrimEnd('\')
+    $separators = Get-XrsPathSeparators
+    $fullPath = (Get-XrsFullPath $Path).TrimEnd($separators)
+    $fullRoot = (Get-XrsFullPath $Root).TrimEnd($separators)
     if ([string]::Equals($fullPath, $fullRoot, [StringComparison]::OrdinalIgnoreCase)) { return $true }
-    return $fullPath.StartsWith($fullRoot + '\', [StringComparison]::OrdinalIgnoreCase)
+    $prefix = $fullRoot
+    if (-not $prefix.EndsWith([string][IO.Path]::DirectorySeparatorChar) -and -not $prefix.EndsWith([string][IO.Path]::AltDirectorySeparatorChar)) {
+        $prefix += [IO.Path]::DirectorySeparatorChar
+    }
+    return $fullPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
 }
 
 function Test-XrsPathsOverlap([string]$Left, [string]$Right) {
@@ -38,9 +47,9 @@ function Assert-XrsNoReparseAncestors([string]$Path) {
                 throw 'A selected path contains a symbolic link or reparse point.'
             }
         }
-        $parent = Split-Path -LiteralPath $current -Parent
-        if ([string]::IsNullOrWhiteSpace($parent) -or [string]::Equals($parent, $current, [StringComparison]::OrdinalIgnoreCase)) { break }
-        $current = $parent
+        $parent = [IO.Directory]::GetParent($current)
+        if ($null -eq $parent -or [string]::Equals($parent.FullName, $current, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $current = $parent.FullName
     }
 }
 
@@ -63,8 +72,11 @@ function Get-XrsInstallRoots([string[]]$AdditionalRoots = @()) {
                 $shell = New-Object -ComObject WScript.Shell
                 $target = $shell.CreateShortcut($shortcut).TargetPath
                 if (-not [string]::IsNullOrWhiteSpace($target)) {
-                    $versionRoot = Split-Path -LiteralPath $target -Parent
-                    $roots.Add((Get-XrsFullPath (Split-Path -LiteralPath $versionRoot -Parent)))
+                    $versionRoot = [IO.Directory]::GetParent($target)
+                    if ($null -ne $versionRoot) {
+                        $applicationRoot = [IO.Directory]::GetParent($versionRoot.FullName)
+                        if ($null -ne $applicationRoot) { $roots.Add((Get-XrsFullPath $applicationRoot.FullName)) }
+                    }
                 }
             } catch { throw 'The installed application location could not be verified.' }
         }
@@ -173,7 +185,11 @@ function Assert-XrsBackupIntegrity([string]$BackupPath) {
             throw 'A backed-up file failed its size or SHA256 check.'
         }
     }
-    $actualPaths = @($actualFiles | ForEach-Object { $_.FullName.Substring($dataRoot.TrimEnd('\').Length).TrimStart('\') -replace '\\', '/' } | Sort-Object)
+    $separators = Get-XrsPathSeparators
+    $dataPrefix = $dataRoot.TrimEnd($separators)
+    $actualPaths = @($actualFiles | ForEach-Object {
+        $_.FullName.Substring($dataPrefix.Length).TrimStart($separators) -replace [regex]::Escape([string][IO.Path]::DirectorySeparatorChar), '/'
+    } | Sort-Object)
     $expectedSorted = @($expectedPaths.ToArray() | Sort-Object)
     if (($actualPaths -join "`n") -cne ($expectedSorted -join "`n")) { throw 'The backup contains missing or unlisted files.' }
     return $manifest
@@ -248,12 +264,17 @@ function New-XrsVerifiedBackup {
 
     try {
         Assert-XrsNoReparseAncestors $stage
-        [void][IO.Directory]::CreateDirectory((Join-Path $stage 'data\profile'))
+        $stageData = Join-Path $stage 'data'
+        $stageProfile = Join-Path $stageData 'profile'
+        $stageDictionaries = Join-Path $stageData 'dictionaries'
+        [void][IO.Directory]::CreateDirectory($stageProfile)
         foreach ($file in $profileFiles) {
-            $relative = $file.FullName.Substring($profile.TrimEnd('\').Length).TrimStart('\')
-            $backupRelative = 'profile/' + ($relative -replace '\\', '/')
-            $target = Join-Path (Join-Path $stage 'data\profile') $relative
-            [void][IO.Directory]::CreateDirectory((Split-Path -LiteralPath $target -Parent))
+            $separators = Get-XrsPathSeparators
+            $profilePrefix = $profile.TrimEnd($separators)
+            $relative = $file.FullName.Substring($profilePrefix.Length).TrimStart($separators)
+            $backupRelative = 'profile/' + ($relative -replace [regex]::Escape([string][IO.Path]::DirectorySeparatorChar), '/')
+            $target = Join-Path $stageProfile $relative
+            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
             $beforeLength = [long]$file.Length
             $beforeWrite = $file.LastWriteTimeUtc.Ticks
             try { [IO.File]::Copy($file.FullName, $target, $false) }
@@ -274,8 +295,8 @@ function New-XrsVerifiedBackup {
         foreach ($dictionary in $dictionaries) {
             $index++
             $backupRelative = 'dictionaries/dictionary-' + $index.ToString('D4') + '.json'
-            $target = Join-Path (Join-Path $stage 'data\dictionaries') ('dictionary-' + $index.ToString('D4') + '.json')
-            [void][IO.Directory]::CreateDirectory((Split-Path -LiteralPath $target -Parent))
+            $target = Join-Path $stageDictionaries ('dictionary-' + $index.ToString('D4') + '.json')
+            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
             $source = Get-Item -LiteralPath $dictionary -Force -ErrorAction Stop
             $beforeLength = [long]$source.Length
             $beforeWrite = $source.LastWriteTimeUtc.Ticks

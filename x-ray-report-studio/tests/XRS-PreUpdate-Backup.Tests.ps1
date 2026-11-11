@@ -22,6 +22,7 @@ $destination = Join-Path $tempRoot 'резервные-копии'
 $appRoot = Join-Path $tempRoot 'X-ray Report Studio\App_20261111-test'
 $oldDictionaryDir = $env:MRI_REPORT_STUDIO_DICTIONARY_DIR
 $oldPublic = $env:PUBLIC
+$noAppProcesses = @([pscustomobject]@{ Name='synthetic-test-host'; ExecutablePath=''; CommandLine='' })
 
 try {
     [void][IO.Directory]::CreateDirectory((Join-Path $profile 'Local Storage\leveldb'))
@@ -40,7 +41,7 @@ try {
 
     $backupOne = New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination `
         -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') -Version '0.4.53' -TargetVersion '0.4.54' `
-        -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList @()
+        -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses
     Assert-True ($backupOne.Files -eq 4) 'Backup did not include every profile and dictionary file.'
     $manifestOne = Assert-XrsBackupIntegrity $backupOne.Path
     Assert-True (@($manifestOne.files).Count -eq 4) 'Manifest file count does not match expected synthetic files.'
@@ -49,39 +50,42 @@ try {
 
     $backupTwo = New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination `
         -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') -Version '0.4.53' -TargetVersion '0.4.54' `
-        -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList @()
+        -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses
     Assert-True ($backupOne.Path -ne $backupTwo.Path) 'A second backup overwrote the previous backup.'
     $tamperTarget = Join-Path $backupTwo.Path 'data\profile\settings.json'
     [IO.File]::AppendAllText($tamperTarget, 'tampered', [Text.UTF8Encoding]::new($false))
     Assert-Fails { Assert-XrsBackupIntegrity $backupTwo.Path } 'A modified backup passed manifest verification.'
     $null = Assert-XrsBackupIntegrity $backupOne.Path
 
-    Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot (Join-Path $profile 'nested-backup') -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList @() } 'A destination inside the profile was accepted.'
-    Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $appRoot -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList @() } 'A destination inside an install folder was accepted.'
-    Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination -ReserveBytes ([long]::MaxValue) -InstallRoots @($appRoot) -ProcessList @() } 'Insufficient disk space was accepted.'
+    Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot (Join-Path $profile 'nested-backup') -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses } 'A destination inside the profile was accepted.'
+    Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $appRoot -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses } 'A destination inside an install folder was accepted.'
+    Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination -ReserveBytes ([long]::MaxValue) -InstallRoots @($appRoot) -ProcessList $noAppProcesses } 'Insufficient disk space was accepted.'
     $blockedParent = Join-Path $tempRoot 'this-is-a-file'
     [IO.File]::WriteAllText($blockedParent, 'synthetic', [Text.UTF8Encoding]::new($false))
-    Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot (Join-Path $blockedParent 'backup') -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList @() } 'An inaccessible destination was accepted.'
+    Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot (Join-Path $blockedParent 'backup') -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses } 'An inaccessible destination was accepted.'
     Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList @([pscustomobject]@{ Name='electron'; ExecutablePath=(Join-Path $appRoot 'resources\app\electron.exe'); CommandLine='' }) } 'A running Electron process was accepted.'
 
     $junctionTarget = Join-Path $tempRoot 'junction-target'
     $junction = Join-Path $profile 'unsafe-junction'
     [void][IO.Directory]::CreateDirectory($junctionTarget)
-    New-Item -ItemType Junction -Path $junction -Target $junctionTarget | Out-Null
-    Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList @() } 'A profile containing a junction was accepted.'
+    if ($env:OS -eq 'Windows_NT') { New-Item -ItemType Junction -Path $junction -Target $junctionTarget | Out-Null }
+    else { New-Item -ItemType SymbolicLink -Path $junction -Target $junctionTarget | Out-Null }
+    Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses } 'A profile containing a link was accepted.'
     Remove-Item -LiteralPath $junction -Force
 
-    $powershell = Join-Path $PSHOME 'powershell.exe'
-    $cliDestination = Join-Path $tempRoot 'cli-backups'
-    $cliOutput = & $powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
-        -ProfilePath $profile -DestinationRoot $cliDestination -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') `
-        -ReserveBytes 0 2>&1
-    Assert-True ($LASTEXITCODE -eq 0 -and ($cliOutput -join "`n") -match 'BACKUP VERIFIED') 'The command-line success result was not reported.'
-    $cliFailure = & $powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
-        -ProfilePath $profile -DestinationRoot $cliDestination -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') `
-        -ReserveBytes ([long]::MaxValue) 2>&1
-    Assert-True ($LASTEXITCODE -ne 0 -and ($cliFailure -join "`n") -match 'BACKUP FAILED') 'The command-line failure result was not reported.'
-    Assert-True (@(Get-ChildItem -LiteralPath $cliDestination -Directory -ErrorAction SilentlyContinue).Count -eq 0) 'A failed run left an incomplete backup folder.'
+    if ($env:OS -eq 'Windows_NT') {
+        $powershell = Join-Path $PSHOME 'powershell.exe'
+        $cliDestination = Join-Path $tempRoot 'cli-backups'
+        $cliOutput = & $powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
+            -ProfilePath $profile -DestinationRoot $cliDestination -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') `
+            -ReserveBytes 0 2>&1
+        Assert-True ($LASTEXITCODE -eq 0 -and ($cliOutput -join "`n") -match 'BACKUP VERIFIED') 'The command-line success result was not reported.'
+        $cliFailure = & $powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
+            -ProfilePath $profile -DestinationRoot $cliDestination -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') `
+            -ReserveBytes ([long]::MaxValue) 2>&1
+        Assert-True ($LASTEXITCODE -ne 0 -and ($cliFailure -join "`n") -match 'BACKUP FAILED') 'The command-line failure result was not reported.'
+        Assert-True (@(Get-ChildItem -LiteralPath $cliDestination -Directory -ErrorAction SilentlyContinue).Count -eq 0) 'A failed run left an incomplete backup folder.'
+    }
 
     Write-Output 'XRS pre-update backup tests passed using synthetic data.'
 } finally {
