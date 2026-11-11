@@ -68,7 +68,11 @@ try {
     $junctionTarget = Join-Path $tempRoot 'junction-target'
     $junction = Join-Path $profile 'unsafe-junction'
     [void][IO.Directory]::CreateDirectory($junctionTarget)
-    if ($env:OS -eq 'Windows_NT') { New-Item -ItemType Junction -Path $junction -Target $junctionTarget | Out-Null }
+    if ($env:OS -eq 'Windows_NT') {
+        $junctionCommand = 'mklink /J "{0}" "{1}"' -f $junction, $junctionTarget
+        & $env:ComSpec /d /c $junctionCommand | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Could not create the synthetic junction needed for the refusal test.' }
+    }
     else { New-Item -ItemType SymbolicLink -Path $junction -Target $junctionTarget | Out-Null }
     Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses } 'A profile containing a link was accepted.'
     Remove-Item -LiteralPath $junction -Force
