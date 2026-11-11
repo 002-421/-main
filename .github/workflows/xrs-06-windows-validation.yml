@@ -89,6 +89,29 @@ jobs:
         run: npm run test:browser
       - name: Electron Undo/Redo caret and scroll regression
         run: npm run test:undo-scroll
+      - name: Add sanitized Undo/Redo diagnostics to run summary
+        if: always()
+        shell: pwsh
+        run: |
+          $diagnosticPath = 'test-output/undo-scroll-failure.json'
+          if (-not (Test-Path -LiteralPath $diagnosticPath)) {
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Undo/Redo diagnostic JSON was not produced.'
+            exit 0
+          }
+          $diagnostic = Get-Content -LiteralPath $diagnosticPath -Raw | ConvertFrom-Json
+          $snapshot = $diagnostic.snapshot
+          $safe = @(
+            '### Sanitized Electron Undo/Redo diagnostics',
+            ('Error type: ' + [string]$diagnostic.errorName),
+            ('Test line: ' + [string]$diagnostic.failureLine),
+            ('Assertion: ' + [string]$diagnostic.safeFailureMessage),
+            ('Scroll top / height / viewport: ' + [string]$snapshot.scrollTop + ' / ' + [string]$snapshot.scrollHeight + ' / ' + [string]$snapshot.clientHeight),
+            ('Caret bounds: ' + ($snapshot.caret | ConvertTo-Json -Compress)),
+            ('Editor viewport bounds: ' + ($snapshot.viewport | ConvertTo-Json -Compress)),
+            ('Active tab index / reports / paragraphs: ' + [string]$snapshot.activeTabIndex + ' / ' + [string]$snapshot.reportCount + ' / ' + [string]$snapshot.paragraphCount),
+            ('Renderer error names: ' + (($snapshot.rendererErrors | ForEach-Object { [string]$_ }) -join ', '))
+          )
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($safe -join "`n")
       - name: Electron persistent history, depth and recovery regression
         run: npm run test:history-browser
       - name: Build isolated Windows 0.4.54 test kit

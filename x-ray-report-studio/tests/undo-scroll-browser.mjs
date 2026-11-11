@@ -105,7 +105,9 @@ try{
  await mkdir(output,{recursive:true});
  const snapshot=await page?.evaluate(rendererErrors=>{const canvas=document.querySelector('#canvas'),selection=getSelection(),range=selection?.rangeCount?selection.getRangeAt(0):null,rect=range?.getBoundingClientRect(),viewport=canvas?.getBoundingClientRect();return{scrollTop:canvas?.scrollTop??null,scrollHeight:canvas?.scrollHeight??null,clientHeight:canvas?.clientHeight??null,caret:rect?{top:rect.top,bottom:rect.bottom}:null,viewport:viewport?{top:viewport.top,bottom:viewport.bottom}:null,activeTabIndex:[...document.querySelectorAll('.report-tab')].findIndex(tab=>tab.classList.contains('active')),reportCount:document.querySelectorAll('.report-tab').length,paragraphCount:document.querySelectorAll('.report-content p').length,rendererErrors};},rendererErrorNames).catch(()=>null);
  await page?.screenshot({path:path.join(output,'undo-scroll-failure.png'),fullPage:false}).catch(()=>{});
- await writeFile(path.join(output,'undo-scroll-failure.json'),JSON.stringify({errorName:error?.name||'Error',errorCode:error?.code||null,errorMessage:error?.message||String(error),snapshot},null,2));
+ const failureLine=String(error?.stack??'').match(/undo-scroll-browser\.mjs:(\d+):(\d+)/)?.[1]??null;
+ const safeFailureMessage=String(error?.message??'Electron integration failure').split('\n',1)[0].split(/:\s*\{/)[0].slice(0,240);
+ await writeFile(path.join(output,'undo-scroll-failure.json'),JSON.stringify({errorName:error?.name||'Error',errorCode:error?.code||null,failureLine,safeFailureMessage,snapshot},null,2));
  throw error;
 }finally{
  if(app)await app.close();
