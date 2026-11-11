@@ -94,6 +94,7 @@ jobs:
         with:
           name: XRS-06-Windows-Electron-Failure-Diagnostics
           path: |
+            x-ray-report-studio/test-output/XRS-PreUpdate-Backup-Failure.txt
             x-ray-report-studio/test-output/report-history-failure.png
             x-ray-report-studio/test-output/report-history-failure.json
             x-ray-report-studio/test-output/undo-scroll-failure.png

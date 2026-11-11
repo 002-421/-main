@@ -23,8 +23,10 @@ $appRoot = Join-Path $tempRoot 'X-ray Report Studio\App_20261111-test'
 $oldDictionaryDir = $env:MRI_REPORT_STUDIO_DICTIONARY_DIR
 $oldPublic = $env:PUBLIC
 $noAppProcesses = @([pscustomobject]@{ Name='synthetic-test-host'; ExecutablePath=''; CommandLine='' })
+$phase = 'initialize synthetic fixture'
 
 try {
+    $phase = 'create synthetic profile and dictionaries'
     [void][IO.Directory]::CreateDirectory((Join-Path $profile 'Local Storage\leveldb'))
     [void][IO.Directory]::CreateDirectory($dictionaryRoot)
     [void][IO.Directory]::CreateDirectory((Join-Path $publicRoot 'Documents\MRI Report Studio'))
@@ -39,6 +41,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $dictionaryRoot 'dictionary.json'), '["искусственный"]', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $publicRoot 'Documents\MRI Report Studio\dictionary.json'), '["синтетический"]', [Text.UTF8Encoding]::new($false))
 
+    $phase = 'create and verify first backup with Cyrillic paths'
     $backupOne = New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination `
         -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') -Version '0.4.53' -TargetVersion '0.4.54' `
         -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses
@@ -48,6 +51,7 @@ try {
     $manifestText = Get-Content -LiteralPath (Join-Path $backupOne.Path 'manifest.json') -Raw -Encoding UTF8
     Assert-True (-not $manifestText.Contains($syntheticOne) -and -not $manifestText.Contains($syntheticTwo)) 'Manifest leaked synthetic file contents.'
 
+    $phase = 'create unique second backup and verify tamper detection'
     $backupTwo = New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination `
         -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') -Version '0.4.53' -TargetVersion '0.4.54' `
         -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses
@@ -57,6 +61,7 @@ try {
     Assert-Fails { Assert-XrsBackupIntegrity $backupTwo.Path } 'A modified backup passed manifest verification.'
     $null = Assert-XrsBackupIntegrity $backupOne.Path
 
+    $phase = 'refuse unsafe destinations, insufficient space and running Electron'
     Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot (Join-Path $profile 'nested-backup') -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses } 'A destination inside the profile was accepted.'
     Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $appRoot -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses } 'A destination inside an install folder was accepted.'
     Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination -ReserveBytes ([long]::MaxValue) -InstallRoots @($appRoot) -ProcessList $noAppProcesses } 'Insufficient disk space was accepted.'
@@ -65,25 +70,28 @@ try {
     Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot (Join-Path $blockedParent 'backup') -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses } 'An inaccessible destination was accepted.'
     Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList @([pscustomobject]@{ Name='electron'; ExecutablePath=(Join-Path $appRoot 'resources\app\electron.exe'); CommandLine='' }) } 'A running Electron process was accepted.'
 
+    $phase = 'refuse a profile containing a symbolic link or junction'
     $junctionTarget = Join-Path $tempRoot 'junction-target'
     $junction = Join-Path $profile 'unsafe-junction'
     [void][IO.Directory]::CreateDirectory($junctionTarget)
     if ($env:OS -eq 'Windows_NT') {
         $junctionCommand = 'mklink /J "{0}" "{1}"' -f $junction, $junctionTarget
         & $env:ComSpec /d /c $junctionCommand | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'Could not create the synthetic junction needed for the refusal test.' }
+        if ($LASTEXITCODE -ne 0) { throw ('Could not create the synthetic junction needed for the refusal test. Exit code: ' + $LASTEXITCODE) }
     }
     else { New-Item -ItemType SymbolicLink -Path $junction -Target $junctionTarget | Out-Null }
     Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses } 'A profile containing a link was accepted.'
     Remove-Item -LiteralPath $junction -Force
 
     if ($env:OS -eq 'Windows_NT') {
+        $phase = 'verify successful command-line result'
         $powershell = Join-Path $PSHOME 'powershell.exe'
         $cliDestination = Join-Path $tempRoot 'cli-backups'
         $cliOutput = & $powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
             -ProfilePath $profile -DestinationRoot $cliDestination -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') `
             -ReserveBytes 0 2>&1
         Assert-True ($LASTEXITCODE -eq 0 -and ($cliOutput -join "`n") -match 'BACKUP VERIFIED') 'The command-line success result was not reported.'
+        $phase = 'verify failed command-line result and absence of partial backup'
         $cliFailure = & $powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
             -ProfilePath $profile -DestinationRoot $cliDestination -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') `
             -ReserveBytes ([long]::MaxValue) 2>&1
@@ -92,6 +100,15 @@ try {
     }
 
     Write-Output 'XRS pre-update backup tests passed using synthetic data.'
+} catch {
+    $diagnostic = 'Phase: ' + $phase + [Environment]::NewLine +
+        'Exception type: ' + $_.Exception.GetType().FullName + [Environment]::NewLine +
+        'PowerShell error id: ' + $_.FullyQualifiedErrorId + [Environment]::NewLine
+    $diagnosticPath = Join-Path $PSScriptRoot '..\test-output\XRS-PreUpdate-Backup-Failure.txt'
+    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($diagnosticPath))
+    [IO.File]::WriteAllText($diagnosticPath, $diagnostic, [Text.UTF8Encoding]::new($false))
+    Write-Error $diagnostic
+    throw
 } finally {
     $env:MRI_REPORT_STUDIO_DICTIONARY_DIR = $oldDictionaryDir
     $env:PUBLIC = $oldPublic
