@@ -88,7 +88,7 @@ function Get-XrsInstallRoots([string[]]$AdditionalRoots = @()) {
 }
 
 function Get-XrsRunningAppProcesses([object[]]$ProcessList, [string[]]$InstallRoots, [string]$ProfileRoot) {
-    $matches = New-Object 'System.Collections.Generic.List[object]'
+    $runningMatches = New-Object 'System.Collections.Generic.List[object]'
     foreach ($process in $ProcessList) {
         $name = [string]$process.Name
         $exe = [string]$process.ExecutablePath
@@ -105,9 +105,9 @@ function Get-XrsRunningAppProcesses([object[]]$ProcessList, [string[]]$InstallRo
                     $commandLine.IndexOf($ProfileRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0
             }
         }
-        if ($isNamedApp -or $isElectronInInstall) { $matches.Add($process) }
+        if ($isNamedApp -or $isElectronInInstall) { $runningMatches.Add($process) }
     }
-    return @($matches.ToArray())
+    return @($runningMatches.ToArray())
 }
 
 function Assert-XrsApplicationClosed([object[]]$ProcessList, [string[]]$InstallRoots, [string]$ProfileRoot) {

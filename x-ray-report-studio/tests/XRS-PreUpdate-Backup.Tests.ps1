@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('All', 'Core', 'Cli')]
+    [ValidateSet('All', 'Core', 'CliSuccess', 'CliFailure')]
     [string]$TestGroup = 'All'
 )
 
@@ -47,7 +47,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $dictionaryRoot 'dictionary.json'), '["искусственный"]', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $publicRoot 'Documents\MRI Report Studio\dictionary.json'), '["синтетический"]', [Text.UTF8Encoding]::new($false))
 
-    if ($TestGroup -ne 'Cli') {
+    if ($TestGroup -eq 'All' -or $TestGroup -eq 'Core') {
     $phase = 'create and verify first backup with Cyrillic paths'
     $backupOne = New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination `
         -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') -Version '0.4.53' -TargetVersion '0.4.54' `
@@ -75,7 +75,9 @@ try {
     $blockedParent = Join-Path $tempRoot 'this-is-a-file'
     [IO.File]::WriteAllText($blockedParent, 'synthetic', [Text.UTF8Encoding]::new($false))
     Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot (Join-Path $blockedParent 'backup') -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses } 'An inaccessible destination was accepted.'
-    Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList @([pscustomobject]@{ Name='electron'; ExecutablePath=(Join-Path $appRoot 'resources\app\electron.exe'); CommandLine='' }) } 'A running Electron process was accepted.'
+    $runningElectron = @([pscustomobject]@{ Name='electron'; ExecutablePath=(Join-Path $appRoot 'resources\app\electron.exe'); CommandLine='' })
+    Assert-True (@(Get-XrsRunningAppProcesses -ProcessList $runningElectron -InstallRoots @($appRoot) -ProfileRoot $profile).Count -eq 1) 'The installed Electron process was not identified.'
+    Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $runningElectron } 'A running Electron process was accepted.'
 
     $phase = 'refuse a profile containing a symbolic link or junction'
     $junctionTarget = Join-Path $tempRoot 'junction-target'
@@ -92,6 +94,7 @@ try {
     }
 
     if ($env:OS -eq 'Windows_NT' -and $TestGroup -ne 'Core') {
+        if ($TestGroup -ne 'CliFailure') {
         $phase = 'verify successful command-line result'
         $powershell = Join-Path $PSHOME 'powershell.exe'
         $cliDestination = Join-Path $tempRoot 'cli-backups'
@@ -99,12 +102,15 @@ try {
             -ProfilePath $profile -DestinationRoot $cliDestination -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') `
             -ReserveBytes 0 2>&1
         Assert-True ($LASTEXITCODE -eq 0 -and ($cliOutput -join "`n") -match 'BACKUP VERIFIED') 'The command-line success result was not reported.'
+        }
+        if ($TestGroup -ne 'CliSuccess') {
         $phase = 'verify failed command-line result and absence of partial backup'
         $cliFailure = & $powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
             -ProfilePath $profile -DestinationRoot $cliDestination -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') `
             -ReserveBytes ([long]::MaxValue) 2>&1
         Assert-True ($LASTEXITCODE -ne 0 -and ($cliFailure -join "`n") -match 'BACKUP FAILED') 'The command-line failure result was not reported.'
         Assert-True (@(Get-ChildItem -LiteralPath $cliDestination -Directory -ErrorAction SilentlyContinue).Count -eq 0) 'A failed run left an incomplete backup folder.'
+        }
     }
 
     Write-Output 'XRS pre-update backup tests passed using synthetic data.'

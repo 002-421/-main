@@ -62,8 +62,11 @@ jobs:
           }
           npm run test:preupdate-backup-core
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Verify backup command-line success and failure messages
-        run: npm run test:preupdate-backup-cli
+      - name: Verify backup command-line success message
+        run: npm run test:preupdate-backup-cli-success
+        shell: powershell
+      - name: Verify backup command-line failure message and cleanup
+        run: npm run test:preupdate-backup-cli-failure
         shell: powershell
       - name: Windows install, shortcut, backup and rollback tests
         run: npm run test:windows-integration
