@@ -9,7 +9,9 @@ const prepareInlineDocument = (doc: RichNode, trackOriginal = true) => prepareIn
 import packageInfo from '../package.json' with { type: 'json' };
 import { TextSelection } from '@tiptap/pm/state';
 import { history, redoDepth, undoDepth } from '@tiptap/pm/history';
-import { ReviewEngine, TrackChangesEngine } from './ai-review';
+import { ReviewEngine, TrackChangesEngine, reviewCategories, categoryGroup, type ReviewCategory } from './ai-review';
+import { applyReviewSuggestion, highlightReviewSuggestion } from './ai-review-editor';
+import { structurePreparedBuiltin } from './ai-review-structure';
 import DOMPurify from 'dompurify';
 import { makeEditor } from './editor';
 import { prepareInlineDocument as prepareInlineDocumentBase, initializeTemplateTracking, promoteInlineTemplate, resetInlineTemplate, collectInlineFields, countUnchangedParts, setReviewHighlights } from './inline-fields';
@@ -95,7 +97,7 @@ function defaultDoctor(doc:RichNode):RichNode {
   let applied=false;
   const walk=(n:RichNode)=>{if(n.content)n.content=n.content.filter(child=>{const m=fieldMark(child);if(m?.attrs?.id===DOCTOR_FIELD_ID&&child.type==='text'){if(applied)return false;applied=true;child.text=settings.doctor.trim();m.attrs={...m.attrs,filled:true};}walk(child);return true;});};walk(doc);return doc;
 }
-function newDocument(id:string) { return justifyDescription(defaultDoctor(prepareInlineDocument(initializeReportFooter(resetInlineTemplate(highlightDeletionNotes(separateRecommendations(compactTemplateTables(overrides[id]??makeTemplateDocument(id))))))))); }
+function newDocument(id:string) { const doc=justifyDescription(defaultDoctor(prepareInlineDocument(initializeReportFooter(resetInlineTemplate(highlightDeletionNotes(separateRecommendations(compactTemplateTables(overrides[id]??makeTemplateDocument(id)))))))));return !overrides[id]&&!id.startsWith('ct-')?structurePreparedBuiltin(id,doc):doc; }
 let initial = newDocument(activeTemplateId);
 try {
   const raw=read<any>(KEYS.draft,null);
@@ -237,32 +239,44 @@ document.querySelectorAll<HTMLElement>('[data-block-filter]').forEach(b=>b.oncli
 
 function dialog(title:string,body:string,footer='') {closeDialog();const overlay=document.createElement('div');overlay.className='dialog-overlay';overlay.innerHTML=`<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><header><h2 id="dialog-title">${esc(title)}</h2><button data-close aria-label="Закрыть">×</button></header><div class="dialog-body">${body}</div>${footer?`<footer>${footer}</footer>`:''}</section>`;document.body.append(overlay);overlay.addEventListener('click',e=>{if(e.target===overlay||(e.target as HTMLElement).closest('[data-close]'))closeDialog();});overlay.addEventListener('keydown',e=>{if(e.key==='Tab'){const nodes=[...overlay.querySelectorAll<HTMLElement>('button,input,textarea,select')].filter(n=>!n.hasAttribute('disabled'));if(e.shiftKey&&document.activeElement===nodes[0]){e.preventDefault();nodes.at(-1)?.focus();}else if(!e.shiftKey&&document.activeElement===nodes.at(-1)){e.preventDefault();nodes[0]?.focus();}}});setTimeout(()=>overlay.querySelector<HTMLElement>('input,textarea,button')?.focus(),0);return overlay;}
 function closeDialog(){$('.dialog-overlay')?.remove();}
-// Experimental local prototype. Existing flat catalog documents intentionally fail extraction.
+// Experimental local prototype. Existing user documents are never migrated automatically.
 if (localStorage.getItem('xrs.ai-review.experimental') === 'enabled') {
   const trigger=document.createElement('button');
   trigger.className='btn';trigger.textContent='AI Review';trigger.id='ai-review-open';
   document.querySelector('.top-actions')?.append(trigger);
   const tracks=new TrackChangesEngine();
   trigger.onclick=()=>{
-    const d=dialog('AI Review', '<label>Режим <select id="ai-mode"><option value="local">Локальный ИИ (mock)</option><option value="cloud" disabled>Облачный ИИ (отключён)</option></select></label><p>Экспериментальный режим. Правки применяются только после решения врача.</p><div id="ai-results"></div>', '<button class="btn" data-close>Закрыть</button><button class="btn primary" id="ai-check">Проверить протокол</button>');
+    const stored=read<unknown>('xrs.ai-review.categories.v1',reviewCategories.map(([id])=>id));
+    const categories=new Set<ReviewCategory>((Array.isArray(stored)?stored:reviewCategories.map(([id])=>id)).filter((id):id is ReviewCategory=>reviewCategories.some(([known])=>known===id)));
+    const choices=reviewCategories.map(([id,label])=>`<label><input type="checkbox" data-ai-category="${id}" ${categories.has(id)?'checked':''}> ${label}</label>`).join('');
+    const d=dialog('AI Review', `<label>Режим <select id="ai-mode"><option value="local">Локальный ИИ (mock)</option><option value="cloud" disabled>Облачный ИИ (отключён)</option></select></label><fieldset><legend>Категории проверки</legend>${choices}</fieldset><p>Врач принимает каждую правку отдельно. Данные остаются на этом компьютере.</p><div id="ai-results"></div>`, '<button class="btn" data-close>Закрыть</button><button class="btn primary" id="ai-check">Проверить протокол</button>');
+    d.querySelectorAll<HTMLInputElement>('[data-ai-category]').forEach(input=>input.onchange=()=>{
+      const selected=[...d.querySelectorAll<HTMLInputElement>('[data-ai-category]:checked')].map(el=>el.dataset.aiCategory!);
+      try{localStorage.setItem('xrs.ai-review.categories.v1',JSON.stringify(selected));}catch{toast('Не удалось сохранить категории проверки.',true);}
+    });
     d.querySelector<HTMLButtonElement>('#ai-check')!.onclick=async()=>{
       const output=d.querySelector<HTMLElement>('#ai-results')!;
       output.textContent='Проверка…';
       try {
         const reportId=activeReportId;
-        const result=await new ReviewEngine().review(json());
-        if(reportId!==activeReportId){output.textContent='Вкладка изменилась. Повторите проверку.';return;}
+        const snapshot=JSON.stringify(json());
+        const selected=new Set<ReviewCategory>([...d.querySelectorAll<HTMLInputElement>('[data-ai-category]:checked')].map(el=>el.dataset.aiCategory as ReviewCategory));
+        const result=await new ReviewEngine().review(json(),selected);
+        if(reportId!==activeReportId||snapshot!==JSON.stringify(json())){output.textContent='Документ изменился. Повторите проверку.';return;}
         tracks.set(reportId,result.suggestions);
         output.replaceChildren();
         if(!result.suggestions.length)output.textContent='Замечаний не найдено.';
         for(const item of result.suggestions){
           const row=document.createElement('div');row.className='notice';
-          const title=document.createElement('p');title.textContent=`${item.category}: ${item.explanation}`;
+          const title=document.createElement('p');title.textContent=`${reviewCategories.find(([id])=>id===categoryGroup(item.category))?.[1]??item.category}: ${item.explanation}`;
           const excerpt=document.createElement('p');excerpt.textContent=`Фрагмент: ${item.original || '(позиция вставки)'} → ${item.proposed || '(без замены)'}`;
+          const show=document.createElement('button');show.className='btn small';show.textContent='Показать в тексте';
+          show.onclick=()=>{if(activeReportId!==reportId){toast('Откройте вкладку проверенного документа.',true);return;}try{highlightReviewSuggestion(editor,item,result.blocks);}catch{toast('Фрагмент изменился или требует ручной проверки.',true);}};
           const reject=document.createElement('button');reject.className='btn small';reject.textContent='Отклонить';
-          reject.onclick=()=>{tracks.reject(reportId,item.id);row.remove();};
-          const accept=document.createElement('button');accept.className='btn small';accept.textContent='Принять';accept.disabled=true;accept.title='Применение к редактору требует структурных границ и интеграции с историей';
-          row.append(title,excerpt,accept,reject);output.append(row);
+          reject.onclick=()=>{try{tracks.reject(reportId,item.id);row.remove();}catch{toast('Предложение уже рассмотрено.',true);}};
+          const accept=document.createElement('button');accept.className='btn small';accept.textContent='Принять';accept.disabled=item.operation==='comment';
+          accept.onclick=()=>{if(activeReportId!==reportId){toast('Откройте вкладку проверенного документа.',true);return;}try{applyReviewSuggestion(editor,item,result.blocks);tracks.markAccepted(reportId,item.id);row.remove();}catch{toast('Правка устарела или затрагивает сложное форматирование. Проверьте текст вручную.',true);}};
+          row.append(title,excerpt,show,accept,reject);output.append(row);
         }
       }catch { output.textContent='Проверка заблокирована: границы блоков не подтверждены или возможны персональные данные.'; }
     };

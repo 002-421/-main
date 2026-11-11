@@ -9,27 +9,41 @@ export type Suggestion = {
   from: number; to: number; state: 'pending' | 'accepted' | 'rejected';
 };
 export type Finding = Omit<Suggestion, 'id' | 'state'>;
+export const reviewCategories = [
+  ['spelling', 'Орфография'], ['punctuation', 'Пунктуация'],
+  ['style', 'Стиль и грамматика'], ['terminology', 'Медицинская терминология'],
+  ['consistency', 'Согласованность описания и заключения'], ['clinical', 'Клиническая логика'],
+] as const;
+export type ReviewCategory = typeof reviewCategories[number][0];
+export function categoryGroup(category: string): ReviewCategory | null {
+  if (category === 'template') return 'style';
+  if (['side', 'level', 'size'].includes(category)) return 'consistency';
+  return reviewCategories.find(([id]) => id === category)?.[0] ?? null;
+}
 
 const allowed = new Set<ReviewBlockId>(['description', 'conclusion']);
-const safeNodes = new Set(['reportSection', 'paragraph', 'heading', 'text', 'bulletList', 'orderedList', 'listItem', 'blockquote']);
+const safeNodes = new Set(['reportSection', 'paragraph', 'heading', 'text', 'bulletList', 'orderedList', 'listItem', 'blockquote', 'horizontalRule', 'hardBreak', 'table', 'tableRow', 'tableCell', 'tableHeader']);
 
-function plain(node: RichNode): string {
+export function reviewPlain(node: RichNode): string {
   if (!safeNodes.has(node.type)) throw new Error('Неоднозначная структура блока');
   if (node.type === 'text') return node.text ?? '';
+  if (node.type === 'horizontalRule') return '';
+  if (node.type === 'hardBreak') return '\n';
   if (!node.content) return '';
   const separator = ['paragraph', 'heading', 'listItem'].includes(node.type) ? '' : '\n';
-  return node.content.map(plain).join(separator);
+  return node.content.map(reviewPlain).join(separator);
 }
 
 export class ReportBlockExtractor {
   extract(doc: RichNode): ReviewBlocks {
     if (doc.type !== 'doc' || !Array.isArray(doc.content)) throw new Error('Неизвестный формат документа');
-    const sections = doc.content;
-    if (sections.length !== 4 || sections.some(n => n.type !== 'reportSection')) throw new Error('Границы описания и заключения не подтверждены');
+    const sections = doc.content.slice(0, 4);
+    const tail = doc.content.slice(4);
+    if (sections.length !== 4 || sections.some(n => n.type !== 'reportSection') || tail.some(n => n.type !== 'paragraph' || reviewPlain(n).trim())) throw new Error('Границы описания и заключения не подтверждены');
     const ids = sections.map(n => n.attrs?.id);
     if (ids.join('|') !== 'header|description|conclusion|signature') throw new Error('Границы описания и заключения не подтверждены');
-    const description = plain(sections[1]).trim();
-    const conclusion = plain(sections[2]).trim();
+    const description = reviewPlain(sections[1]).trim();
+    const conclusion = reviewPlain(sections[2]).trim();
     if (!description || !conclusion) throw new Error('Пустой разрешённый блок');
     return { description, conclusion };
   }
@@ -78,18 +92,22 @@ export class ConsistencyEngine {
 }
 
 export interface AIProvider { review(blocks: ReviewBlocks): Promise<Finding[]>; }
-export class MockAIProvider implements AIProvider { async review(_blocks: ReviewBlocks): Promise<Finding[]> { return []; } }
+export class MockAIProvider implements AIProvider {
+  private readonly findings: Finding[];
+  constructor(findings: Finding[] = []) { this.findings = findings; }
+  async review(_blocks: ReviewBlocks): Promise<Finding[]> { return structuredClone(this.findings); }
+}
 export class LocalAIProvider implements AIProvider { async review(_blocks: ReviewBlocks): Promise<Finding[]> { throw new Error('Локальная модель ещё не подключена'); } }
 export class CloudAIProvider implements AIProvider { async review(_blocks: ReviewBlocks): Promise<Finding[]> { throw new Error('Облачный режим отключён в XRS-AI-01'); } }
 
 export class ReviewEngine {
   private readonly provider: AIProvider;
   constructor(provider: AIProvider = new MockAIProvider()) { this.provider = provider; }
-  async review(doc: RichNode): Promise<{ blocks: ReviewBlocks; suggestions: Suggestion[] }> {
+  async review(doc: RichNode, categories: ReadonlySet<ReviewCategory> = new Set(reviewCategories.map(([id]) => id))): Promise<{ blocks: ReviewBlocks; suggestions: Suggestion[] }> {
     const blocks = new ReportBlockExtractor().extract(doc);
     new PrivacyGuard().check(blocks);
     const findings = [...new TemplateValidator().validate(blocks), ...new ConsistencyEngine().validate(blocks), ...await this.provider.review(blocks)];
-    const suggestions = findings.filter(f => allowed.has(f.blockId) && Number.isInteger(f.from) && Number.isInteger(f.to) && f.from >= 0 && f.to <= blocks[f.blockId].length && f.from <= f.to && blocks[f.blockId].slice(f.from, f.to) === f.original).map(f => ({ ...f, id: crypto.randomUUID(), state: 'pending' as const }));
+    const suggestions = findings.filter(f => { const group=categoryGroup(f.category); return group && categories.has(group) && allowed.has(f.blockId) && Number.isInteger(f.from) && Number.isInteger(f.to) && f.from >= 0 && f.to <= blocks[f.blockId].length && f.from <= f.to && blocks[f.blockId].slice(f.from, f.to) === f.original; }).map(f => ({ ...f, id: crypto.randomUUID(), state: 'pending' as const }));
     return { blocks, suggestions };
   }
 }
@@ -99,6 +117,7 @@ export class TrackChangesEngine {
   set(tabId: string, suggestions: Suggestion[]): void { this.tabs.set(tabId, structuredClone(suggestions)); }
   list(tabId: string): Suggestion[] { return structuredClone(this.tabs.get(tabId) ?? []); }
   reject(tabId: string, id: string): void { this.changeState(tabId, id, 'rejected'); }
+  markAccepted(tabId: string, id: string): void { const item=this.get(tabId,id); if(item.state!=='pending')throw new Error('Правка уже рассмотрена'); item.state='accepted'; }
   accept(tabId: string, id: string, blocks: ReviewBlocks): ReviewBlocks {
     const suggestion = this.get(tabId, id);
     if (suggestion.state !== 'pending' || !allowed.has(suggestion.blockId)) throw new Error('Правка недоступна');

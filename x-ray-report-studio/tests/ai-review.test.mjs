@@ -17,6 +17,10 @@ test('ambiguous, reordered and flat documents are blocked', () => {
   assert.throws(() => extractor.extract({ type: 'doc', content: [p('Описание'), p('Заключение')] }));
   const changed = doc(); changed.content[2].attrs.id = 'signature';
   assert.throws(() => extractor.extract(changed));
+  const withText = doc(); withText.content.push(p('Лишний текст после подписи'));
+  assert.throws(() => extractor.extract(withText));
+  const withEmptyTail = doc(); withEmptyTail.content.push({type:'paragraph',content:[]});
+  assert.ok(extractor.extract(withEmptyTail).description);
 });
 test('template placeholders and conflicting sides, levels and sizes are found', () => {
   const blocks = { description: 'На уровне L4-L5 справа грыжа 5 мм. [[Заполнить]]', conclusion: 'На уровне L5-S1 слева грыжа 7 мм.' };
