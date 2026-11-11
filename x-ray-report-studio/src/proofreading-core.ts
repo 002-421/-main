@@ -1,5 +1,6 @@
 import nspell from 'nspell';
 import { morphologicalIssues } from './morphological-grammar.ts';
+import { medicalLexicon } from './medical-lexicon.ts';
 
 export type ProofIssue = {
   id: string;
@@ -203,10 +204,12 @@ function grammarIssues(text: string): ProofIssue[] {
 export function createRussianChecker(aff: string, dic: string, englishAff = '', englishDic = '') {
   const spell = nspell(aff, dic);
   const latinSpell = englishAff && englishDic ? nspell(englishAff, englishDic) : null;
-  for (const word of medicalWords()) spell.add(word);
+  for (const word of [...medicalWords(), ...medicalLexicon]) spell.add(word);
   const spellingCache = new Map<string, { correct: boolean; suggestions: string[] }>();
-  return async function checkRussian(text: string, personalWords: string[] = []): Promise<ProofIssue[]> {
-    const issues = [...grammarIssues(text), ...await morphologicalIssues(text)];
+  return async function checkRussian(text: string, personalWords: string[] = [], signal?: AbortSignal): Promise<ProofIssue[]> {
+    signal?.throwIfAborted();
+    const issues = [...grammarIssues(text), ...await morphologicalIssues(text, signal)];
+    signal?.throwIfAborted();
     const personal = new Set(personalWords.filter(w => typeof w === 'string').map(normalize));
     let examined = 0;
     let suggested = 0;
@@ -224,7 +227,7 @@ export function createRussianChecker(aff: string, dic: string, englishAff = '', 
       if (issues.length >= MAX_PROOF_ISSUES) break;
       const word = match[0];
       if (word.length < 3 || abbreviation(word) || personal.has(normalize(word))) continue;
-      if (++examined % 24 === 0) await pause();
+      if (++examined % 24 === 0) { await pause(); signal?.throwIfAborted(); }
       let result = spellingCache.get(word);
       if (!result) {
         const isCorrect = correct(word);
@@ -250,7 +253,7 @@ export function createRussianChecker(aff: string, dic: string, englishAff = '', 
       if (issues.length >= MAX_PROOF_ISSUES) break;
       const word = match[0];
       if (word.length < 3 || abbreviation(word) || personal.has(normalize(word))) continue;
-      if (++examined % 24 === 0) await pause();
+      if (++examined % 24 === 0) { await pause(); signal?.throwIfAborted(); }
       let result = spellingCache.get(`en:${word}`);
       if (!result) {
         const isCorrect = correct(word, true);
@@ -265,6 +268,7 @@ export function createRussianChecker(aff: string, dic: string, englishAff = '', 
       if (issues.some(issue => issue.start < end && issue.end > start)) continue;
       issues.push({ id: `spelling.en.${start}.${end}`, start, end, text: word, kind: 'spelling', message: 'Слово не найдено в английском словаре. Проверьте написание или добавьте термин в личный словарь.', suggestions: result.suggestions });
     }
+    signal?.throwIfAborted();
     return issues.sort((a, b) => a.start - b.start || a.end - b.end).slice(0, MAX_PROOF_ISSUES);
   };
 }

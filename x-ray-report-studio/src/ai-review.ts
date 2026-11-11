@@ -7,6 +7,7 @@ export type Suggestion = {
   id: string; operation: Operation; blockId: ReviewBlockId; original: string;
   proposed: string; explanation: string; category: string; priority: 'low' | 'medium' | 'high';
   from: number; to: number; state: 'pending' | 'accepted' | 'rejected';
+  confidence?: 'high' | 'limited'; meaningRisk?: boolean;
 };
 export type Finding = Omit<Suggestion, 'id' | 'state'>;
 export const reviewCategories = [
@@ -91,22 +92,24 @@ export class ConsistencyEngine {
   }
 }
 
-export interface AIProvider { review(blocks: ReviewBlocks): Promise<Finding[]>; }
+export interface AIProvider { review(blocks: ReviewBlocks, signal?: AbortSignal): Promise<Finding[]>; }
 export class MockAIProvider implements AIProvider {
   private readonly findings: Finding[];
   constructor(findings: Finding[] = []) { this.findings = findings; }
   async review(_blocks: ReviewBlocks): Promise<Finding[]> { return structuredClone(this.findings); }
 }
-export class LocalAIProvider implements AIProvider { async review(_blocks: ReviewBlocks): Promise<Finding[]> { throw new Error('Локальная модель ещё не подключена'); } }
+export { LocalAIProvider } from './local-ai-provider.ts';
 export class CloudAIProvider implements AIProvider { async review(_blocks: ReviewBlocks): Promise<Finding[]> { throw new Error('Облачный режим отключён в XRS-AI-01'); } }
 
 export class ReviewEngine {
   private readonly provider: AIProvider;
   constructor(provider: AIProvider = new MockAIProvider()) { this.provider = provider; }
-  async review(doc: RichNode, categories: ReadonlySet<ReviewCategory> = new Set(reviewCategories.map(([id]) => id))): Promise<{ blocks: ReviewBlocks; suggestions: Suggestion[] }> {
+  async review(doc: RichNode, categories: ReadonlySet<ReviewCategory> = new Set(reviewCategories.map(([id]) => id)), signal?: AbortSignal): Promise<{ blocks: ReviewBlocks; suggestions: Suggestion[] }> {
+    signal?.throwIfAborted();
     const blocks = new ReportBlockExtractor().extract(doc);
     new PrivacyGuard().check(blocks);
-    const findings = [...new TemplateValidator().validate(blocks), ...new ConsistencyEngine().validate(blocks), ...await this.provider.review(blocks)];
+    const findings = [...new TemplateValidator().validate(blocks), ...new ConsistencyEngine().validate(blocks), ...await this.provider.review(blocks, signal)];
+    signal?.throwIfAborted();
     const suggestions = findings.filter(f => { const group=categoryGroup(f.category); return group && categories.has(group) && allowed.has(f.blockId) && Number.isInteger(f.from) && Number.isInteger(f.to) && f.from >= 0 && f.to <= blocks[f.blockId].length && f.from <= f.to && blocks[f.blockId].slice(f.from, f.to) === f.original; }).map(f => ({ ...f, id: crypto.randomUUID(), state: 'pending' as const }));
     return { blocks, suggestions };
   }

@@ -9,7 +9,7 @@ const prepareInlineDocument = (doc: RichNode, trackOriginal = true) => prepareIn
 import packageInfo from '../package.json' with { type: 'json' };
 import { EditorState, TextSelection } from '@tiptap/pm/state';
 import { history, redoDepth, undoDepth } from '@tiptap/pm/history';
-import { ReviewEngine, TrackChangesEngine, reviewCategories, categoryGroup, type ReviewCategory } from './ai-review';
+import { ReviewEngine, TrackChangesEngine, LocalAIProvider, reviewCategories, categoryGroup, type ReviewCategory } from './ai-review';
 import { applyReviewSuggestion, highlightReviewSuggestion } from './ai-review-editor';
 import { structurePreparedBuiltin } from './ai-review-structure';
 import { planManualMigration, createMigrationBackup, readMigrationBackup, migrationBackupKeys, type ManualBoundaries } from './ai-review-migration';
@@ -305,22 +305,32 @@ if (localStorage.getItem('xrs.ai-review.experimental') === 'enabled') {
   migrateButton.onclick=showMigration;
   const tracks=new TrackChangesEngine();
   trigger.onclick=()=>{
-    const stored=read<unknown>('xrs.ai-review.categories.v1',reviewCategories.map(([id])=>id));
-    const categories=new Set<ReviewCategory>((Array.isArray(stored)?stored:reviewCategories.map(([id])=>id)).filter((id):id is ReviewCategory=>reviewCategories.some(([known])=>known===id)));
-    const choices=reviewCategories.map(([id,label])=>`<label><input type="checkbox" data-ai-category="${id}" ${categories.has(id)?'checked':''}> ${label}</label>`).join('');
-    const d=dialog('AI Review', `<label>Режим <select id="ai-mode"><option value="local">Локальный ИИ (mock)</option><option value="cloud" disabled>Облачный ИИ (отключён)</option></select></label><fieldset><legend>Категории проверки</legend>${choices}</fieldset><p>Врач принимает каждую правку отдельно. Данные остаются на этом компьютере.</p><div id="ai-results"></div>`, '<button class="btn" data-close>Закрыть</button><button class="btn primary" id="ai-check">Проверить протокол</button>');
+    const available=new Set<ReviewCategory>(['spelling','punctuation','style']);
+    const stored=read<unknown>('xrs.ai-review.categories.v1',[...available]);
+    const categories=new Set<ReviewCategory>((Array.isArray(stored)?stored:[...available]).filter((id):id is ReviewCategory=>available.has(id as ReviewCategory)));
+    const choices=reviewCategories.map(([id,label])=>`<label><input type="checkbox" data-ai-category="${id}" ${categories.has(id)?'checked':''} ${available.has(id)?'':'disabled'}> ${label}${available.has(id)?'':' (пока недоступно)'}</label>`).join('');
+    const d=dialog('AI Review', `<label>Режим <select id="ai-mode"><option value="local">Локальная проверка</option><option value="cloud" disabled>Облачный ИИ (отключён)</option></select></label><fieldset><legend>Категории проверки</legend>${choices}</fieldset><p>Локальные правила находят только часть ошибок и не оценивают клиническую точность. Медицински значимые варианты показаны как замечания без применяемой правки. Все данные остаются на этом компьютере; каждую правку подтверждает врач.</p><div id="ai-results"></div>`, '<button class="btn" data-close>Закрыть</button><button class="btn" id="ai-cancel" disabled>Отменить проверку</button><button class="btn primary" id="ai-check">Проверить протокол</button>');
+    let currentCheck:AbortController|undefined;
+    const checkButton=d.querySelector<HTMLButtonElement>('#ai-check')!;
+    const cancelButton=d.querySelector<HTMLButtonElement>('#ai-cancel')!;
+    cancelButton.onclick=()=>currentCheck?.abort();
+    d.querySelector<HTMLButtonElement>('[data-close]')?.addEventListener('click',()=>currentCheck?.abort());
     d.querySelectorAll<HTMLInputElement>('[data-ai-category]').forEach(input=>input.onchange=()=>{
       const selected=[...d.querySelectorAll<HTMLInputElement>('[data-ai-category]:checked')].map(el=>el.dataset.aiCategory!);
       try{localStorage.setItem('xrs.ai-review.categories.v1',JSON.stringify(selected));}catch{toast('Не удалось сохранить категории проверки.',true);}
     });
-    d.querySelector<HTMLButtonElement>('#ai-check')!.onclick=async()=>{
+    checkButton.onclick=async()=>{
       const output=d.querySelector<HTMLElement>('#ai-results')!;
       output.textContent='Проверка…';
+      currentCheck?.abort();currentCheck=new AbortController();
+      const signal=currentCheck.signal;
+      checkButton.disabled=true;cancelButton.disabled=false;
       try {
         const reportId=activeReportId;
         const snapshot=JSON.stringify(json());
         const selected=new Set<ReviewCategory>([...d.querySelectorAll<HTMLInputElement>('[data-ai-category]:checked')].map(el=>el.dataset.aiCategory as ReviewCategory));
-        const result=await new ReviewEngine().review(json(),selected);
+        const result=await new ReviewEngine(new LocalAIProvider()).review(json(),selected,signal);
+        signal.throwIfAborted();
         if(reportId!==activeReportId||snapshot!==JSON.stringify(json())){output.textContent='Документ изменился. Повторите проверку.';return;}
         tracks.set(reportId,result.suggestions);
         output.replaceChildren();
@@ -329,15 +339,17 @@ if (localStorage.getItem('xrs.ai-review.experimental') === 'enabled') {
           const row=document.createElement('div');row.className='notice';
           const title=document.createElement('p');title.textContent=`${reviewCategories.find(([id])=>id===categoryGroup(item.category))?.[1]??item.category}: ${item.explanation}`;
           const excerpt=document.createElement('p');excerpt.textContent=`Фрагмент: ${item.original || '(позиция вставки)'} → ${item.proposed || '(без замены)'}`;
+          const safety=document.createElement('p');safety.textContent=`${item.meaningRisk?'Возможное изменение медицинского смысла; только ручная проверка.':'Медицинский смысл не проверен.'} Уверенность: ${item.confidence==='high'?'высокая для локального правила':'ограниченная'}.`;
           const show=document.createElement('button');show.className='btn small';show.textContent='Показать в тексте';
           show.onclick=()=>{if(activeReportId!==reportId){toast('Откройте вкладку проверенного документа.',true);return;}try{highlightReviewSuggestion(editor,item,result.blocks,reportId,activeReportId);}catch{toast('Фрагмент изменился или требует ручной проверки.',true);}};
           const reject=document.createElement('button');reject.className='btn small';reject.textContent='Отклонить';
           reject.onclick=()=>{try{tracks.reject(reportId,item.id);row.remove();}catch{toast('Предложение уже рассмотрено.',true);}};
           const accept=document.createElement('button');accept.className='btn small';accept.textContent='Принять';accept.disabled=item.operation==='comment';
           accept.onclick=()=>{if(activeReportId!==reportId){toast('Откройте вкладку проверенного документа.',true);return;}try{applyReviewSuggestion(editor,item,result.blocks,reportId,activeReportId);tracks.markAccepted(reportId,item.id);row.remove();}catch{toast('Правка устарела или затрагивает сложное форматирование. Проверьте текст вручную.',true);}};
-          row.append(title,excerpt,show,accept,reject);output.append(row);
+          row.append(title,excerpt,safety,show,accept,reject);output.append(row);
         }
-      }catch { output.textContent='Проверка заблокирована: границы блоков не подтверждены или возможны персональные данные.'; }
+      }catch (error) { output.textContent=signal.aborted?'Проверка отменена.':'Проверка заблокирована: границы блоков не подтверждены, возможны персональные данные или анализатор недоступен.'; }
+      finally { if(currentCheck?.signal===signal){currentCheck=undefined;checkButton.disabled=false;cancelButton.disabled=true;} }
     };
   };
 }
