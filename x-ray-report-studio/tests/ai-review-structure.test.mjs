@@ -16,7 +16,7 @@ const prepared = id => justifyDescription(prepareInlineDocument(initializeReport
 
 test('all 55 bundled MRI templates receive audited sections without changing nodes or formatting', () => {
   assert.equal(source.templates.length, 55);
-  assert.equal(Object.keys(boundaries).length, 55);
+  assert.equal(Object.keys(boundaries).length, 113);
   for (const template of source.templates) {
     const original = prepared(template.id);
     const snapshot = structuredClone(original);
@@ -30,9 +30,18 @@ test('all 55 bundled MRI templates receive audited sections without changing nod
   }
 });
 
-test('all 58 CT templates are inventoried and remain blocked pending audited boundaries', () => {
+test('all 58 CT templates receive audited boundaries without changing nested nodes or formatting', () => {
   assert.equal(ctSource.templates.length, 58);
-  for (const template of ctSource.templates) assert.throws(() => structurePreparedBuiltin(template.id, prepared(template.id)));
+  for (const template of ctSource.templates) {
+    const original=prepared(template.id), snapshot=structuredClone(original);
+    const structured=structurePreparedBuiltin(template.id,original);
+    assert.deepEqual(structured.content.map(x=>x.attrs.id),['header','description','conclusion','signature'],template.id);
+    assert.deepEqual(structured.content.flatMap(x=>x.content),snapshot.content,template.id);
+    assert.deepEqual(original,snapshot,template.id);
+    const blocks=new ReportBlockExtractor().extract(structured);
+    assert.ok(blocks.description && blocks.conclusion,template.id);
+    assert.doesNotMatch(JSON.stringify(blocks),/Ф\.И\.О\. пациента|Дата рождения|Врач(?:-рентгенолог)?:|дд\.мм\.гггг/,template.id);
+  }
 });
 
 test('changed and user-authored documents require manual review; backup is an exact copy', () => {
@@ -50,4 +59,10 @@ test('structured MRI document round-trips through DOCX without losing sections o
   const blob = await exportDocx(original,{templateId:source.templates[0].id});
   const restored = await importOwnDocx(blob);
   assert.deepEqual(restored.doc, original);
+});
+test('structured CT document round-trips through DOCX without losing sections or formatting', async () => {
+  const original=structurePreparedBuiltin(ctSource.templates[0].id,prepared(ctSource.templates[0].id));
+  const blob=await exportDocx(original,{templateId:ctSource.templates[0].id});
+  const restored=await importOwnDocx(blob);
+  assert.deepEqual(restored.doc,original);
 });
