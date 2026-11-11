@@ -373,7 +373,8 @@ if (-not $Library) {
         }
         $installRoots = @(Get-XrsInstallRoots)
         $result = New-XrsVerifiedBackup -ProfilePath $ProfilePath -DestinationRoot $DestinationRoot `
-            -DictionaryPath $DictionaryPath -Version $Version -TargetVersion $TargetVersion -InstallRoots $installRoots
+            -DictionaryPath $DictionaryPath -Version $Version -TargetVersion $TargetVersion `
+            -ReserveBytes $ReserveBytes -InstallRoots $installRoots
         Write-Host 'BACKUP VERIFIED' -ForegroundColor Green
         Write-Host ('Backup folder: ' + $result.Path)
         Write-Host ('Files verified: ' + $result.Files)
