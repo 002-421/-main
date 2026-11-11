@@ -5,7 +5,7 @@ from pathlib import Path
 from zipfile import ZIP_STORED, ZipFile
 
 from scripts.package_setup import ROOT, write_zip
-from scripts.verify_setup_package import verify_setup_package, write_candidate_manifest
+from scripts.verify_setup_package import compare_zip_contents, verify_setup_package, write_candidate_manifest
 
 
 class SetupPackageTests(unittest.TestCase):
@@ -42,6 +42,21 @@ class SetupPackageTests(unittest.TestCase):
     def test_rejects_version_mismatch(self):
         with self.assertRaisesRegex(ValueError, 'Expected version'):
             verify_setup_package(self.archive, self.source, '0.4.53')
+
+    def test_compares_archive_payloads_without_exposing_file_contents(self):
+        reference = self.root / 'reference.zip'
+        with ZipFile(reference, 'w') as archive:
+            archive.writestr('same.txt', 'same')
+            archive.writestr('changed.txt', 'old')
+            archive.writestr('removed.txt', 'gone')
+        candidate = self.root / 'candidate.zip'
+        with ZipFile(candidate, 'w') as archive:
+            archive.writestr('same.txt', 'same')
+            archive.writestr('changed.txt', 'new')
+            archive.writestr('added.txt', 'new')
+        self.assertEqual(compare_zip_contents(candidate, reference), {
+            'missing': ['removed.txt'], 'added': ['added.txt'], 'different': ['changed.txt']
+        })
 
     def test_writes_candidate_manifest_without_touching_canonical_manifest(self):
         output = self.root / 'latest-0.4.54-candidate.json'

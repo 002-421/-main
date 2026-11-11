@@ -63,6 +63,19 @@ def verify_setup_package(archive_path: Path, source_root: Path, expected_version
     return hashlib.sha256(archive_path.read_bytes()).hexdigest()
 
 
+def compare_zip_contents(candidate_path: Path, reference_path: Path) -> dict[str, list[str]]:
+    """Compare uncompressed ZIP entries to distinguish content from container differences."""
+    with ZipFile(candidate_path) as candidate, ZipFile(reference_path) as reference:
+        candidate_names = set(candidate.namelist())
+        reference_names = set(reference.namelist())
+        common = candidate_names & reference_names
+        return {
+            'missing': sorted(reference_names - candidate_names),
+            'added': sorted(candidate_names - reference_names),
+            'different': sorted(name for name in common if candidate.read(name) != reference.read(name)),
+        }
+
+
 def write_candidate_manifest(url: str, version: str, sha256: str, output: Path) -> None:
     parsed = urlparse(url)
     if parsed.scheme != 'https' or parsed.hostname not in ALLOWED_HOSTS:
@@ -82,9 +95,13 @@ def main() -> None:
     parser.add_argument('--version', required=True)
     parser.add_argument('--candidate-url')
     parser.add_argument('--manifest-out', type=Path)
+    parser.add_argument('--reference-zip', type=Path)
     args = parser.parse_args()
     digest = verify_setup_package(args.zip, args.source_electron, args.version)
     print(f'SETUP VERIFIED: version {args.version}, {args.zip.stat().st_size} bytes, SHA256 {digest}')
+    if args.reference_zip:
+        differences = compare_zip_contents(args.zip, args.reference_zip)
+        print('REFERENCE ENTRY COMPARISON: ' + json.dumps(differences, ensure_ascii=False, separators=(',', ':')))
     if args.candidate_url or args.manifest_out:
         if not args.candidate_url or not args.manifest_out:
             parser.error('--candidate-url and --manifest-out must be used together.')
