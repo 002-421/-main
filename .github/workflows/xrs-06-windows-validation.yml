@@ -65,8 +65,11 @@ jobs:
       - name: Verify backup command-line success message
         run: npm run test:preupdate-backup-cli-success
         shell: powershell
-      - name: Verify backup command-line failure message and cleanup
-        run: npm run test:preupdate-backup-cli-failure
+      - name: Verify backup command-line failure exit code
+        run: npm run test:preupdate-backup-cli-failure-exit
+        shell: powershell
+      - name: Verify backup command-line failure message
+        run: npm run test:preupdate-backup-cli-failure-output
         shell: powershell
       - name: Verify failed backup leaves no partial directory
         run: npm run test:preupdate-backup-cli-cleanup

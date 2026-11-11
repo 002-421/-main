@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('All', 'Core', 'CliSuccess', 'CliFailure', 'CliCleanup')]
+    [ValidateSet('All', 'Core', 'CliSuccess', 'CliFailureExit', 'CliFailureOutput', 'CliCleanup')]
     [string]$TestGroup = 'All'
 )
 
@@ -94,23 +94,30 @@ try {
     }
 
     if ($env:OS -eq 'Windows_NT' -and $TestGroup -ne 'Core') {
-        if ($TestGroup -ne 'CliFailure' -and $TestGroup -ne 'CliCleanup') {
+        if ($TestGroup -eq 'All' -or $TestGroup -eq 'CliSuccess') {
         $phase = 'verify successful command-line result'
         $powershell = Join-Path $PSHOME 'powershell.exe'
         $cliDestination = Join-Path $tempRoot 'cli-backups'
+        $expectedBackupDirectories = 0
         $cliOutput = & $powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
             -ProfilePath $profile -DestinationRoot $cliDestination -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') `
             -ReserveBytes 0 2>&1
         Assert-True ($LASTEXITCODE -eq 0 -and ($cliOutput -join "`n") -match 'BACKUP VERIFIED') 'The command-line success result was not reported.'
+        $expectedBackupDirectories = @(Get-ChildItem -LiteralPath $cliDestination -Directory -ErrorAction SilentlyContinue).Count
         }
-        if ($TestGroup -ne 'CliSuccess') {
+        if ($TestGroup -eq 'All' -or $TestGroup -in @('CliFailureExit', 'CliFailureOutput', 'CliCleanup')) {
         $phase = 'verify failed command-line result and absence of partial backup'
         $cliFailure = & $powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
             -ProfilePath $profile -DestinationRoot $cliDestination -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') `
-            -ReserveBytes ([long]::MaxValue) 2>&1
-        Assert-True ($LASTEXITCODE -ne 0 -and ($cliFailure -join "`n") -match 'BACKUP FAILED') 'The command-line failure result was not reported.'
+            -ReserveBytes 9000000000000 2>&1
+        if ($TestGroup -eq 'All' -or $TestGroup -eq 'CliFailureExit') {
+            Assert-True ($LASTEXITCODE -ne 0) 'The command-line failure result returned a success exit code.'
+        }
+        if ($TestGroup -eq 'All' -or $TestGroup -eq 'CliFailureOutput') {
+            Assert-True (($cliFailure -join "`n") -match 'BACKUP FAILED') 'The command-line BACKUP FAILED message was not reported.'
+        }
         if ($TestGroup -eq 'All' -or $TestGroup -eq 'CliCleanup') {
-            Assert-True (@(Get-ChildItem -LiteralPath $cliDestination -Directory -ErrorAction SilentlyContinue).Count -eq 0) 'A failed run left an incomplete backup folder.'
+            Assert-True (@(Get-ChildItem -LiteralPath $cliDestination -Directory -ErrorAction SilentlyContinue).Count -eq $expectedBackupDirectories) 'A failed run left an incomplete backup folder or changed an earlier backup.'
         }
         }
     }
