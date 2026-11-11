@@ -1,4 +1,10 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿[CmdletBinding()]
+param(
+    [ValidateSet('All', 'Core', 'Cli')]
+    [string]$TestGroup = 'All'
+)
+
+$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\XRS-PreUpdate-Backup.ps1'
@@ -41,6 +47,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $dictionaryRoot 'dictionary.json'), '["искусственный"]', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $publicRoot 'Documents\MRI Report Studio\dictionary.json'), '["синтетический"]', [Text.UTF8Encoding]::new($false))
 
+    if ($TestGroup -ne 'Cli') {
     $phase = 'create and verify first backup with Cyrillic paths'
     $backupOne = New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination `
         -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') -Version '0.4.53' -TargetVersion '0.4.54' `
@@ -82,8 +89,9 @@ try {
     else { New-Item -ItemType SymbolicLink -Path $junction -Target $junctionTarget | Out-Null }
     Assert-Fails { New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination -ReserveBytes 0 -InstallRoots @($appRoot) -ProcessList $noAppProcesses } 'A profile containing a link was accepted.'
     Remove-Item -LiteralPath $junction -Force
+    }
 
-    if ($env:OS -eq 'Windows_NT') {
+    if ($env:OS -eq 'Windows_NT' -and $TestGroup -ne 'Core') {
         $phase = 'verify successful command-line result'
         $powershell = Join-Path $PSHOME 'powershell.exe'
         $cliDestination = Join-Path $tempRoot 'cli-backups'

@@ -60,8 +60,11 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error ($file + ': ' + $_.Message) }; exit 1 }
           }
-          npm run test:preupdate-backup
+          npm run test:preupdate-backup-core
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify backup command-line success and failure messages
+        run: npm run test:preupdate-backup-cli
+        shell: powershell
       - name: Windows install, shortcut, backup and rollback tests
         run: npm run test:windows-integration
       - name: Install Chromium for browser regressions
