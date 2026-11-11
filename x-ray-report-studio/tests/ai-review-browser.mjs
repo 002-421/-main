@@ -14,10 +14,13 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.locator('#ai-review-open').click();
   assert.equal(await page.locator('[data-ai-category]').count(),6);
+  for(const id of ['terminology','consistency','clinical'])assert.equal(await page.locator(`[data-ai-category="${id}"]`).isDisabled(),true);
+  assert.equal(await page.locator('#ai-mode').inputValue(),'local');
   await page.locator('[data-ai-category="punctuation"]').uncheck();
   await page.reload();
   await page.locator('#ai-review-open').click();
   assert.equal(await page.locator('[data-ai-category="punctuation"]').isChecked(),false);
+  assert.equal(await page.locator('[data-ai-category="terminology"]').isChecked(),false);
   await page.locator('#ai-check').click();
   await page.waitForFunction(()=>!document.querySelector('#ai-results')?.textContent?.includes('Проверка…'));
   const state=await page.evaluate(()=>({sections:JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1')||'{}').reports?.[0]?.doc?.content?.map(x=>x.attrs?.id),result:document.querySelector('#ai-results')?.textContent}));
