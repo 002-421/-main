@@ -2,8 +2,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from zipfile import ZipFile
+from zipfile import ZIP_STORED, ZipFile
 
+from scripts.package_setup import ROOT, write_zip
 from scripts.verify_setup_package import verify_setup_package, write_candidate_manifest
 
 
@@ -47,6 +48,19 @@ class SetupPackageTests(unittest.TestCase):
         url = 'https://github.com/002-421/-main/raw/refs/heads/codex/xrs-06-release-0.4.54/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip'
         write_candidate_manifest(url, '0.4.54', 'a' * 64, output)
         self.assertEqual(json.loads(output.read_text(encoding='utf-8'))['url'], url)
+
+    def test_stored_setup_zip_is_byte_stable(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            root = Path(directory)
+            package = root / 'Setup'
+            package.mkdir()
+            (package / 'file.txt').write_text('synthetic package data', encoding='utf-8')
+            first, second = root / 'first.zip', root / 'second.zip'
+            write_zip(package, first, ZIP_STORED)
+            write_zip(package, second, ZIP_STORED)
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+            with ZipFile(first) as archive:
+                self.assertEqual(archive.getinfo('Setup/file.txt').compress_type, ZIP_STORED)
 
 
 if __name__ == '__main__':

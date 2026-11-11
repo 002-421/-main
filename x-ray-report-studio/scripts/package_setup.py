@@ -4,7 +4,7 @@ Run `npm run build` first. No runtime is downloaded by this packaging script;
 Install.cmd downloads and verifies the official pinned Electron on Windows.
 """
 from pathlib import Path
-from zipfile import ZipFile, ZIP_DEFLATED, ZipInfo
+from zipfile import ZipFile, ZIP_DEFLATED, ZIP_STORED, ZipInfo
 import json
 import re
 import shutil
@@ -42,16 +42,17 @@ def collect_licenses():
     return ''.join(notices)
 
 
-def write_zip(directory, output):
+def write_zip(directory, output, compression=ZIP_DEFLATED):
     """Use stable timestamps and regular file permissions in the download ZIP."""
-    with ZipFile(output, 'w', ZIP_DEFLATED, compresslevel=9) as package:
+    compresslevel = 9 if compression == ZIP_DEFLATED else None
+    with ZipFile(output, 'w', compression, compresslevel=compresslevel) as package:
         for file in sorted(directory.rglob('*')):
             if file.is_file():
                 info = ZipInfo(file.relative_to(directory.parent).as_posix(),
                                date_time=(2026, 1, 1, 0, 0, 0))
-                info.compress_type = ZIP_DEFLATED
+                info.compress_type = compression
                 info.external_attr = 0o100644 << 16
-                package.writestr(info, file.read_bytes(), compresslevel=9)
+                package.writestr(info, file.read_bytes(), compresslevel=compresslevel)
     print(f'{output.relative_to(ROOT)}: {output.stat().st_size:,} bytes', flush=True)
 
 
@@ -141,7 +142,10 @@ def main():
     notices = collect_licenses()
     (setup / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8', newline='\n')
     setup_zip = DOWNLOADS / 'X-ray_Report_Studio_Windows_Setup.zip'
-    write_zip(setup, setup_zip)
+    # Store the setup archive without DEFLATE: zlib versions can produce
+    # different compressed bytes on Linux and Windows for identical files,
+    # which makes cross-run SHA256 comparisons unreliable.
+    write_zip(setup, setup_zip, ZIP_STORED)
     manifest = {
         'version': metadata['version'],
         'url': 'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip',
