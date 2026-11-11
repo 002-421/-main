@@ -15,7 +15,7 @@ const doc = (description, conclusion='Без особенностей.') => ({ty
 test('local checker converts spelling, punctuation and style into review findings', async () => {
   const text='Иследование  выполнено ,очаг очаг не выявлен.';
   const result=await new ReviewEngine(provider).review(doc(text),new Set(['spelling','punctuation','style']));
-  assert.ok(result.suggestions.some(s=>s.category==='spelling'&&s.original==='Иследование'));
+  assert.ok(result.suggestions.some(s=>s.category==='spelling'&&s.original==='Иследование'&&s.operation==='comment'&&s.meaningRisk));
   assert.ok(result.suggestions.some(s=>s.category==='punctuation'&&s.original==='  '));
   assert.ok(result.suggestions.some(s=>s.category==='style'&&s.original.toLowerCase().includes('очаг очаг')));
   for(const s of result.suggestions) assert.equal(text.slice(s.from,s.to),s.original);

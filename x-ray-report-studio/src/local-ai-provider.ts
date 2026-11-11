@@ -20,7 +20,9 @@ function convert(issue: ProofIssue, blockId: ReviewBlockId, text: string): Findi
   // Dictionary guesses and contextual grammar rules can change medical meaning.
   // A comment can show the candidate, but cannot be accepted as an edit.
   const context = text.slice(Math.max(0, issue.start - 18), Math.min(text.length, issue.end + 18));
-  const risk = meaningSensitive(context, proposed) || (issue.kind === 'spelling' && issue.suggestions.length !== 1) || rule === 'repeat' || rule === 'punctuation-repeat' || rule === 'morph';
+  // Even one Hunspell candidate is a spelling guess, not a medically verified
+  // replacement. Keep it visible, but require the physician to edit manually.
+  const risk = issue.kind === 'spelling' || meaningSensitive(context, proposed) || rule === 'repeat' || rule === 'punctuation-repeat' || rule === 'morph';
   const operation = !risk && proposed && proposed !== issue.text ? 'replace' : 'comment';
   return {
     operation, blockId, original: issue.text, proposed,
