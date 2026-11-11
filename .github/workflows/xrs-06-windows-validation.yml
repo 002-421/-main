@@ -120,7 +120,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path 'test-output' | Out-Null
-          $diagnostic = [ordered]@{ phase = 'start'; unittestExit = $null; packageExit = $null; verifyExit = $null; expectedSha256 = $null; actualSha256 = $null; bytes = $null; error = $null }
+          $diagnostic = [ordered]@{ phase = 'start'; unittestExit = $null; packageExit = $null; packageOutputTail = @(); verifyExit = $null; expectedSha256 = $null; actualSha256 = $null; bytes = $null; error = $null }
           function Save-CandidateDiagnostic([string]$errorMessage, [int]$exitCode) {
             $diagnostic.error = $errorMessage
             $diagnostic | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath 'test-output/setup-package-ci-diagnostics.json' -Encoding utf8
@@ -131,9 +131,10 @@ jobs:
           python -m unittest discover -s tests -p test_setup_package.py
           $diagnostic.unittestExit = $LASTEXITCODE
           if ($LASTEXITCODE -ne 0) { Save-CandidateDiagnostic 'Setup package verifier unit tests failed.' $LASTEXITCODE }
-          npm run package:setup
+          $packageOutput = & npm run package:setup 2>&1
           $diagnostic.packageExit = $LASTEXITCODE
-          if ($LASTEXITCODE -ne 0) { Save-CandidateDiagnostic 'package:setup failed on Windows.' $LASTEXITCODE }
+          $diagnostic.packageOutputTail = @($packageOutput | ForEach-Object { [string]$_ } | Select-Object -Last 12)
+          if ($LASTEXITCODE -ne 0) { Save-CandidateDiagnostic ('package:setup failed on Windows: ' + ($diagnostic.packageOutputTail -join ' | ')) $LASTEXITCODE }
           $candidateUrl = 'https://github.com/002-421/-main/raw/refs/heads/codex/xrs-06-release-0.4.54/x-ray-report-studio/downloads/xrs-06-candidate-0.4.54/downloads/X-ray_Report_Studio_Windows_Setup.zip'
           python scripts/verify_setup_package.py --zip downloads/X-ray_Report_Studio_Windows_Setup.zip --source-electron electron --version 0.4.54 --candidate-url $candidateUrl --manifest-out test-output/latest-0.4.54-candidate.json
           $diagnostic.verifyExit = $LASTEXITCODE
