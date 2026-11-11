@@ -1,0 +1,387 @@
+{
+  "abdomen-bp-zp-ku": {
+    "count": 30,
+    "headerEnd": 4,
+    "conclusionStart": 24,
+    "signatureStart": 27,
+    "doctorIndex": 28
+  },
+  "abdomen-bp-zp": {
+    "count": 27,
+    "headerEnd": 4,
+    "conclusionStart": 23,
+    "signatureStart": 24,
+    "doctorIndex": 25
+  },
+  "abdomen-bp-mrkhpg": {
+    "count": 28,
+    "headerEnd": 4,
+    "conclusionStart": 24,
+    "signatureStart": 25,
+    "doctorIndex": 26
+  },
+  "abdomen-bp": {
+    "count": 26,
+    "headerEnd": 4,
+    "conclusionStart": 22,
+    "signatureStart": 23,
+    "doctorIndex": 24
+  },
+  "abdomen-zp-ku": {
+    "count": 26,
+    "headerEnd": 4,
+    "conclusionStart": 22,
+    "signatureStart": 23,
+    "doctorIndex": 24
+  },
+  "abdomen-zp": {
+    "count": 25,
+    "headerEnd": 4,
+    "conclusionStart": 21,
+    "signatureStart": 22,
+    "doctorIndex": 23
+  },
+  "abdomen-mrkhpg": {
+    "count": 21,
+    "headerEnd": 4,
+    "conclusionStart": 18,
+    "signatureStart": 19,
+    "doctorIndex": 19
+  },
+  "head-gipofiz-ku": {
+    "count": 25,
+    "headerEnd": 4,
+    "conclusionStart": 21,
+    "signatureStart": 22,
+    "doctorIndex": 23
+  },
+  "head-gm-sd": {
+    "count": 48,
+    "headerEnd": 4,
+    "conclusionStart": 42,
+    "signatureStart": 45,
+    "doctorIndex": 46
+  },
+  "head-gm-altsgeimer": {
+    "count": 53,
+    "headerEnd": 4,
+    "conclusionStart": 39,
+    "signatureStart": 47,
+    "doctorIndex": 48
+  },
+  "head-gm-vsp": {
+    "count": 48,
+    "headerEnd": 4,
+    "conclusionStart": 37,
+    "signatureStart": 45,
+    "doctorIndex": 46
+  },
+  "head-gm-ku": {
+    "count": 44,
+    "headerEnd": 4,
+    "conclusionStart": 34,
+    "signatureStart": 41,
+    "doctorIndex": 42
+  },
+  "head-gm-mra-mrv": {
+    "count": 74,
+    "headerEnd": 4,
+    "conclusionStart": 59,
+    "signatureStart": 71,
+    "doctorIndex": 72
+  },
+  "head-gm-mra": {
+    "count": 61,
+    "headerEnd": 4,
+    "conclusionStart": 47,
+    "signatureStart": 58,
+    "doctorIndex": 59
+  },
+  "head-gm-nvk": {
+    "count": 55,
+    "headerEnd": 4,
+    "conclusionStart": 41,
+    "signatureStart": 50,
+    "doctorIndex": 51
+  },
+  "head-gm-parkinson": {
+    "count": 45,
+    "headerEnd": 4,
+    "conclusionStart": 34,
+    "signatureStart": 42,
+    "doctorIndex": 43
+  },
+  "head-gm-episindrom": {
+    "count": 45,
+    "headerEnd": 4,
+    "conclusionStart": 35,
+    "signatureStart": 42,
+    "doctorIndex": 43
+  },
+  "head-gm": {
+    "count": 43,
+    "headerEnd": 4,
+    "conclusionStart": 33,
+    "signatureStart": 40,
+    "doctorIndex": 41
+  },
+  "head-mra-gm": {
+    "count": 28,
+    "headerEnd": 4,
+    "conclusionStart": 20,
+    "signatureStart": 25,
+    "doctorIndex": 26
+  },
+  "head-mrv-gm": {
+    "count": 22,
+    "headerEnd": 4,
+    "conclusionStart": 18,
+    "signatureStart": 19,
+    "doctorIndex": 20
+  },
+  "head-okolonosovye-pazukhi": {
+    "count": 29,
+    "headerEnd": 4,
+    "conclusionStart": 24,
+    "signatureStart": 26,
+    "doctorIndex": 27
+  },
+  "head-orbity": {
+    "count": 25,
+    "headerEnd": 4,
+    "conclusionStart": 20,
+    "signatureStart": 22,
+    "doctorIndex": 23
+  },
+  "pelvis-npo-ku": {
+    "count": 28,
+    "headerEnd": 4,
+    "conclusionStart": 22,
+    "signatureStart": 25,
+    "doctorIndex": 26
+  },
+  "pelvis-npo": {
+    "count": 27,
+    "headerEnd": 4,
+    "conclusionStart": 21,
+    "signatureStart": 24,
+    "doctorIndex": 25
+  },
+  "pelvis-omt-zh-ku": {
+    "count": 27,
+    "headerEnd": 5,
+    "conclusionStart": 23,
+    "signatureStart": 24,
+    "doctorIndex": 25
+  },
+  "pelvis-omt-zh": {
+    "count": 26,
+    "headerEnd": 5,
+    "conclusionStart": 22,
+    "signatureStart": 23,
+    "doctorIndex": 24
+  },
+  "pelvis-omt-m-ku": {
+    "count": 35,
+    "headerEnd": 4,
+    "conclusionStart": 22,
+    "signatureStart": 30,
+    "doctorIndex": 31
+  },
+  "pelvis-omt-m": {
+    "count": 34,
+    "headerEnd": 4,
+    "conclusionStart": 21,
+    "signatureStart": 29,
+    "doctorIndex": 30
+  },
+  "other-molochnye-zhelezy": {
+    "count": 60,
+    "headerEnd": 4,
+    "conclusionStart": 35,
+    "signatureStart": 42,
+    "doctorIndex": 43
+  },
+  "other-mt-bedra": {
+    "count": 45,
+    "headerEnd": 4,
+    "conclusionStart": 40,
+    "signatureStart": 42,
+    "doctorIndex": 43
+  },
+  "other-mt-goleni": {
+    "count": 39,
+    "headerEnd": 4,
+    "conclusionStart": 34,
+    "signatureStart": 36,
+    "doctorIndex": 37
+  },
+  "other-mt-plecha": {
+    "count": 40,
+    "headerEnd": 4,
+    "conclusionStart": 35,
+    "signatureStart": 37,
+    "doctorIndex": 38
+  },
+  "other-mt-predplechya": {
+    "count": 42,
+    "headerEnd": 4,
+    "conclusionStart": 37,
+    "signatureStart": 39,
+    "doctorIndex": 40
+  },
+  "other-mtsh-ku": {
+    "count": 27,
+    "headerEnd": 4,
+    "conclusionStart": 22,
+    "signatureStart": 24,
+    "doctorIndex": 25
+  },
+  "other-plechevoe-spletenie": {
+    "count": 31,
+    "headerEnd": 4,
+    "conclusionStart": 24,
+    "signatureStart": 28,
+    "doctorIndex": 29
+  },
+  "other-sredostenie": {
+    "count": 24,
+    "headerEnd": 4,
+    "conclusionStart": 19,
+    "signatureStart": 21,
+    "doctorIndex": 22
+  },
+  "spine-gop-m": {
+    "count": 46,
+    "headerEnd": 4,
+    "conclusionStart": 41,
+    "signatureStart": 43,
+    "doctorIndex": 44
+  },
+  "spine-gop": {
+    "count": 44,
+    "headerEnd": 4,
+    "conclusionStart": 39,
+    "signatureStart": 41,
+    "doctorIndex": 42
+  },
+  "spine-kkop": {
+    "count": 25,
+    "headerEnd": 4,
+    "conclusionStart": 20,
+    "signatureStart": 22,
+    "doctorIndex": 23
+  },
+  "spine-pop-m": {
+    "count": 61,
+    "headerEnd": 4,
+    "conclusionStart": 56,
+    "signatureStart": 58,
+    "doctorIndex": 59
+  },
+  "spine-pop": {
+    "count": 59,
+    "headerEnd": 4,
+    "conclusionStart": 54,
+    "signatureStart": 56,
+    "doctorIndex": 57
+  },
+  "spine-shop-art": {
+    "count": 54,
+    "headerEnd": 4,
+    "conclusionStart": 47,
+    "signatureStart": 51,
+    "doctorIndex": 52
+  },
+  "spine-shop-m": {
+    "count": 50,
+    "headerEnd": 4,
+    "conclusionStart": 45,
+    "signatureStart": 47,
+    "doctorIndex": 48
+  },
+  "spine-shop": {
+    "count": 48,
+    "headerEnd": 4,
+    "conclusionStart": 43,
+    "signatureStart": 45,
+    "doctorIndex": 46
+  },
+  "joints-vnchs": {
+    "count": 32,
+    "headerEnd": 4,
+    "conclusionStart": 28,
+    "signatureStart": 29,
+    "doctorIndex": 30
+  },
+  "joints-gs": {
+    "count": 47,
+    "headerEnd": 4,
+    "conclusionStart": 38,
+    "signatureStart": 44,
+    "doctorIndex": 45
+  },
+  "joints-kist": {
+    "count": 20,
+    "headerEnd": 4,
+    "conclusionStart": 15,
+    "signatureStart": 17,
+    "doctorIndex": 18
+  },
+  "joints-kps": {
+    "count": 49,
+    "headerEnd": 4,
+    "conclusionStart": 42,
+    "signatureStart": 46,
+    "doctorIndex": 47
+  },
+  "joints-ks": {
+    "count": 46,
+    "headerEnd": 4,
+    "conclusionStart": 37,
+    "signatureStart": 43,
+    "doctorIndex": 44
+  },
+  "joints-lokot": {
+    "count": 23,
+    "headerEnd": 4,
+    "conclusionStart": 18,
+    "signatureStart": 20,
+    "doctorIndex": 21
+  },
+  "joints-luchezapyastnyi-sustav": {
+    "count": 21,
+    "headerEnd": 4,
+    "conclusionStart": 15,
+    "signatureStart": 18,
+    "doctorIndex": 19
+  },
+  "joints-ps": {
+    "count": 37,
+    "headerEnd": 4,
+    "conclusionStart": 27,
+    "signatureStart": 34,
+    "doctorIndex": 35
+  },
+  "joints-stopa": {
+    "count": 35,
+    "headerEnd": 4,
+    "conclusionStart": 27,
+    "signatureStart": 32,
+    "doctorIndex": 33
+  },
+  "joints-tbs-otdelno": {
+    "count": 36,
+    "headerEnd": 4,
+    "conclusionStart": 32,
+    "signatureStart": 33,
+    "doctorIndex": 34
+  },
+  "joints-tbs": {
+    "count": 24,
+    "headerEnd": 4,
+    "conclusionStart": 20,
+    "signatureStart": 21,
+    "doctorIndex": 22
+  }
+}
