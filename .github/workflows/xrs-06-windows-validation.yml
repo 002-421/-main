@@ -51,6 +51,17 @@ jobs:
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/install_windows.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+      - name: Validate and test pre-update backup utility with synthetic data
+        shell: powershell
+        run: |
+          foreach ($file in @('scripts/XRS-PreUpdate-Backup.ps1', 'tests/XRS-PreUpdate-Backup.Tests.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error ($file + ': ' + $_.Message) }; exit 1 }
+          }
+          npm run test:preupdate-backup
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Windows install, shortcut, backup and rollback tests
         run: npm run test:windows-integration
       - name: Install Chromium for browser regressions
