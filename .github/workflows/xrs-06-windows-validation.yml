@@ -119,17 +119,38 @@ jobs:
       - name: Build and verify Windows Setup ZIP candidate
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force -Path 'test-output' | Out-Null
+          $diagnostic = [ordered]@{ phase = 'start'; unittestExit = $null; packageExit = $null; verifyExit = $null; expectedSha256 = $null; actualSha256 = $null; bytes = $null; error = $null }
+          function Save-CandidateDiagnostic([string]$errorMessage, [int]$exitCode) {
+            $diagnostic.error = $errorMessage
+            $diagnostic | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath 'test-output/setup-package-ci-diagnostics.json' -Encoding utf8
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ('Setup package diagnostic: ' + ($diagnostic | ConvertTo-Json -Compress -Depth 4))
+            Write-Output ('::error title=Setup ZIP candidate::' + $errorMessage)
+            exit $exitCode
+          }
           python -m unittest discover -s tests -p test_setup_package.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $diagnostic.unittestExit = $LASTEXITCODE
+          if ($LASTEXITCODE -ne 0) { Save-CandidateDiagnostic 'Setup package verifier unit tests failed.' $LASTEXITCODE }
           npm run package:setup
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $diagnostic.packageExit = $LASTEXITCODE
+          if ($LASTEXITCODE -ne 0) { Save-CandidateDiagnostic 'package:setup failed on Windows.' $LASTEXITCODE }
           $candidateUrl = 'https://github.com/002-421/-main/raw/refs/heads/codex/xrs-06-release-0.4.54/x-ray-report-studio/downloads/xrs-06-candidate-0.4.54/downloads/X-ray_Report_Studio_Windows_Setup.zip'
           python scripts/verify_setup_package.py --zip downloads/X-ray_Report_Studio_Windows_Setup.zip --source-electron electron --version 0.4.54 --candidate-url $candidateUrl --manifest-out test-output/latest-0.4.54-candidate.json
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $diagnostic.verifyExit = $LASTEXITCODE
+          if (Test-Path -LiteralPath 'downloads/X-ray_Report_Studio_Windows_Setup.zip') {
+            $diagnostic.actualSha256 = (Get-FileHash 'downloads/X-ray_Report_Studio_Windows_Setup.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+            $diagnostic.bytes = (Get-Item 'downloads/X-ray_Report_Studio_Windows_Setup.zip').Length
+          }
+          if ($LASTEXITCODE -ne 0) { Save-CandidateDiagnostic 'Windows Setup ZIP structural or dependency validation failed.' $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath 'test-output/latest-0.4.54-candidate.json')) { Save-CandidateDiagnostic 'Verifier did not produce the candidate manifest.' 1 }
           $checkedInCandidate = Get-Content 'downloads/latest-0.4.54-candidate.json' -Raw | ConvertFrom-Json
           $builtCandidate = Get-Content 'test-output/latest-0.4.54-candidate.json' -Raw | ConvertFrom-Json
+          $diagnostic.expectedSha256 = [string]$checkedInCandidate.sha256
+          $diagnostic.phase = 'manifest-comparison'
+          $diagnostic | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath 'test-output/setup-package-ci-diagnostics.json' -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ('Setup package diagnostic: ' + ($diagnostic | ConvertTo-Json -Compress -Depth 4))
           if ($checkedInCandidate.version -ne $builtCandidate.version -or $checkedInCandidate.url -ne $builtCandidate.url -or $checkedInCandidate.sha256 -ne $builtCandidate.sha256) {
-            throw 'The checked-in inactive candidate manifest does not match the Windows-built Setup ZIP.'
+            Save-CandidateDiagnostic 'Checked-in candidate manifest does not match the Windows-built ZIP; compare expectedSha256 with actualSha256.' 1
           }
       - name: Upload Windows 0.4.54 Setup ZIP and inactive candidate manifest
         uses: actions/upload-artifact@v4
@@ -158,5 +179,6 @@ jobs:
             x-ray-report-studio/test-output/report-history-failure.json
             x-ray-report-studio/test-output/undo-scroll-failure.png
             x-ray-report-studio/test-output/undo-scroll-failure.json
+            x-ray-report-studio/test-output/setup-package-ci-diagnostics.json
           if-no-files-found: warn
           retention-days: 7
