@@ -55,6 +55,11 @@ def write_zip(directory, output):
     print(f'{output.relative_to(ROOT)}: {output.stat().st_size:,} bytes', flush=True)
 
 
+def normalized_text(path):
+    """Read text with universal newline handling for byte-stable ZIP output."""
+    return path.read_text(encoding='utf-8').replace('\r\n', '\n').replace('\r', '\n')
+
+
 def main():
     if not BUILD.is_file():
         raise RuntimeError('dist/index.html is missing. Run npm run build first.')
@@ -81,17 +86,23 @@ def main():
     setup = stage / 'X-ray Report Studio Setup'
     (setup / 'app/dist').mkdir(parents=True)
     (setup / 'app/electron').mkdir()
-    shutil.copy2(BUILD, setup / 'app/dist/index.html')
+    (setup / 'app/dist/index.html').write_text(normalized_text(BUILD), encoding='utf-8', newline='\n')
     shutil.copy2(ROOT / 'public/x-ray-report-studio.ico', setup / 'app/dist/x-ray-report-studio.ico')
     shutil.copy2(ROOT / 'node_modules/rcedit/bin/rcedit-x64.exe', setup / 'app/dist/rcedit-x64.exe')
-    for filename in ('main.cjs', 'preload.cjs', 'update-install.cjs', 'live-update.cjs', 'startup-diagnostics.cjs'):
-        shutil.copy2(ROOT / 'electron' / filename, setup / 'app/electron' / filename)
+    # Keep the packaged Electron app in sync with its local CommonJS modules.
+    # main.cjs and its transitive requires have grown over time; a fixed list
+    # silently produces an installer that builds successfully but cannot boot.
+    electron_sources = sorted((ROOT / 'electron').glob('*.cjs'))
+    if not electron_sources or not any(source.name == 'main.cjs' for source in electron_sources):
+        raise RuntimeError('Electron main-process modules are missing.')
+    for source in electron_sources:
+        (setup / 'app/electron' / source.name).write_text(normalized_text(source), encoding='utf-8', newline='\n')
     (setup / 'app/package.json').write_text(json.dumps({
         'name': metadata['name'], 'productName': 'X-ray Report Studio',
         'version': metadata['version'], 'main': 'electron/main.cjs', 'private': True,
-    }, indent=2) + '\n', encoding='utf-8')
-    shutil.copy2(ROOT / 'README_RU.txt', setup / 'README_RU.txt')
-    (setup / 'Install.ps1').write_text(installer, encoding='utf-8-sig')
+    }, indent=2) + '\n', encoding='utf-8', newline='\n')
+    (setup / 'README_RU.txt').write_text(normalized_text(ROOT / 'README_RU.txt'), encoding='utf-8', newline='\n')
+    (setup / 'Install.ps1').write_bytes(b'\xef\xbb\xbf' + installer.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\r\n').encode('utf-8'))
 
     # Use an inline command so running Install.cmd does not require changing
     # PowerShell ExecutionPolicy. Keep the readable .ps1 alongside it.
@@ -112,7 +123,7 @@ def main():
     if len(command.encode('ascii')) > 8000:
         raise RuntimeError('The inline installer exceeds the Windows command-line limit.')
     (setup / 'Install.cmd').write_bytes(command.encode('ascii'))
-    (setup / 'START_HERE_RU.txt').write_text(
+    start_here = (
         f'УСТАНОВКА X-RAY REPORT STUDIO {metadata["version"]}\n\n'
         '1. Распакуйте весь архив.\n'
         '2. Запустите Install.cmd двойным щелчком.\n'
@@ -125,10 +136,10 @@ def main():
         'При обновлении интерфейс сменится в открытом окне без перезапуска приложения. '
         'Изменения системной части вступят в силу при следующем запуске. '
         'Локальный рабочий черновик и настройки шаблонов сохраняются в профиле приложения.\n\n'
-        'Install.ps1 — читаемый исходник команды. Папку app нужно оставить рядом с Install.cmd.\n',
-        encoding='utf-8-sig')
+        'Install.ps1 — читаемый исходник команды. Папку app нужно оставить рядом с Install.cmd.\n')
+    (setup / 'START_HERE_RU.txt').write_bytes(b'\xef\xbb\xbf' + start_here.replace('\n', '\r\n').encode('utf-8'))
     notices = collect_licenses()
-    (setup / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8')
+    (setup / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8', newline='\n')
     setup_zip = DOWNLOADS / 'X-ray_Report_Studio_Windows_Setup.zip'
     write_zip(setup, setup_zip)
     manifest = {

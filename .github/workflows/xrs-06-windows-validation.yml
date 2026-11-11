@@ -93,6 +93,30 @@ jobs:
         run: npm run test:history-browser
       - name: Build isolated Windows 0.4.54 test kit
         run: npm run package:windows-test-kit
+      - name: Build and verify Windows Setup ZIP candidate
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p test_setup_package.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run package:setup
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $candidateUrl = 'https://github.com/002-421/-main/raw/refs/heads/codex/xrs-06-release-0.4.54/x-ray-report-studio/downloads/xrs-06-candidate-0.4.54/downloads/X-ray_Report_Studio_Windows_Setup.zip'
+          python scripts/verify_setup_package.py --zip downloads/X-ray_Report_Studio_Windows_Setup.zip --source-electron electron --version 0.4.54 --candidate-url $candidateUrl --manifest-out test-output/latest-0.4.54-candidate.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $checkedInCandidate = Get-Content 'downloads/latest-0.4.54-candidate.json' -Raw | ConvertFrom-Json
+          $builtCandidate = Get-Content 'test-output/latest-0.4.54-candidate.json' -Raw | ConvertFrom-Json
+          if ($checkedInCandidate.version -ne $builtCandidate.version -or $checkedInCandidate.url -ne $builtCandidate.url -or $checkedInCandidate.sha256 -ne $builtCandidate.sha256) {
+            throw 'The checked-in inactive candidate manifest does not match the Windows-built Setup ZIP.'
+          }
+      - name: Upload Windows 0.4.54 Setup ZIP and inactive candidate manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: XRS-06-Windows-0.4.54-Setup-Candidate
+          path: |
+            x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip
+            x-ray-report-studio/test-output/latest-0.4.54-candidate.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload isolated release candidate test kit
         uses: actions/upload-artifact@v4
         with:
