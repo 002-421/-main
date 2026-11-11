@@ -20,6 +20,19 @@ function Assert-Fails([scriptblock]$Action, [string]$Message) {
     if (-not $failed) { throw $Message }
 }
 
+function Invoke-BackupCli([string]$ScriptFile, [string]$ProfilePath, [string]$DestinationPath, [string]$DictionaryFile, [long]$ReserveBytes, [string]$OutputPrefix) {
+    $powershell = Join-Path $PSHOME 'powershell.exe'
+    $stdoutPath = $OutputPrefix + '.stdout.txt'
+    $stderrPath = $OutputPrefix + '.stderr.txt'
+    $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -ProfilePath "{1}" -DestinationRoot "{2}" -DictionaryPath "{3}" -ReserveBytes {4}' -f `
+        $ScriptFile, $ProfilePath, $DestinationPath, $DictionaryFile, $ReserveBytes
+    $process = Start-Process -FilePath $powershell -ArgumentList $arguments -PassThru -Wait -NoNewWindow `
+        -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { '' }
+    $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { '' }
+    return [pscustomobject]@{ ExitCode=$process.ExitCode; Output=($stdout + [Environment]::NewLine + $stderr) }
+}
+
 $tempRoot = Join-Path $env:TEMP ('XRS-Backup-Test-' + [guid]::NewGuid().ToString('N'))
 $profile = Join-Path $tempRoot 'профиль-искусственный'
 $dictionaryRoot = Join-Path $tempRoot 'общий-словарь'
@@ -94,27 +107,24 @@ try {
     }
 
     if ($env:OS -eq 'Windows_NT' -and $TestGroup -ne 'Core') {
-        if ($TestGroup -eq 'All' -or $TestGroup -eq 'CliSuccess') {
-        $phase = 'verify successful command-line result'
-        $powershell = Join-Path $PSHOME 'powershell.exe'
         $cliDestination = Join-Path $tempRoot 'cli-backups'
         $expectedBackupDirectories = 0
-        $cliOutput = & $powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
-            -ProfilePath $profile -DestinationRoot $cliDestination -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') `
-            -ReserveBytes 0 2>&1
-        Assert-True ($LASTEXITCODE -eq 0 -and ($cliOutput -join "`n") -match 'BACKUP VERIFIED') 'The command-line success result was not reported.'
+        if ($TestGroup -eq 'All' -or $TestGroup -eq 'CliSuccess') {
+        $phase = 'verify successful command-line result'
+        $cliSuccess = Invoke-BackupCli -ScriptFile $scriptPath -ProfilePath $profile -DestinationPath $cliDestination `
+            -DictionaryFile (Join-Path $dictionaryRoot 'dictionary.json') -ReserveBytes 0 -OutputPrefix (Join-Path $tempRoot 'cli-success')
+        Assert-True ($cliSuccess.ExitCode -eq 0 -and $cliSuccess.Output -match 'BACKUP VERIFIED') 'The command-line success result was not reported.'
         $expectedBackupDirectories = @(Get-ChildItem -LiteralPath $cliDestination -Directory -ErrorAction SilentlyContinue).Count
         }
         if ($TestGroup -eq 'All' -or $TestGroup -in @('CliFailureExit', 'CliFailureOutput', 'CliCleanup')) {
         $phase = 'verify failed command-line result and absence of partial backup'
-        $cliFailure = & $powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
-            -ProfilePath $profile -DestinationRoot $cliDestination -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') `
-            -ReserveBytes 9000000000000 2>&1
+        $cliFailure = Invoke-BackupCli -ScriptFile $scriptPath -ProfilePath $profile -DestinationPath $cliDestination `
+            -DictionaryFile (Join-Path $dictionaryRoot 'dictionary.json') -ReserveBytes 9000000000000 -OutputPrefix (Join-Path $tempRoot 'cli-failure')
         if ($TestGroup -eq 'All' -or $TestGroup -eq 'CliFailureExit') {
-            Assert-True ($LASTEXITCODE -ne 0) 'The command-line failure result returned a success exit code.'
+            Assert-True ($cliFailure.ExitCode -ne 0) 'The command-line failure result returned a success exit code.'
         }
         if ($TestGroup -eq 'All' -or $TestGroup -eq 'CliFailureOutput') {
-            Assert-True (($cliFailure -join "`n") -match 'BACKUP FAILED') 'The command-line BACKUP FAILED message was not reported.'
+            Assert-True ($cliFailure.Output -match 'BACKUP FAILED') 'The command-line BACKUP FAILED message was not reported.'
         }
         if ($TestGroup -eq 'All' -or $TestGroup -eq 'CliCleanup') {
             Assert-True (@(Get-ChildItem -LiteralPath $cliDestination -Directory -ErrorAction SilentlyContinue).Count -eq $expectedBackupDirectories) 'A failed run left an incomplete backup folder or changed an earlier backup.'
