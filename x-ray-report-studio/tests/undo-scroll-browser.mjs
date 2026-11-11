@@ -107,7 +107,10 @@ try{
  await page?.screenshot({path:path.join(output,'undo-scroll-failure.png'),fullPage:false}).catch(()=>{});
  const failureLine=String(error?.stack??'').match(/undo-scroll-browser\.mjs:(\d+):(\d+)/)?.[1]??null;
  const safeFailureMessage=String(error?.message??'Electron integration failure').split('\n',1)[0].split(/:\s*\{/)[0].slice(0,240);
- const diagnostic={errorName:error?.name||'Error',errorCode:error?.code||null,failureLine,safeFailureMessage,snapshot};
+ let transition=null;
+ const transitionText=String(error?.message??'').match(/:\s*(\{[\s\S]*\})$/)?.[1];
+ if(transitionText){try{const parsed=JSON.parse(transitionText);if(parsed&&typeof parsed==='object'&&parsed.before&&parsed.after)transition={before:parsed.before,after:parsed.after};}catch{/* Non-JSON assertion details are intentionally not copied into diagnostics. */}}
+ const diagnostic={errorName:error?.name||'Error',errorCode:error?.code||null,failureLine,safeFailureMessage,transition,snapshot};
  const annotation=JSON.stringify(diagnostic).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A');
  process.stdout.write(`::error title=Undo/Redo synthetic diagnostics::${annotation}\n`);
  await writeFile(path.join(output,'undo-scroll-failure.json'),JSON.stringify(diagnostic,null,2));
