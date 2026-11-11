@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('All', 'Core', 'CliSuccess', 'CliFailure')]
+    [ValidateSet('All', 'Core', 'CliSuccess', 'CliFailure', 'CliCleanup')]
     [string]$TestGroup = 'All'
 )
 
@@ -94,7 +94,7 @@ try {
     }
 
     if ($env:OS -eq 'Windows_NT' -and $TestGroup -ne 'Core') {
-        if ($TestGroup -ne 'CliFailure') {
+        if ($TestGroup -ne 'CliFailure' -and $TestGroup -ne 'CliCleanup') {
         $phase = 'verify successful command-line result'
         $powershell = Join-Path $PSHOME 'powershell.exe'
         $cliDestination = Join-Path $tempRoot 'cli-backups'
@@ -109,7 +109,9 @@ try {
             -ProfilePath $profile -DestinationRoot $cliDestination -DictionaryPath (Join-Path $dictionaryRoot 'dictionary.json') `
             -ReserveBytes ([long]::MaxValue) 2>&1
         Assert-True ($LASTEXITCODE -ne 0 -and ($cliFailure -join "`n") -match 'BACKUP FAILED') 'The command-line failure result was not reported.'
-        Assert-True (@(Get-ChildItem -LiteralPath $cliDestination -Directory -ErrorAction SilentlyContinue).Count -eq 0) 'A failed run left an incomplete backup folder.'
+        if ($TestGroup -eq 'All' -or $TestGroup -eq 'CliCleanup') {
+            Assert-True (@(Get-ChildItem -LiteralPath $cliDestination -Directory -ErrorAction SilentlyContinue).Count -eq 0) 'A failed run left an incomplete backup folder.'
+        }
         }
     }
 

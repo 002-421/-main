@@ -68,6 +68,9 @@ jobs:
       - name: Verify backup command-line failure message and cleanup
         run: npm run test:preupdate-backup-cli-failure
         shell: powershell
+      - name: Verify failed backup leaves no partial directory
+        run: npm run test:preupdate-backup-cli-cleanup
+        shell: powershell
       - name: Windows install, shortcut, backup and rollback tests
         run: npm run test:windows-integration
       - name: Install Chromium for browser regressions
