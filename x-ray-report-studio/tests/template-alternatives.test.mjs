@@ -26,6 +26,7 @@ test('three convexital descriptions and other confirmed brain variants are all y
   for (const index of group.indices) assert.ok(yellow(doc.content[index]) > 0, `paragraph ${index}`);
   const unrelated = doc.content.find(node => visible(node).startsWith('Срединные структуры не смещены'));
   assert.equal(yellow(unrelated), 0);
+  assert.equal(brainAlternativeGroups(doc, 'head-gm').some(item => item.structure === 'базальные цистерны'), false);
   assert.equal(brainAlternativeGroups(makeTemplateDocument('head-mra-gm'), 'head-mra-gm').length, 0);
   const knee = makeTemplateDocument('joints-ks');
   const kneeGroup = confirmedAlternativeGroups(knee, 'joints-ks').find(item => item.structure.includes('мениска'));
