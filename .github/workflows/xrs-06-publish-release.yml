@@ -2,6 +2,19 @@ name: XRS 0.4.54 release preflight (read-only)
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'preflight (default) or publish'
+        required: true
+        type: choice
+        default: preflight
+        options:
+          - preflight
+          - publish
+      confirmation:
+        description: 'For publish only, type PUBLISH-XRS-0.4.54'
+        required: false
+        type: string
 
 permissions:
   actions: read
@@ -82,4 +95,102 @@ jobs:
           assert hashlib.sha256(live_zip).hexdigest() == old_sha, 'Live 0.4.53 ZIP hash mismatch'
           print('PASS: source run, commit, artifact download, inner ZIP SHA/size, live 0.4.53 manifest and ZIP verified')
           print('READ-ONLY preflight only. No publish operation exists in this workflow.')
+          PY
+
+  publish:
+    if: ${{ inputs.mode == 'publish' && inputs.confirmation == 'PUBLISH-XRS-0.4.54' }}
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Checkout official update branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/mri-report-studio
+          persist-credentials: true
+      - name: Download exact Windows candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: XRS-06-Windows-0.4.54-Setup-Candidate
+          run-id: 43132409163
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/xrs-release-artifact
+      - name: Verify both versions and stage versioned ZIP plus backup manifest
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/xrs-release-artifact
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          b=pathlib.Path('x-ray-report-studio/downloads')
+          old=json.loads((b/'latest.json').read_text())
+          oldsha='959be76c8cb0db8cc2defd5b262b4914205de6d111c543a15c530519062289b0'
+          newsha='04ae2cd7745edb92e2c115ca8a620deb0f86152b281a4747eef656f91a768cc3'
+          sha=lambda x:hashlib.sha256(x).hexdigest()
+          assert old['version']=='0.4.53' and old['sha256']==oldsha
+          assert old['url']=='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip'
+          assert sha((b/'X-ray_Report_Studio_Windows_Setup.zip').read_bytes())==oldsha
+          matches=[p for p in pathlib.Path(os.environ['ARTIFACT_DIR']).rglob('*.zip') if p.stat().st_size==28975891 and sha(p.read_bytes())==newsha]
+          assert len(matches)==1,'Verified candidate not found'
+          new=b/'X-ray_Report_Studio_Windows_Setup-0.4.54.zip'
+          backup=b/'latest-0.4.53-before-0.4.54.json'
+          assert not new.exists() and not backup.exists(),'Existing release or backup: stop'
+          new.write_bytes(matches[0].read_bytes())
+          backup.write_bytes((b/'latest.json').read_bytes())
+          print('Old ZIP verified, new ZIP verified, old manifest backed up')
+          PY
+      - name: Publish new versioned ZIP without changing live manifest
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-0.4.54.zip x-ray-report-studio/downloads/latest-0.4.53-before-0.4.54.json
+          git commit -m 'release(xrs): stage verified 0.4.54 and backup 0.4.53 manifest'
+          git push origin HEAD:refs/heads/codex/mri-report-studio
+      - name: Verify new public ZIP before manifest activation
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,time,urllib.request
+          url='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-0.4.54.zip'
+          manifest='https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json'
+          expected='04ae2cd7745edb92e2c115ca8a620deb0f86152b281a4747eef656f91a768cc3'
+          ok=False
+          for i in range(12):
+              try:
+                  with urllib.request.urlopen(url+'?verify='+str(i),timeout=120) as r: data=r.read()
+                  if hashlib.sha256(data).hexdigest()==expected: ok=True; break
+              except Exception as e: print('Public ZIP not ready:',type(e).__name__)
+              time.sleep(10)
+          assert ok,'Public ZIP not verified; old manifest remains active'
+          with urllib.request.urlopen(manifest,timeout=60) as r: m=json.load(r)
+          assert m['version']=='0.4.53','Official manifest changed concurrently'
+          print('Public candidate verified, current manifest unchanged')
+          PY
+      - name: Activate 0.4.54 manifest
+        run: |
+          python3 - <<'PY'
+          import json,pathlib
+          p=pathlib.Path('x-ray-report-studio/downloads/latest.json')
+          assert json.loads(p.read_text())['version']=='0.4.53'
+          m={'version':'0.4.54','url':'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-0.4.54.zip','sha256':'04ae2cd7745edb92e2c115ca8a620deb0f86152b281a4747eef656f91a768cc3'}
+          p.write_text(json.dumps(m,indent=2)+'\n')
+          PY
+          git add x-ray-report-studio/downloads/latest.json
+          git commit -m 'release(xrs): activate verified 0.4.54 update manifest'
+          git push origin HEAD:refs/heads/codex/mri-report-studio
+      - name: Verify public 0.4.54 manifest
+        run: |
+          python3 - <<'PY'
+          import json,time,urllib.request
+          url='https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json'
+          ok=False
+          for i in range(12):
+              try:
+                  with urllib.request.urlopen(url+'?verify='+str(i),timeout=60) as r: m=json.load(r)
+                  if m['version']=='0.4.54' and m['sha256']=='04ae2cd7745edb92e2c115ca8a620deb0f86152b281a4747eef656f91a768cc3':ok=True;break
+              except Exception as e: print(type(e).__name__)
+              time.sleep(10)
+          assert ok,'Manifest propagation unconfirmed; inspect official branch immediately'
+          print('RELEASED 0.4.54; rollback manifest from latest-0.4.53-before-0.4.54.json; old ZIP retained')
           PY
