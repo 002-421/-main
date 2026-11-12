@@ -24,6 +24,7 @@ jobs:
           python3 - <<'PY'
           import hashlib, io, json, os, urllib.request, zipfile
           from urllib.error import HTTPError
+          from urllib.parse import urlsplit
           repo = os.environ['REPOSITORY']
           token = os.environ['GH_TOKEN']
           assert repo == '002-421/-main', 'Unexpected repository'
@@ -32,21 +33,36 @@ jobs:
           expected_sha = '04ae2cd7745edb92e2c115ca8a620deb0f86152b281a4747eef656f91a768cc3'
           old_sha = '959be76c8cb0db8cc2defd5b262b4914205de6d111c543a15c530519062289b0'
           manifest_url = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json'
+          class SafeRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+                  if redirected and urlsplit(req.full_url).hostname != urlsplit(newurl).hostname:
+                      redirected.remove_header('Authorization')
+                      redirected.remove_header('X-GitHub-Api-Version')
+                  return redirected
+          opener = urllib.request.build_opener(SafeRedirect)
           def get(url, auth=False):
               headers = {'User-Agent': 'xrs-release-preflight', 'Accept': 'application/vnd.github+json' if auth else '*/*'}
               if auth:
                   headers['Authorization'] = 'Bearer ' + token
                   headers['X-GitHub-Api-Version'] = '2022-11-28'
-              with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=90) as response:
-                  return response.read()
+              try:
+                  with opener.open(urllib.request.Request(url, headers=headers), timeout=90) as response:
+                      return response.read()
+              except HTTPError as error:
+                  print('HTTP failure: host=' + str(urlsplit(url).hostname) + ' status=' + str(error.code) + ' authenticated=' + str(auth), flush=True)
+                  raise
           api = 'https://api.github.com/repos/' + repo
+          print('Stage 1: verify Actions run', flush=True)
           run = json.loads(get(api + '/actions/runs/' + str(run_id), True))
           assert run['conclusion'] == 'success' and run['head_sha'] == expected_commit, 'Wrong run or commit'
           assert run['head_branch'] == 'codex/xrs-06-release-0.4.54', 'Wrong source branch'
+          print('Stage 2: list Actions artifacts', flush=True)
           artifacts = json.loads(get(api + '/actions/runs/' + str(run_id) + '/artifacts?per_page=100', True))['artifacts']
           matches = [a for a in artifacts if a['name'] == 'XRS-06-Windows-0.4.54-Setup-Candidate' and not a['expired']]
           assert len(matches) == 1, 'Expected candidate artifact unavailable'
           artifact = matches[0]
+          print('Stage 3: download Actions artifact with cross-host authorization stripped', flush=True)
           archive = get(api + '/actions/artifacts/' + str(artifact['id']) + '/zip', True)
           with zipfile.ZipFile(io.BytesIO(archive)) as z:
               candidates = []
@@ -57,9 +73,11 @@ jobs:
                   digest = hashlib.sha256(payload).hexdigest()
                   candidates.append((entry.filename, len(payload), digest))
               assert any(d == expected_sha and n == 28975891 for _, n, d in candidates), 'Verified Setup ZIP not found inside artifact'
+          print('Stage 4: verify live manifest', flush=True)
           manifest = json.loads(get(manifest_url))
           assert manifest['version'] == '0.4.53' and manifest['sha256'] == old_sha, 'Live manifest differs from expected baseline'
           assert manifest['url'].startswith('https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/'), 'Unexpected official ZIP URL'
+          print('Stage 5: verify live 0.4.53 ZIP', flush=True)
           live_zip = get(manifest['url'])
           assert hashlib.sha256(live_zip).hexdigest() == old_sha, 'Live 0.4.53 ZIP hash mismatch'
           print('PASS: source run, commit, artifact download, inner ZIP SHA/size, live 0.4.53 manifest and ZIP verified')
