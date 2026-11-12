@@ -16,6 +16,11 @@ RELEASE = ROOT / 'release'
 BUILD = ROOT / 'dist/index.html'
 
 
+def is_single_platform_package(metadata):
+    """Exclude optional build binaries that are not part of the shipped app."""
+    return any(len(values) == 1 for values in (metadata.get('os') or [], metadata.get('cpu') or []))
+
+
 def collect_licenses():
     notices = []
     names = {'license', 'license.md', 'license.txt', 'licence', 'licence.md',
@@ -23,6 +28,8 @@ def collect_licenses():
     for manifest in sorted((ROOT / 'node_modules').glob('**/package.json')):
         try:
             metadata = json.loads(manifest.read_text(encoding='utf-8'))
+            if is_single_platform_package(metadata):
+                continue
             files = sorted(p for p in manifest.parent.iterdir()
                            if p.is_file() and p.name.lower() in names)
         except (ValueError, OSError):

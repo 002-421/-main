@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from zipfile import ZIP_STORED, ZipFile
 
-from scripts.package_setup import ROOT, write_zip
+from scripts.package_setup import ROOT, is_single_platform_package, write_zip
 from scripts.verify_setup_package import (
     compare_zip_contents, verify_setup_package, write_candidate_manifest, zip_entry_diagnostics,
 )
@@ -59,6 +59,12 @@ class SetupPackageTests(unittest.TestCase):
         self.assertEqual(compare_zip_contents(candidate, reference), {
             'missing': ['removed.txt'], 'added': ['added.txt'], 'different': ['changed.txt']
         })
+
+    def test_platform_specific_optional_binaries_do_not_affect_license_inventory(self):
+        self.assertTrue(is_single_platform_package({'os': ['win32'], 'cpu': ['x64']}))
+        self.assertTrue(is_single_platform_package({'cpu': ['arm64']}))
+        self.assertFalse(is_single_platform_package({'os': ['linux', 'win32'], 'cpu': ['x64', 'arm64']}))
+        self.assertFalse(is_single_platform_package({}))
 
     def test_reports_safe_entry_diagnostics_without_payload_text(self):
         reference = self.root / 'diagnostic-reference.zip'
