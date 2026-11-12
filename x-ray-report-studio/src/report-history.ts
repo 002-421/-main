@@ -50,12 +50,27 @@ function selectionBeforeTransaction(tr: Transaction, oldState: EditorState, newS
     if (previous.map(newState.doc, tr.mapping).eq(newState.selection)) return previous;
     // A fast DOM selection change can reach the browser before ProseMirror has
     // synchronized its state selection. Recover the input's true start from
-    // the inverse edit mapping instead of persisting a stale caret.
+    // the transaction's changed range instead of persisting a stale caret.
+    // Mapping a collapsed caret at the end of inserted replacement text back
+    // through the inverse map loses the selected range at its boundary.
     if (previous instanceof TextSelection && newState.selection instanceof TextSelection) {
-      const inverse = tr.mapping.invert();
-      const from = inverse.map(newState.selection.from, -1);
-      const to = inverse.map(newState.selection.to, 1);
-      return TextSelection.between(oldState.doc.resolve(from), oldState.doc.resolve(to));
+      const head = newState.selection.head;
+      const candidates: Array<{from:number;to:number;exactEnd:boolean;step:number}> = [];
+      for (let index = 0; index < tr.mapping.maps.length; index++) {
+        const beforeStep = tr.mapping.slice(0, index).invert();
+        const afterStep = tr.mapping.slice(index + 1);
+        tr.mapping.maps[index].forEach((oldStart, oldEnd, newStart, newEnd) => {
+          const finalStart = afterStep.map(newStart, -1);
+          const finalEnd = afterStep.map(newEnd, 1);
+          if (head < Math.min(finalStart, finalEnd) || head > Math.max(finalStart, finalEnd)) return;
+          const from = beforeStep.map(oldStart, -1);
+          const to = beforeStep.map(oldEnd, 1);
+          candidates.push({from:Math.min(from,to),to:Math.max(from,to),exactEnd:head===finalEnd,step:index});
+        });
+      }
+      candidates.sort((left,right)=>Number(right.exactEnd)-Number(left.exactEnd)||right.step-left.step);
+      const candidate = candidates[0];
+      if (candidate) return TextSelection.between(oldState.doc.resolve(candidate.from), oldState.doc.resolve(candidate.to));
     }
   } catch {
     // Keep the prior selection if the transaction cannot map it safely.

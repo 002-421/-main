@@ -86,6 +86,35 @@ test('Undo records the edited caret when the DOM selection moved before ProseMir
   assert.equal(state.selection.head, editPosition, 'Undo restores the actual edit location, not stale position zero');
 });
 
+test('Undo restores a replaced selection when the browser selection moved before ProseMirror state synchronized', () => {
+  setDefaultReportHistoryDepth(500);
+  const first = schema.node('paragraph', null, [schema.text('first paragraph')]);
+  const second = schema.node('paragraph', null, [schema.text('target paragraph')]);
+  const doc = schema.node('doc', null, [first, second]);
+  let state = EditorState.create({
+    schema,
+    doc,
+    selection: TextSelection.create(doc, 1),
+    plugins: [reportHistoryPlugin()],
+  });
+  const from = 1 + first.nodeSize + 1;
+  const to = from + 8;
+  const originalSelectionText = doc.textBetween(from, to);
+  const replacedText = 'replacement';
+  let tr = state.tr.insertText(replacedText, from, to);
+  tr = tr.setSelection(TextSelection.create(tr.doc, from + replacedText.length));
+  state = state.apply(tr);
+  const entry = getReportHistory(state).undo.at(-1);
+  assert.equal(entry.before.anchor, from);
+  assert.equal(entry.before.head, to);
+  const view = { get state() { return state; }, dispatch(transaction) { state = state.apply(transaction); } };
+  assert.equal(runReportHistoryCommand(view, 'undo'), true);
+  assert.equal(state.doc.textContent, 'first paragraphtarget paragraph');
+  assert.equal(state.selection.from, from, 'Undo restores the start of the replaced range');
+  assert.equal(state.selection.to, to, 'Undo restores the end of the replaced range');
+  assert.equal(state.doc.textBetween(state.selection.from, state.selection.to), originalSelectionText);
+});
+
 test('appended normalization steps share one Undo action and restore original yellow field marks', () => {
   setDefaultReportHistoryDepth(500);
   const highlight = schema.marks.highlight.create({ color: '#ffff00' });
