@@ -265,6 +265,7 @@ try{
 
  const originalReportTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
  const reportTabsBefore=await page.locator('.report-tab').count();
+ const originalReportIds=await page.locator('.report-tab [data-report-select]').evaluateAll(elements=>elements.map(element=>element.getAttribute('data-report-select')));
  const wordZip=unzipSync(saved.bytes),wordXml=strFromU8(wordZip['word/document.xml']);
  assert.match(wordXml,/Тестовый Пациент/);
  const editedReportZip={...wordZip,'word/document.xml':strToU8(wordXml.replace('Тестовый Пациент','Синтетический Пациент'))};
@@ -290,6 +291,10 @@ try{
  assert.equal(await page.locator('.report-tab').count(),reportTabsBefore+3);
  await page.locator(`[data-report-select="${originalReportTab}"]`).click();
  assert.match(await page.locator('.report-content').innerText(),/Тестовый Пациент/,'Word recovery never changes the original protocol');
+ const recoveredReportIds=await page.locator('.report-tab [data-report-select]').evaluateAll((elements,previous)=>elements.map(element=>element.getAttribute('data-report-select')).filter(id=>!previous.includes(id)),originalReportIds);
+ assert.equal(recoveredReportIds.length,3);
+ for(const id of recoveredReportIds)await page.locator(`[data-report-close="${id}"]`).click();
+ assert.equal(await page.locator('.report-tab').count(),reportTabsBefore,'recovery scenario closes only its own tabs');
  console.log('PASS: Word-edited reports reopen; missing or damaged metadata requires preview and confirmation; original tab stays intact.');
 
  await page.locator('[data-tab="blocks"]').click();await page.locator('#new-block').click();
