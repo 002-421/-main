@@ -136,14 +136,14 @@ try{
 
  await newReport();
  for (const areaId of [...new Set(reportTemplates.map(template=>template.areaId))]) {
-  await page.locator('#modality-select').selectOption(areaId.startsWith('ct-')?'ct':'mri');
-  await page.locator('#area-select').selectOption(areaId);
   for (const template of reportTemplates.filter(item=>item.areaId===areaId)) {
    const activeTab=page.locator('.report-tab.active');
    if(await activeTab.count()){
     await activeTab.locator('[data-report-close]').click();
     if(await page.locator('#close-unsaved-report').count())await page.locator('#close-unsaved-report').click();
    }
+   await page.locator('#modality-select').selectOption(areaId.startsWith('ct-')?'ct':'mri');
+   await page.locator('#area-select').selectOption(areaId);
    await page.locator(`[data-template="${template.id}"]`).click();
    assert.ok((await page.locator('.report-content').innerText()).trim().length>100,`${template.title} must render its content`);
   }
