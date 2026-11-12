@@ -242,7 +242,7 @@ try{
  await page.locator('[data-preview-block]').click();assert.match(await page.locator('.block-preview').innerText(),/Проверочное описание/);
  await page.locator('#insert-preview-block').click();
  const insertedField=page.locator('[data-template-field][data-hint="Описание участка"]').first();await insertedField.waitFor();
- await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.insertText('Иследование. Очаг очаг не выявлен.');
+ await fillField(await insertedField.getAttribute('data-field-id'),'Иследование. Очаг очаг не выявлен.');
  assert.match(await insertedField.innerText(),/Иследование/);
  await page.locator('#check-now').click();
  const spelling=page.locator('.proof-spelling').filter({hasText:/^Иследование$/});await spelling.waitFor({timeout:30000});
