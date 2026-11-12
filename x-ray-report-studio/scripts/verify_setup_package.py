@@ -100,6 +100,8 @@ def zip_entry_diagnostics(candidate_path: Path, reference_path: Path) -> list[di
             if name.endswith('.txt') or name.endswith('.html'):
                 row['candidateCRLF'] = candidate_bytes.count(b'\r\n')
                 row['referenceCRLF'] = reference_bytes.count(b'\r\n')
+                row['candidateTailHex'] = candidate_bytes[-32:].hex()
+                row['referenceTailHex'] = reference_bytes[-32:].hex()
                 row['sameAfterNewlineNormalization'] = (
                     candidate_bytes.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
                     == reference_bytes.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
