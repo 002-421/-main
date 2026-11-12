@@ -11,9 +11,12 @@
     "desktop:install": "node node_modules/electron/install.js",
     "test": "node --test tests/*.test.mjs",
     "test:browser": "node tests/browser.mjs",
+    "test:undo-scroll": "node tests/undo-scroll-browser.mjs",
     "test:tab-isolation": "node tests/tab-isolation-browser.mjs",
     "test:workspace-recovery": "node tests/workspace-recovery-browser.mjs",
+    "test:windows-integration": "node --test tests/windows-integration.test.mjs",
     "package:windows": "python3 scripts/package_windows.py",
+    "package:windows-test-kit": "python3 scripts/package_test_kit.py",
     "package:setup": "python3 scripts/package_setup.py",
     "test:morphology-browser": "node tests/morphology-browser.mjs"
   },

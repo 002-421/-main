@@ -44,13 +44,19 @@ try {
     }
     Write-Host ('Installed: ' + $destination) -ForegroundColor Green
     $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut((Join-Path $desktop 'X-ray Report Studio.lnk'))
+    $shortcutPath = Join-Path $desktop 'X-ray Report Studio.lnk'
+    $temporaryShortcut = Join-Path $desktop ('.XRS-' + [guid]::NewGuid().ToString('N') + '.lnk')
+    $shortcut = $shell.CreateShortcut($temporaryShortcut)
     $shortcut.TargetPath = Join-Path $destination 'X-ray Report Studio.exe'
     $shortcut.WorkingDirectory = $destination
     $shortcut.IconLocation = Join-Path $destination 'resources\app\dist\x-ray-report-studio.ico'
     $shortcut.Save()
-    $legacyShortcut = Join-Path $desktop 'MRI Report Studio.lnk'
-    if (Test-Path -LiteralPath $legacyShortcut) { Remove-Item -LiteralPath $legacyShortcut -Force }
+    if (Test-Path -LiteralPath $shortcutPath) {
+        $shortcutBackup = Join-Path $desktop ('.XRS-previous-' + [guid]::NewGuid().ToString('N') + '.lnk')
+        [IO.File]::Replace($temporaryShortcut, $shortcutPath, $shortcutBackup, $true)
+    } else {
+        [IO.File]::Move($temporaryShortcut, $shortcutPath)
+    }
     Start-Process -FilePath (Join-Path $destination 'X-ray Report Studio.exe')
     Start-Process explorer.exe -ArgumentList ('"' + $destination + '"')
 } catch {
