@@ -1,5 +1,5 @@
 import { Extension } from '@tiptap/core';
-import { Plugin, PluginKey, Selection } from '@tiptap/pm/state';
+import { Plugin, PluginKey, Selection, TextSelection } from '@tiptap/pm/state';
 import { Step } from '@tiptap/pm/transform';
 import type { EditorState, Transaction } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
@@ -44,6 +44,25 @@ function validEntry(value: unknown): value is ReportHistoryEntry {
   return validSteps(entry.forward) && validSteps(entry.inverse) && validSelection(entry.before) && validSelection(entry.after) && Number.isFinite(entry.time) && typeof entry.groupedInput === 'boolean';
 }
 
+function selectionBeforeTransaction(tr: Transaction, oldState: EditorState, newState: EditorState): Selection {
+  const previous = oldState.selection;
+  try {
+    if (previous.map(newState.doc, tr.mapping).eq(newState.selection)) return previous;
+    // A fast DOM selection change can reach the browser before ProseMirror has
+    // synchronized its state selection. Recover the input's true start from
+    // the inverse edit mapping instead of persisting a stale caret.
+    if (previous instanceof TextSelection && newState.selection instanceof TextSelection) {
+      const inverse = tr.mapping.invert();
+      const from = inverse.map(newState.selection.from, -1);
+      const to = inverse.map(newState.selection.to, 1);
+      return TextSelection.between(oldState.doc.resolve(from), oldState.doc.resolve(to));
+    }
+  } catch {
+    // Keep the prior selection if the transaction cannot map it safely.
+  }
+  return previous;
+}
+
 /** Corrupt or oversized history is discarded independently of the report document. */
 export function sanitizeReportHistory(value: unknown, depth: number = configuredDepth): StoredReportHistory {
   const allowedDepth = REPORT_HISTORY_DEPTHS.includes(depth as ReportHistoryDepth) ? depth : 500;
@@ -77,7 +96,7 @@ function entryForTransaction(tr: Transaction, oldState: EditorState, newState: E
     return {
       forward: tr.steps.map(step => step.toJSON() as StepJSON),
       inverse,
-      before: oldState.selection.toJSON() as StoredSelection,
+      before: selectionBeforeTransaction(tr, oldState, newState).toJSON() as StoredSelection,
       after: newState.selection.toJSON() as StoredSelection,
       time: Date.now(),
       groupedInput: tr.getMeta('uiEvent') === 'input',

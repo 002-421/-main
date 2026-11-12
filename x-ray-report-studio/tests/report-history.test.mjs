@@ -60,6 +60,32 @@ test('Undo moves the operation to Redo and Redo restores it without cross-docume
   assert.equal(canRedoReport(state), false);
 });
 
+test('Undo records the edited caret when the DOM selection moved before ProseMirror state synchronized', () => {
+  setDefaultReportHistoryDepth(500);
+  const first = schema.node('paragraph', null, [schema.text('first paragraph')]);
+  const second = schema.node('paragraph', null, [schema.text('target paragraph')]);
+  const doc = schema.node('doc', null, [first, second]);
+  let state = EditorState.create({
+    schema,
+    doc,
+    selection: TextSelection.create(doc, 1),
+    plugins: [reportHistoryPlugin()],
+  });
+  const editPosition = 1 + first.nodeSize + 1 + 8;
+  const text = 'XRS synthetic edit';
+  let tr = state.tr.insertText(text, editPosition);
+  tr = tr.setSelection(TextSelection.create(tr.doc, editPosition + text.length));
+  state = state.apply(tr);
+  const entry = getReportHistory(state).undo.at(-1);
+  assert.equal(entry.before.type, 'text');
+  assert.equal(entry.before.anchor, editPosition);
+  assert.equal(entry.before.head, editPosition);
+  const view = { get state() { return state; }, dispatch(transaction) { state = state.apply(transaction); } };
+  assert.equal(runReportHistoryCommand(view, 'undo'), true);
+  assert.equal(state.doc.textContent, 'first paragraphtarget paragraph');
+  assert.equal(state.selection.head, editPosition, 'Undo restores the actual edit location, not stale position zero');
+});
+
 test('appended normalization steps share one Undo action and restore original yellow field marks', () => {
   setDefaultReportHistoryDepth(500);
   const highlight = schema.marks.highlight.create({ color: '#ffff00' });
