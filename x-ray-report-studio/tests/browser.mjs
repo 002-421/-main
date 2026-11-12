@@ -139,10 +139,17 @@ try{
   await page.locator('#modality-select').selectOption(areaId.startsWith('ct-')?'ct':'mri');
   await page.locator('#area-select').selectOption(areaId);
   for (const template of reportTemplates.filter(item=>item.areaId===areaId)) {
+   const activeTab=page.locator('.report-tab.active');
+   if(await activeTab.count()){
+    await activeTab.locator('[data-report-close]').click();
+    if(await page.locator('#close-unsaved-report').count())await page.locator('#close-unsaved-report').click();
+   }
    await page.locator(`[data-template="${template.id}"]`).click();
    assert.ok((await page.locator('.report-content').innerText()).trim().length>100,`${template.title} must render its content`);
   }
  }
+ const activeAfterTemplateSweep=page.locator('.report-tab.active');
+ if(await activeAfterTemplateSweep.count())await activeAfterTemplateSweep.locator('[data-report-close]').click();
  console.log('PASS: all 55 source templates across six zones render nonempty content.');
 
  await page.locator('#modality-select').selectOption('mri');
