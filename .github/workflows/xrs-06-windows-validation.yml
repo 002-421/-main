@@ -174,7 +174,7 @@ jobs:
           }
           $diagnostic = Get-Content -LiteralPath $diagnosticPath -Raw | ConvertFrom-Json
           $snapshot = $diagnostic.snapshot
-          $stack = [string]$diagnostic.errorMessage
+          $stack = [string]$diagnostic.errorStack
           $line = [regex]::Match($stack, 'report-history-browser\.mjs:(\d+):\d+').Groups[1].Value
           $safe = 'Persistent history failure: stage=' + [string]$diagnostic.stage + ', line=' + $line + ', error=' + [string]$diagnostic.errorName + ', activeTab=' + [string]$snapshot.activeTabIndex + ', reports=' + [string]$snapshot.reportCount + ', paragraphs=' + [string]$snapshot.paragraphCount + ', scrollTop=' + [string]$snapshot.scrollTop + ', caret=' + ($snapshot.caret | ConvertTo-Json -Compress) + ', view=' + ($snapshot.activeHistoryView | ConvertTo-Json -Compress) + ', depth=' + [string]$snapshot.historyDepth
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $safe

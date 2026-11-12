@@ -39,12 +39,14 @@ async function captureFailure(error){
   return{reportCount:document.querySelectorAll('.report-tab').length,activeTabIndex:active?[...document.querySelectorAll('.report-tab')].indexOf(active):-1,paragraphCount:document.querySelectorAll('.report-content p').length,scrollTop:canvas?.scrollTop??null,scrollHeight:canvas?.scrollHeight??null,clientHeight:canvas?.clientHeight??null,caret,domSelection:{rangeCount:selection?.rangeCount??0,anchorNode:selection?.anchorNode?.nodeName??null,anchorOffset:selection?.anchorOffset??null},activeElement:{tag:activeElement?.tagName??null,id:activeElement?.id??null,className:typeof activeElement?.className==='string'?activeElement.className:null,contenteditable:activeElement?.getAttribute('contenteditable')??null},workspaceActiveId:workspace.activeId,activeHistoryView:activeHistory?.view?{scrollTop:activeHistory.view.scrollTop,selectionType:activeHistory.view.selection?.type,anchor:activeHistory.view.selection?.anchor,head:activeHistory.view.selection?.head}:null,historyDepth:JSON.parse(localStorage.getItem('mri-alliance.settings.v3')||'{}').historyDepth??null,rendererErrors};
  },rendererErrorNames).catch(()=>null);
  await page?.screenshot({path:path.join(root,'test-output/report-history-failure.png'),fullPage:false}).catch(()=>{});
- await writeFile(path.join(root,'test-output/report-history-failure.json'),JSON.stringify({stage:diagnosticStage,errorName:error?.name||'Error',errorCode:error?.code||null,errorMessage:error?.message||String(error),snapshot},null,2));
+ await writeFile(path.join(root,'test-output/report-history-failure.json'),JSON.stringify({stage:diagnosticStage,errorName:error?.name||'Error',errorCode:error?.code||null,errorMessage:error?.message||String(error),errorStack:error?.stack||null,snapshot},null,2));
 }
 try{
+ diagnosticStage='launch synthetic report';
  page=await launch();
  const editor=page.locator('.report-content');
  assert.equal(await page.locator('.report-tab').count(),1,'one synthetic report opens');
+ diagnosticStage='enter synthetic patient name';
  const patientField=page.locator('[data-field-id="head-gm.patient"]');
  await patientField.evaluate(el=>{el.closest('[contenteditable]')?.focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection?.removeAllRanges();selection?.addRange(range);});
  await page.keyboard.insertText('СверхдлиннаяСинтетическаяФамилия Тест Пациент');
@@ -52,6 +54,7 @@ try{
  assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'patient surname appears after initial entry');
  const paragraphCount=await editor.locator('p').count();
  assert.ok(paragraphCount>20,'the synthetic protocol spans multiple pages');
+ diagnosticStage='initial Undo and Redo at paragraph 12';
  const targetParagraph=page.locator('.report-content p').nth(12);
  const beforeText=await targetParagraph.innerText();
  await targetParagraph.evaluate(paragraph=>{const canvas=document.querySelector('#canvas');if(canvas){const rect=paragraph.getBoundingClientRect(),container=canvas.getBoundingClientRect();canvas.scrollTop+=rect.top-container.top-120;}});
@@ -70,6 +73,7 @@ try{
  assert.ok(Math.abs(afterRedo-scrollBeforeRedo)<80,`Redo keeps the viewport near the edit: ${scrollBeforeRedo} -> ${afterRedo}`);
  assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'patient surname survives the first Undo/Redo pair');
  for(const index of [5,12,paragraphCount-4]){
+  diagnosticStage=`Undo and Redo at synthetic paragraph ${index}`;
   const paragraph=page.locator('.report-content p').nth(index),original=await paragraph.innerText();
   await paragraph.evaluate((el,scrollOffset)=>{const canvas=document.querySelector('#canvas'),rect=el.getBoundingClientRect(),box=canvas.getBoundingClientRect();canvas.scrollTop+=rect.top-box.top-scrollOffset;},Math.floor((await page.locator('#canvas').evaluate(el=>el.clientHeight))/3));
   await typeInParagraph(page,index,`XRS06_POSITION_${index}`);
@@ -87,6 +91,7 @@ try{
   assert.ok(Math.abs(redoState-undoState.scrollTop)<80,`Redo preserves the nearby viewport at report position ${index}`);
   assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),`patient surname survives the position ${index} Undo/Redo pair`);
  }
+ diagnosticStage='Undo and Redo of a selected text replacement';
  const selectionParagraph=page.locator('.report-content p').nth(12),selectionBefore=await selectionParagraph.innerText();
  const selectedText=await selectionParagraph.evaluate(el=>{const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT),node=walker.nextNode();if(!node)throw new Error('Synthetic paragraph has no text to select');const length=Math.min(8,node.textContent.length);const range=document.createRange();range.setStart(node,2);range.setEnd(node,Math.min(2+length,node.textContent.length));getSelection().removeAllRanges();getSelection().addRange(range);return range.toString();});
  await page.keyboard.insertText('XRS06_REPLACEMENT');
@@ -98,6 +103,7 @@ try{
  assert.ok((await selectionParagraph.innerText()).includes('XRS06_REPLACEMENT'),'Redo reapplies the selection replacement');
  await save(page);
  assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'patient surname survives A-document edits before opening report B');
+ diagnosticStage='save report A history and configure history depth';
  let aId=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
  let stored=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),historyKey);
  assert.ok(stored[aId]?.history.undo.length,'the per-report operation history is persisted locally');
@@ -115,6 +121,7 @@ try{
  }
  assert.deepEqual(depthValues,['100','250','500','1000'],'each doctor setting can be selected and saved');
 
+ diagnosticStage='create report B and switch between independent histories';
  await page.locator('#new-report').click();
  await page.locator('.report-tab').nth(1).waitFor();
  const bId=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
