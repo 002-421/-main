@@ -89,7 +89,7 @@ function verifySha256(bytes, expected) {
 
 /** Install app files beside the running copy. The caller commits the shortcut only after smoke checks. */
 async function installUpdateArchive({ archive, currentRoot, version, extractArchive = extractWithTar, log = () => {} }) {
-  if (!/^\d+\.\d+\.\d+$/.test(String(version))) throw new Error('Некорректная версия обновления.');
+  if (!/^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/.test(String(version))) throw new Error('Некорректная версия обновления.');
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'XRayReportStudio_Update_'));
   const parent = path.dirname(currentRoot);
   const stage = path.join(parent, `.X-ray_Report_Studio_stage_${randomUUID()}`);

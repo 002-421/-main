@@ -122,20 +122,20 @@ try{
  assert.deepEqual(depthValues,['100','250','500','1000'],'each doctor setting can be selected and saved');
 
  diagnosticStage='create report B and switch between independent histories';
- await page.locator('#new-report').click();
- await page.locator('.report-tab').nth(1).waitFor();
- const bId=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
  const templateIds=await page.locator('[data-template]').evaluateAll(elements=>elements.map(element=>element.getAttribute('data-template')));
  const activeTemplate=await page.locator('[data-template].selected').getAttribute('data-template');
  const alternateTemplate=templateIds.find(id=>id!==activeTemplate);
  assert.ok(alternateTemplate,'the selected zone offers a second synthetic test template');
  await page.locator(`[data-template="${alternateTemplate}"]`).click();
+ await page.locator('.report-tab').nth(1).waitFor();
+ assert.equal(await page.locator('.report-tab').count(),2,'selecting another template creates exactly one independent report B');
+ const bId=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
  const patientB=page.locator('[data-field-id$=".patient"]').first();
  await patientB.evaluate(el=>{el.closest('[contenteditable]')?.focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection?.removeAllRanges();selection?.addRange(range);});
  await page.keyboard.insertText('СверхдлиннаяСинтетическаяФамилия Тест Пациент');
  await typeInParagraph(page,12,'XRS06_SYNTHETIC_B');
  await save(page);
- assert.ok((await page.locator('.report-tab-select').nth(1).getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'patient surname is present in report B before switching');
+ assert.ok((await page.locator('.report-tab.active .report-tab-select').getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'patient surname is present in report B before switching');
  await page.locator(`[data-report-select="${aId}"]`).click();
  assert.ok((await editor.innerText()).includes('XRS06_SYNTHETIC_A'),'switching restores report A content before its history action');
  assert.equal(await page.locator('[data-command="redo"]').isEnabled(),false,'fresh report A has no redo action');

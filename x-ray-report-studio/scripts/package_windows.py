@@ -65,6 +65,9 @@ shutil.copy2(ROOT / 'public/x-ray-report-studio.ico', app / 'dist/x-ray-report-s
     'version': json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))['version'], 'main': 'electron/main.cjs', 'private': True,
 }, indent=2), encoding='utf-8')
 shutil.copy2(ROOT / 'README_RU.txt', destination / 'ПРОЧИТАЙТЕ.txt')
+if '-beta.' in json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))['version']:
+    for filename in ('Start-XRS-Beta.cmd', 'Start-XRS-Beta.ps1', 'XRS-PreUpdate-Backup.ps1'):
+        shutil.copy2(ROOT / 'scripts' / filename, destination / filename)
 
 (destination / 'THIRD_PARTY_LICENSES.txt').write_text(collect_licenses(), encoding='utf-8')
 output = RELEASE / 'X-ray_Report_Studio_Windows_x64.zip'

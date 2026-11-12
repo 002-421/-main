@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { CURRENT_DATA_CONTRACT, DATA_SCHEMA_VERSION, applicationSupportsDataContract } = require('./data-compatibility.cjs');
+const { parseVersion } = require('./update-version.cjs');
 
 const CURRENT_DATA_SCHEMA = DATA_SCHEMA_VERSION;
 
@@ -42,7 +43,7 @@ function canRollback({ installState, dataState, currentRoot }) {
   if (!previous || !current || typeof current.root !== 'string' || typeof currentRoot !== 'string'
       || !path.isAbsolute(current.root) || !path.isAbsolute(currentRoot) || path.resolve(current.root) !== path.resolve(currentRoot))
     return { available: false, reason: 'Предыдущая установленная версия не зарегистрирована.' };
-  if (!/^\d+\.\d+\.\d+$/.test(String(current.version)) || !/^\d+\.\d+\.\d+$/.test(String(previous.version))
+  if (!parseVersion(current.version) || !parseVersion(previous.version)
       || typeof previous.root !== 'string' || typeof previous.executable !== 'string' || !path.isAbsolute(previous.root) || !path.isAbsolute(previous.executable))
     return { available: false, reason: 'Сведения о предыдущей версии неполны.' };
   if (!Number.isInteger(dataState?.schemaVersion) || !Number.isInteger(previous.dataSchemaVersion)

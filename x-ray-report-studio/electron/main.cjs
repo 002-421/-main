@@ -2,7 +2,6 @@ const { app, BrowserWindow, ipcMain, dialog, clipboard, ClipboardItem, session, 
 const path = require('node:path');
 const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
-const https = require('node:https');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { pathToFileURL, fileURLToPath } = require('node:url');
@@ -10,10 +9,11 @@ const { installUpdateArchive, verifySha256, writeShortcutAtomically } = require(
 const { activateRendererUpdate, isUsableRenderer, smokeTestInstalledApp } = require('./live-update.cjs');
 const { createUserDataBackup } = require('./user-data-backup.cjs');
 const { CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema, canRollback } = require('./install-state.cjs');
-const { isUpdateAvailable } = require('./update-version.cjs');
+const { STABLE_MANIFEST, BETA_MANIFEST, selectedChannel, profileForLaunch, validateManifest, chooseUpdate } = require('./update-channel.cjs');
+const { changeUpdateChannel } = require('./channel-preference.cjs');
+const { downloadHttps } = require('./update-download.cjs');
 const { sanitizeUpdateLogEvent, sanitizeStartupLogEvent } = require('./log-safety.cjs');
 const { summarizeFrame } = require('./startup-diagnostics.cjs');
-const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json';
 const TEST_KIT_MARKER = path.join(process.resourcesPath, 'app', 'xrs-test-mode.json');
 let TEST_KIT_ROOT = '';
 let INVALID_TEST_KIT_LAUNCH = false;
@@ -34,12 +34,21 @@ app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu-compositing');
 app.commandLine.appendSwitch('disable-features', 'DirectComposition');
 
-// Keep the existing profile path so the rename preserves drafts and settings.
+// Channel preference is local to this Windows account. Beta always uses a
+// separate Chromium profile; a prerelease executable can never open Stable data.
+const channelSettingsFile = path.join(TEST_KIT_ROOT ? path.join(TEST_KIT_ROOT, 'AppData') : app.getPath('appData'), 'X-ray Report Studio Channel.json');
+let channelPreference = null;
+try { channelPreference = JSON.parse(fsSync.readFileSync(channelSettingsFile, 'utf8')); } catch { /* Default to Stable, or Beta for a prerelease executable. */ }
+let activeProfile = profileForLaunch(app.getVersion(), channelPreference);
+let activeUpdateChannel = selectedChannel(channelPreference?.channel ?? (activeProfile === 'beta' ? 'beta' : 'stable'));
 if (TEST_KIT_ROOT) {
   app.setPath('appData', path.join(TEST_KIT_ROOT, 'AppData'));
   if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(TEST_KIT_ROOT, 'Profile'));
   app.setPath('sessionData', path.join(app.getPath('userData'), 'Session Data'));
-} else if (!INVALID_TEST_KIT_LAUNCH && !app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
+} else if (!INVALID_TEST_KIT_LAUNCH && !app.commandLine.hasSwitch('user-data-dir')) {
+  app.setPath('userData', path.join(app.getPath('appData'), activeProfile === 'beta' ? 'MRI Report Studio Beta' : 'MRI Report Studio'));
+  if (activeProfile === 'beta') app.setPath('sessionData', path.join(app.getPath('userData'), 'Session Data'));
+}
 app.setName('X-ray Report Studio');
 let mainWindow;
 let rendererUnresponsive = false;
@@ -49,7 +58,9 @@ let startupLogQueue = Promise.resolve();
 let startupWatchdog;
 let startupFailureDialogOpen = false;
 let startupRecoveryAttempted = false;
-const sharedDictionaryDir = process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR
+const sharedDictionaryDir = activeProfile === 'beta' && !TEST_KIT_ROOT
+  ? path.join(app.getPath('userData'), 'Shared Dictionary')
+  : process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR
   ? path.resolve(process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR)
   : TEST_KIT_ROOT
     ? path.join(TEST_KIT_ROOT, 'Shared Dictionary')
@@ -266,7 +277,8 @@ async function getRollbackStatus() {
 }
 
 async function createVerifiedUserDataBackup() {
-  session.defaultSession.flushStorageData();
+  await dictionaryQueue;
+  await session.defaultSession.flushStorageData();
   return createUserDataBackup({
     userDataDir: app.getPath('userData'), sharedDictionaryFile,
     backupRoot: backupRoot(), allowedBackupRoot: app.getPath('appData'), forbiddenRoots: [activeApplicationRoot], version: activeApplicationVersion,
@@ -299,52 +311,37 @@ async function downloadBuffer(url, limit, redirects = 0, onProgress = () => {}) 
     onProgress({ loaded: bytes.length, total: bytes.length, percent: 100 });
     return bytes;
   }
-  return new Promise((resolve, reject) => {
-    if (redirects > 5) return reject(new Error('Слишком много перенаправлений при загрузке обновления.'));
-    const target = new URL(url);
-    if (target.protocol !== 'https:' || !['raw.githubusercontent.com', 'github.com', 'objects.githubusercontent.com'].includes(target.hostname)) return reject(new Error('Недопустимый источник обновления.'));
-    const request = https.get(target, { timeout: 30000, headers: { 'User-Agent': 'MRI-Report-Studio-Updater', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } }, response => {
-      if ([301,302,303,307,308].includes(response.statusCode) && response.headers.location) {
-        response.resume(); return resolve(downloadBuffer(new URL(response.headers.location, target).toString(), limit, redirects + 1, onProgress));
-      }
-      if (response.statusCode !== 200) { response.resume(); return reject(new Error(`Сервер обновлений ответил ${response.statusCode}.`)); }
-      const chunks=[]; let total=0;
-      const expected = Number(response.headers['content-length']) || 0;
-      onProgress({loaded:0,total:expected,percent:expected?0:null});
-      response.on('data', chunk => { total += chunk.length; if (total > limit) { request.destroy(new Error('Файл обновления больше допустимого размера.')); } else { chunks.push(chunk); onProgress({loaded:total,total:expected,percent:expected?Math.min(100,Math.round(total/expected*100)):null}); } });
-      response.on('end', () => resolve(Buffer.concat(chunks)));
-    });
-    request.on('timeout', () => request.destroy(new Error('Время ожидания сервера обновлений истекло.')));
-    request.on('error', reject);
-  });
+  return downloadHttps(url, limit, redirects, onProgress);
 }
-async function getUpdateManifest() {
+async function readUpdateManifest(kind) {
   let bytes;
   if (TEST_KIT_ROOT) {
-    bytes = await fs.readFile(path.join(TEST_KIT_ROOT, 'Updates', 'latest.json'));
+    bytes = await fs.readFile(path.join(TEST_KIT_ROOT, 'Updates', kind === 'beta' ? 'beta.json' : 'latest.json'));
   } else {
-    const manifestUrl = new URL(UPDATE_MANIFEST);
+    const manifestUrl = new URL(kind === 'beta' ? BETA_MANIFEST : STABLE_MANIFEST);
     manifestUrl.searchParams.set('check', `${Date.now()}-${crypto.randomUUID()}`);
     bytes = await downloadBuffer(manifestUrl.toString(), 32_000);
   }
   let manifest; try { manifest=JSON.parse(bytes.toString('utf8')); } catch { throw new Error('Файл обновлений повреждён.'); }
-  if (!manifest || typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.version)
-      || typeof manifest.url !== 'string' || typeof manifest.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(manifest.sha256)
-      || (manifest.notes !== undefined && (typeof manifest.notes !== 'string' || manifest.notes.length > 10000))) throw new Error('Файл обновлений содержит некорректные данные.');
-  let artifactUrl = manifest.url;
-  if (TEST_KIT_ROOT) {
-    if (typeof manifest.url !== 'string' || path.basename(manifest.url) !== manifest.url || !/^XRS_Test_Update_\d+\.\d+\.\d+\.zip$/.test(manifest.url)) throw new Error('Недопустимый файл локального тестового обновления.');
-    artifactUrl = pathToFileURL(path.join(TEST_KIT_ROOT, 'Updates', manifest.url)).toString();
-  } else {
-    const artifact=new URL(manifest.url);
-    if (artifact.protocol!=='https:' || !['raw.githubusercontent.com','github.com'].includes(artifact.hostname) || !artifact.pathname.endsWith('/downloads/X-ray_Report_Studio_Windows_Setup.zip')) throw new Error('Недопустимая ссылка на установочный файл.');
-  }
-  return { version: manifest.version, currentVersion: activeApplicationVersion, url: artifactUrl, sha256: manifest.sha256.toLowerCase(), notes: manifest.notes ?? '', available: isUpdateAvailable(manifest.version, activeApplicationVersion) };
+  return validateManifest(manifest, kind, TEST_KIT_ROOT);
+}
+async function getUpdateManifest() {
+  if (activeUpdateChannel === 'stable') return chooseUpdate('stable', activeApplicationVersion, [await readUpdateManifest('stable')]);
+  const outcomes = await Promise.allSettled([readUpdateManifest('stable'), readUpdateManifest('beta')]);
+  const candidates = outcomes.filter(result => result.status === 'fulfilled').map(result => result.value);
+  if (!candidates.length) throw outcomes[0].reason;
+  return chooseUpdate(activeUpdateChannel, activeApplicationVersion, candidates);
 }
 
 app.whenReady().then(async () => {
   if (INVALID_TEST_KIT_LAUNCH) {
     dialog.showErrorBox('XRS-05 test kit', 'Запустите эту тестовую копию через Run-Test-App.cmd. Профиль и рабочий ярлык не были открыты.');
+    app.quit();
+    return;
+  }
+  if (app.isPackaged && activeProfile === 'beta' && !TEST_KIT_ROOT && !app.commandLine.hasSwitch('user-data-dir')
+      && fsSync.existsSync(path.join(app.getPath('appData'), 'MRI Report Studio')) && channelPreference?.onboarded !== true) {
+    dialog.showErrorBox('X-ray Report Studio Beta', 'Перед первым запуском Beta закройте рабочую версию и запустите Start-XRS-Beta.cmd из тестового комплекта. Он проверит резервную копию, затем откроет отдельный профиль.');
     app.quit();
     return;
   }
@@ -505,6 +502,24 @@ app.whenReady().then(async () => {
   ipcMain.handle('updates:check', async event => {
     requireMain(event);
     return getUpdateManifest();
+  });
+  ipcMain.handle('updates:channel', async event => {
+    requireMain(event);
+    return { channel: activeUpdateChannel, profile: activeProfile, version: activeApplicationVersion };
+  });
+  ipcMain.handle('updates:set-channel', async (event, requested) => {
+    requireMain(event);
+    if (updateInstalling) throw new Error('Дождитесь завершения установки обновления.');
+    const result = await changeUpdateChannel({ requested, current: activeUpdateChannel, profile: activeProfile,
+      backup: async () => {
+      const betaRoot = path.join(app.getPath('appData'), 'MRI Report Studio Beta');
+      const existing = await fs.lstat(betaRoot).catch(error => error.code === 'ENOENT' ? null : Promise.reject(error));
+      if (existing && (!existing.isDirectory() || existing.isSymbolicLink())) throw new Error('Каталог профиля Beta имеет небезопасный тип.');
+      await createVerifiedUserDataBackup();
+      }, persist: preference => writeJsonAtomic(channelSettingsFile, preference) });
+    activeUpdateChannel = result.channel;
+    if (result.restarting) setTimeout(() => { app.relaunch(); app.exit(0); }, 250);
+    return result;
   });
   ipcMain.handle('app:version', async event => {
     requireMain(event);

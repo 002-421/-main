@@ -57,7 +57,7 @@ async function smokeTestInstalledApp({ executable, timeoutMs = 30000, spawnProce
     while (Date.now() < deadline) {
       try {
         const result = JSON.parse(await fs.readFile(resultFile, 'utf8'));
-        if (result.ready === true && /^\d+\.\d+\.\d+$/.test(result.version)) return result;
+        if (result.ready === true && /^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/.test(result.version)) return result;
         throw new Error('Новая версия не прошла проверку запуска редактора.');
       } catch (error) { if (error.code !== 'ENOENT') throw error; }
       if (exitCode !== null) throw new Error(`Проверка первого запуска завершилась с кодом ${exitCode}.`);
