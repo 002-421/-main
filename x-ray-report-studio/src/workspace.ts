@@ -168,7 +168,7 @@ $('#app').innerHTML=`<div class="shell">
  <aside class="sidebar" aria-label="Зоны, шаблоны и дополнительные описания">
   <button class="brand" id="brand-settings" title="Настроить врача и подпись"><span id="brand-image"></span></button>
   <div class="side-tabs"><button data-tab="templates" class="active">Зоны и шаблоны</button><button data-tab="blocks">Доп. описания</button></div>
-  <div id="template-navigation"><label class="side-label" for="modality-select">Тип исследования</label><select id="modality-select"><option value="mri">МРТ</option><option value="ct">КТ</option></select><label class="side-label area-label" for="area-select">Зона исследования</label><select id="area-select"></select><div class="side-heading">Выберите шаблон</div><div id="template-list" class="template-list"></div><button class="side-action" id="edit-template">✎ Редактировать шаблон</button></div>
+  <div id="template-navigation"><label class="side-label" for="modality-select">Тип исследования</label><select id="modality-select"><option value="mri">МРТ</option><option value="ct">КТ</option></select><label class="side-label area-label" for="area-select">Зона исследования</label><select id="area-select"></select><div class="side-heading">Выберите шаблон</div><div id="template-list" class="template-list"></div><button class="side-action" id="edit-template">✎ Редактировать шаблон</button><button class="side-action" id="export-template-docx">⇩ Экспортировать шаблон в Word</button><button class="side-action" id="import-template-docx">⇧ Импортировать шаблон из Word</button><button class="side-action" id="restore-template-backup">↶ Резервные копии шаблонов</button></div>
   <div id="block-navigation" class="hidden"><label class="side-label" for="block-search">Поиск дополнительных описаний</label><input type="search" id="block-search" placeholder="Название, находка или ключевое слово…"><div class="block-filters"><button data-block-filter="all" class="active">Все</button><button data-block-filter="custom">Мои</button></div><div class="block-create"><button id="new-block" class="btn small">＋ Создать</button><button id="save-selection" class="btn small">Сохранить выделенное</button></div><div id="block-list" class="block-list"></div></div>
   <div class="side-bottom"><button id="settings">⚙ Врач и настройки</button><small>Локальная работа · версия <span id="application-version">${esc(packageInfo.version)}</span></small></div>
  </aside>
@@ -180,7 +180,7 @@ $('#app').innerHTML=`<div class="shell">
   <div class="document-tools"><div><button id="next-field" class="chip">Следующее поле <span id="empty-count"></span></button><button id="review-unchanged" class="chip" aria-pressed="false" title="Показать поля и фрагменты, оставшиеся как в шаблоне">Подсветить неизменённое</button><button id="sticky-note-open" class="chip" title="Открыть заметку">Заметка</button><button id="calculator" class="chip" title="Открыть калькулятор" aria-haspopup="dialog">Калькулятор</button></div><div><button id="proof-toggle" class="chip active" aria-pressed="true">✓ Проверка текста</button><button id="check-now" class="chip" title="Повторить проверку (F7)">Проверить сейчас</button><label class="zoom-control" title="Масштаб редактора"><span>Масштаб</span><input id="zoom" type="range" min="75" max="150" step="5" value="100" aria-label="Масштаб редактора"><output id="zoom-value">100%</output></label></div></div>
   <div class="canvas" id="canvas"><div class="page-meta"><span id="template-name"></span><span>A4 · оформление исходного шаблона</span></div><article class="paper"><div id="editor"></div></article></div>
   <footer class="statusbar"><span id="status-left">Данные сохраняются на этом компьютере</span><span id="proof-status">Проверка текста…</span><span id="word-count"></span></footer>
- </main></div><input type="file" id="report-file" accept=".docx,.json,.mri.json" hidden><input type="file" id="doctor-stamp-file" accept="image/png,image/jpeg,.jpg,.jpeg" hidden>`;
+ </main></div><input type="file" id="report-file" accept=".docx,.json,.mri.json" hidden><input type="file" id="template-file" accept=".docx" hidden><input type="file" id="doctor-stamp-file" accept="image/png,image/jpeg,.jpg,.jpeg" hidden>`;
 
 function applyTheme() {
   document.documentElement.dataset.theme = settings.theme;
@@ -447,6 +447,73 @@ function paginateBrowserPreview(html:string):string {const source=document.creat
 function confirmYellowExport(continueExport:()=>void){if(!hasYellowFields(json()))return true;const d=dialog('В описании осталась жёлтая заливка','<p class="yellow-export-warning-text">Остались незаполненные поля или фрагменты с жёлтой заливкой. Они попадут в сохранённый документ.</p><p>Проверьте описание или сохраните текущий вариант.</p>','<button class="btn" data-close>Вернуться к описанию</button><button class="btn primary" id="continue-yellow-export">Сохранить всё равно</button>');d.querySelector('.dialog')!.classList.add('yellow-export-warning');d.querySelector('#continue-yellow-export')!.addEventListener('click',()=>{closeDialog();continueExport();});return false;}
 async function saveWord(confirmed=false){if(!confirmed&&!confirmYellowExport(()=>void saveWord(true)))return;const button=$('#save-docx') as HTMLButtonElement;if(button.disabled)return;button.disabled=true;try{if(!templateMode)saveLocal();const savedReport={id:activeReportId,snapshot:JSON.stringify(json())};const doc=exportDocument(),name=filename('.docx');const fonts=await embeddedFonts();const blob=await exportDocx(doc,{profile:profileForTemplate(),templateId:activeTemplateId,fonts,kind:templateMode?'template':'report'});download(blob,name,savedReport);toast('Документ Word подготовлен для сохранения.');}catch(e){toast(`Не удалось сохранить Word: ${(e as Error).message}`,true);}finally{button.disabled=false;}}
 $('#save-docx').onclick=previewReport;$('#open-report').onclick=()=>($('#report-file') as HTMLInputElement).click();
+$('#export-template-docx').onclick=async()=>{
+ if(templateMode){toast('Сначала завершите редактирование текущего шаблона.',true);return;}
+ try{
+  const template=reportTemplates.find(item=>item.id===activeTemplateId);if(!template)throw new Error('Шаблон не найден.');
+  const doc=overrides[activeTemplateId]??makeTemplateDocument(activeTemplateId),fonts=await embeddedFonts();
+  const blob=await exportDocx(doc,{profile:profileForTemplate(),templateId:activeTemplateId,kind:'template',title:template.title,fonts});
+  const safeName=template.title.replace(/[\\/:*?"<>|]/g,' ').replace(/\s+/g,' ').trim()||activeTemplateId;
+  download(blob,`${safeName}.docx`);toast(`Шаблон «${template.title}» экспортирован в Word.`);
+ }catch(error){toast(`Не удалось экспортировать шаблон: ${(error as Error).message}`,true);}
+};
+$('#import-template-docx').onclick=()=>{if(templateMode){toast('Сначала завершите редактирование шаблона.',true);return;}($('#template-file') as HTMLInputElement).click();};
+$('#template-file').onchange=async event=>{
+ const input=event.target as HTMLInputElement,file=input.files?.[0];input.value='';if(!file)return;
+ try{
+  if(file.size>20_000_000)throw new Error('Максимальный размер файла 20 МБ.');
+  const imported=await importOwnDocx(await file.arrayBuffer());
+  if(!imported)throw new Error('В DOCX нет метаданных XRS. Экспортируйте исходный шаблон из библиотеки XRS и редактируйте этот файл в Word.');
+  if(imported.kind!=='template')throw new Error('Этот DOCX экспортирован как протокол. Для замены шаблона нужен файл, экспортированный командой «Экспортировать шаблон в Word».');
+  const templateId=imported.templateId,template=reportTemplates.find(item=>item.id===templateId);
+  if(!templateId||!template)throw new Error('В файле нет действительного идентификатора шаблона библиотеки XRS. Исходный шаблон не изменён.');
+  const candidate=validateTemplate(promoteInlineTemplate(imported.doc));
+  const old=overrides[templateId]??makeTemplateDocument(templateId);
+  editor.schema.nodeFromJSON(candidate).check();
+  const oldText=plain(old),newText=plain(candidate);
+  const count=(doc:RichNode,type:string)=>{let n=0;const visit=(node:RichNode)=>{if(node.type===type)n++;node.content?.forEach(visit);};visit(doc);return n;};
+  const countYellow=(doc:RichNode)=>{let n=0;const visit=(node:RichNode)=>{n+=(node.marks??[]).filter(mark=>mark.type==='highlight'&&String(mark.attrs?.color??'').toLowerCase()==='#ffff00').length;node.content?.forEach(visit);};visit(doc);return n;};
+  const previewHtml=(doc:RichNode)=>{const host=document.createElement('div'),previewEditor=makeEditor(host,prepareInlineDocument(doc),()=>{});const html=DOMPurify.sanitize(previewEditor.getHTML());previewEditor.destroy();return html;};
+  const warnings=[...(imported.importWarnings??[])];
+  const d=dialog(`Предпросмотр шаблона «${template.title}»`,
+   `<p>Проверьте содержимое и форматирование до замены. Существующие протоколы пациентов не изменяются.</p><p>Абзацы: ${count(old,'paragraph')} → ${count(candidate,'paragraph')}; таблицы: ${count(old,'table')} → ${count(candidate,'table')}; жёлтые фрагменты: ${countYellow(old)} → ${countYellow(candidate)}.</p>${warnings.length?`<div class="notice">${warnings.map(esc).join('<br>')}</div>`:'<div class="notice">Неподдерживаемых элементов Word не обнаружено.</div>'}<div class="template-import-diff"><section><h3>Текущий шаблон</h3><div class="report-content">${previewHtml(old)}</div><pre>${esc(oldText)}</pre></section><section><h3>Версия из Word</h3><div class="report-content">${previewHtml(candidate)}</div><pre>${esc(newText)}</pre></section></div>`,
+   '<button class="btn" data-close>Отмена</button><button class="btn primary" id="confirm-template-import">Создать резервную копию и заменить шаблон</button>');
+  d.querySelector('.dialog')!.classList.add('wide-preview');
+  d.querySelector('#confirm-template-import')!.addEventListener('click',()=>{
+   const backupKey='mri-alliance.template-backups.v1',previousTemplates=localStorage.getItem(KEYS.templates),backupRecord={id:crypto.randomUUID(),templateId,templateTitle:template.title,createdAt:new Date().toISOString(),doc:old};
+   try{
+    const oldBackups=localStorage.getItem(backupKey),backups=oldBackups?JSON.parse(oldBackups):[];
+    if(!Array.isArray(backups))throw new Error('Повреждено хранилище резервных копий шаблонов.');
+    const nextBackups=[...backups,backupRecord];localStorage.setItem(backupKey,JSON.stringify(nextBackups));
+    const verified=JSON.parse(localStorage.getItem(backupKey)??'null');
+    if(!Array.isArray(verified)||JSON.stringify(verified.at(-1))!==JSON.stringify(backupRecord))throw new Error('Не удалось проверить резервную копию исходного шаблона.');
+    const nextOverrides={...overrides,[templateId]:candidate};localStorage.setItem(KEYS.templates,JSON.stringify(nextOverrides));
+    const saved=JSON.parse(localStorage.getItem(KEYS.templates)??'null');
+    if(!saved||JSON.stringify(saved[templateId])!==JSON.stringify(candidate))throw new Error('Не удалось проверить сохранённый шаблон.');
+    overrides=nextOverrides;renderTemplates();closeDialog();toast(`Шаблон «${template.title}» заменён. Резервная копия сохранена локально.`);
+   }catch(error){
+    if(previousTemplates===null)localStorage.removeItem(KEYS.templates);else try{localStorage.setItem(KEYS.templates,previousTemplates);}catch{}
+    toast(`Импорт отменён: ${(error as Error).message}. Исходный шаблон сохранён.`,true);
+   }
+  });
+ }catch(error){toast(`Не удалось импортировать шаблон: ${(error as Error).message}`,true);}
+};
+$('#restore-template-backup').onclick=()=>{
+ const backupKey='mri-alliance.template-backups.v1';let backups:unknown[];
+ try{backups=JSON.parse(localStorage.getItem(backupKey)??'[]');if(!Array.isArray(backups))throw new Error();}catch{toast('Не удалось прочитать резервные копии шаблонов.',true);return;}
+ const current=backups.map((entry,index)=>({entry,index})).filter(({entry})=>entry&&typeof entry==='object'&&typeof (entry as any).templateId==='string'&&reportTemplates.some(t=>t.id===(entry as any).templateId)&&Boolean((entry as any).doc?.type==='doc'));
+ if(!current.length){dialog('Резервные копии шаблонов','<p>Пока нет сохранённых копий шаблонов.</p>','<button class="btn" data-close>Закрыть</button>');return;}
+ const markup=current.slice().reverse().map(({entry,index})=>{const item=entry as any;return `<div class="template-backup-row"><div><strong>${esc(item.templateTitle??item.templateId)}</strong><small>${esc(item.createdAt??'Дата неизвестна')}</small></div><button class="btn" data-restore-template-backup="${index}">Восстановить</button></div>`;}).join('');
+ const d=dialog('Резервные копии шаблонов',`<p>Перед восстановлением текущая версия также будет сохранена отдельной копией.</p>${markup}`,'<button class="btn" data-close>Закрыть</button>');
+ d.querySelectorAll<HTMLElement>('[data-restore-template-backup]').forEach(button=>button.addEventListener('click',()=>{
+  const item=backups[Number(button.dataset.restoreTemplateBackup)] as any,template=reportTemplates.find(t=>t.id===item?.templateId);if(!template)return;
+  let restored:RichNode;try{restored=validateTemplate(item.doc);}catch(error){toast(`Резервная копия повреждена: ${(error as Error).message}`,true);return;}
+  const confirmDialog=dialog(`Восстановить «${template.title}»?`,'<p>Текущий вариант будет сохранён как резервная копия. Протоколы пациентов не изменяются.</p>','<button class="btn" data-close>Отмена</button><button class="btn primary" id="confirm-template-backup-restore">Сохранить копию и восстановить</button>');
+  confirmDialog.querySelector('#confirm-template-backup-restore')!.addEventListener('click',()=>{
+   try{const now=overrides[item.templateId]??makeTemplateDocument(item.templateId),record={id:crypto.randomUUID(),templateId:item.templateId,templateTitle:template.title,createdAt:new Date().toISOString(),doc:now};const next=[...backups,record];localStorage.setItem(backupKey,JSON.stringify(next));const checked=JSON.parse(localStorage.getItem(backupKey)??'null');if(!Array.isArray(checked)||JSON.stringify(checked.at(-1))!==JSON.stringify(record))throw new Error('Не удалось проверить резервную копию текущей версии.');const nextOverrides={...overrides,[item.templateId]:restored};localStorage.setItem(KEYS.templates,JSON.stringify(nextOverrides));const saved=JSON.parse(localStorage.getItem(KEYS.templates)??'null');if(JSON.stringify(saved?.[item.templateId])!==JSON.stringify(restored))throw new Error('Не удалось проверить восстановленный шаблон.');overrides=nextOverrides;renderTemplates();closeDialog();toast(`Шаблон «${template.title}» восстановлен.`);}catch(error){toast(`Восстановление отменено: ${(error as Error).message}`,true);}
+  });
+ }));
+};
 async function previewReport(){
  const cleanupExport=mountExportEditor();
  try{
@@ -457,7 +524,7 @@ async function previewReport(){
  finally{cleanupExport();}
 }
 $('#preview-report').onclick=previewReport;
-$('#report-file').onchange=async e=>{const input=e.target as HTMLInputElement,file=input.files?.[0];input.value='';if(!file)return;try{if(file.size>20_000_000)throw new Error('Максимальный размер файла 20 МБ.');const result=file.name.toLowerCase().endsWith('.docx')?await importOwnDocx(await file.arrayBuffer()):validateDraft(JSON.parse(await file.text()));if(!result)throw new Error('Это сторонний файл Word. Откройте DOCX, сохранённый из МРТ Альянс, или скопируйте текст из Word.');if(templateMode)throw new Error('Завершите редактирование шаблона.');const doc=prepareInlineDocument(result.doc);editor.schema.nodeFromJSON(doc).check();const open=()=>{if(templateMode)return;if('templateId' in result&&reportTemplates.some(t=>t.id===result.templateId)){activeTemplateId=String(result.templateId);selectedAreaId=reportTemplates.find(t=>t.id===activeTemplateId)!.areaId;renderTemplates();}if('kind' in result&&result.kind==='template'){const next=validateTemplate(promoteInlineTemplate(doc));const all={...overrides,[activeTemplateId]:next};try{localStorage.setItem(KEYS.templates,JSON.stringify(all));overrides=all;}catch{toast('Не удалось сохранить шаблон.',true);return;}}createReportTab(activeTemplateId,doc);closeDialog();toast('Документ открыт в отдельной вкладке.');};open();}catch(e){toast((e as Error).message,true);}};
+$('#report-file').onchange=async e=>{const input=e.target as HTMLInputElement,file=input.files?.[0];input.value='';if(!file)return;try{if(file.size>20_000_000)throw new Error('Максимальный размер файла 20 МБ.');const result=file.name.toLowerCase().endsWith('.docx')?await importOwnDocx(await file.arrayBuffer()):validateDraft(JSON.parse(await file.text()));if(!result)throw new Error('Это сторонний файл Word. Откройте DOCX, сохранённый из МРТ Альянс, или скопируйте текст из Word.');if('kind' in result&&result.kind==='template')throw new Error('Файл является шаблоном. Используйте «Импортировать шаблон из Word», чтобы сначала проверить изменения и сохранить резервную копию.');if(templateMode)throw new Error('Завершите редактирование шаблона.');const doc=prepareInlineDocument(result.doc);editor.schema.nodeFromJSON(doc).check();if('templateId' in result&&reportTemplates.some(t=>t.id===result.templateId)){activeTemplateId=String(result.templateId);selectedAreaId=reportTemplates.find(t=>t.id===activeTemplateId)!.areaId;renderTemplates();}createReportTab(activeTemplateId,doc);closeDialog();toast('Документ открыт в отдельной вкладке.');}catch(e){toast((e as Error).message,true);}};
 $('#copy-report').onclick=async()=>{const box=document.createElement('div');box.innerHTML=DOMPurify.sanitize(editor.getHTML());box.querySelectorAll<HTMLElement>('[data-template-field]').forEach(el=>{el.style.backgroundColor=el.classList.contains('is-empty')?'#fff0a4':'transparent';});const html=`<html><body><style>body{font-family:Arial,sans-serif;font-size:12pt;line-height:1.05}p{margin:0 0 5pt}table{border-collapse:collapse}td,th{border:1px solid #bbb;padding:4px}</style>${box.innerHTML}</body></html>`;try{if(window.desktop)await window.desktop.copyReport(html,editor.getText());else await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([editor.getText()],{type:'text/plain'})})]);toast('Описание скопировано с форматированием.');}catch{toast('Выделите текст и скопируйте его сочетанием Ctrl+C.',true);}};
 async function printPDF(confirmed=false){
  if(!confirmed&&!confirmYellowExport(()=>void printPDF(true)))return;

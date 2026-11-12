@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import { importOwnDocx } from '../src/docx.ts';
 import { reportTemplates } from '../src/catalog.ts';
-import { unzipSync, strFromU8 } from 'fflate';
+import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 
 const root=process.cwd(), output=path.join(root,'test-output');
 await mkdir(output,{recursive:true});
@@ -240,6 +240,28 @@ try{
  assert.equal(await page.locator('#template-name').innerText(),'ГМ');
  assert.equal(await page.locator('.report-content').count(),1);
  console.log('PASS: zone → template changes and imported DOCX restores original report.');
+
+ const templateBefore=await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.templates.v4')??'{}')['head-gm']);
+ const templateDownload=path.join(output,'sidebar-template.docx');await rm(templateDownload,{force:true});
+ await application.evaluate(({session},dest)=>session.defaultSession.once('will-download',(_event,item)=>item.setSavePath(dest)),templateDownload);
+ await page.locator('#export-template-docx').click();
+ let templateBytes;for(let i=0;i<200;i++){try{templateBytes=await readFile(templateDownload);if(templateBytes.length)break;}catch{}await new Promise(r=>setTimeout(r,50));}
+ assert.ok(templateBytes?.length,'separate library template export completes');const originalZip=unzipSync(templateBytes),originalXml=strFromU8(originalZip['word/document.xml']);
+ const firstText=/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/.exec(originalXml)?.[1];assert.ok(firstText,'template DOCX contains Word text');
+ const editedZip={...originalZip,'word/document.xml':strToU8(originalXml.replace(firstText,'СИНТЕТИЧЕСКИЙ ШАБЛОН ИЗ WORD'))};const editedFile=path.join(output,'sidebar-template-edited.docx');await writeFile(editedFile,zipSync(editedZip));
+ const backupCount=await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-backups.v1')??'[]').length);
+ await page.locator('#template-file').setInputFiles(editedFile);await page.locator('#confirm-template-import').waitFor();
+ assert.match(await page.locator('.template-import-diff').innerText(),/СИНТЕТИЧЕСКИЙ ШАБЛОН ИЗ WORD/);
+ assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.templates.v4')??'{}')['head-gm']),templateBefore);
+ await page.locator('[role="dialog"] footer [data-close]').click();await page.waitForTimeout(100);
+ assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-backups.v1')??'[]').length),backupCount,'cancel does not create a backup or mutate templates');
+ await page.locator('#template-file').setInputFiles(editedFile);await page.locator('#confirm-template-import').waitFor();await page.locator('#confirm-template-import').click();
+ const updatedTemplate=await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.templates.v4')??'{}')['head-gm']);
+ assert.match(JSON.stringify(updatedTemplate),/СИНТЕТИЧЕСКИЙ ШАБЛОН ИЗ WORD/);assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-backups.v1')??'[]').length),backupCount+1);
+ await page.locator('#restore-template-backup').click();await page.locator('[data-restore-template-backup]').first().click();await page.locator('#confirm-template-backup-restore').click();
+ assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.templates.v4')??'{}')['head-gm']),templateBefore);
+ assert.match(await page.locator('.report-content').innerText(),/Тестовый Пациент/,'template restore does not modify open patient reports');
+ console.log('PASS: template DOCX export, Word edit preview/cancel, verified backup, replacement and restore are isolated from patient reports.');
 
  await page.locator('[data-tab="blocks"]').click();await page.locator('#new-block').click();
  await page.locator('#block-title').fill('Проверочный блок');await page.locator('#block-tags').fill('контроль нейро');

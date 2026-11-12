@@ -162,13 +162,57 @@ test('own DOCX restores fields, rich JSON, modules, custom library, cached modul
   assert.deepEqual(result.cache, options.cache);
 });
 
-test('external Word edits and style edits cannot silently restore stale Studio state', async () => {
-  const first = await exported({ type: 'doc', content: [p('До изменения')] });
+test('Word text edits are imported while the original template identity and document metadata survive', async () => {
+  const doc = { type: 'doc', attrs: { sourceFormat: 'alliance-template', pageWidthMm: 210 }, content: [p('До изменения'), p('Второй абзац')] };
+  const first = await exported(doc, { kind: 'template', templateId: 'head-gm' });
   first.zip['word/document.xml'] = strToU8(first.xml.replace('До изменения', 'Изменено в Word'));
-  await assert.rejects(importOwnDocx(zipSync(first.zip)), /изменён в Word/);
-  const second = await exported(makeDocument());
+  const imported = await importOwnDocx(zipSync(first.zip));
+  assert.equal(imported.kind, 'template'); assert.equal(imported.templateId, 'head-gm'); assert.equal(imported.doc.attrs.pageWidthMm, 210);
+  assert.match(JSON.stringify(imported.doc), /Изменено в Word/); assert.equal(imported.editedInWord, true);
+});
+
+test('Word import round-trips paragraph changes, tables, formatting and yellow highlights repeatedly', async () => {
+  const cell = (text, type = 'tableCell') => ({ type, content: [p(text)] });
+  const doc = { type: 'doc', attrs: { sourceFormat: 'alliance-template' }, content: [
+    { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Заголовок', marks: [{ type: 'bold' }] }] },
+    { type: 'paragraph', content: [{ type: 'text', text: 'Первый абзац', marks: [{ type: 'italic' }] }, { type: 'text', text: ' выделен', marks: [{ type: 'highlight', attrs: { color: '#ffff00' } }] }] },
+    p('Второй абзац'), { type: 'table', content: [{ type: 'tableRow', content: [cell('Ячейка 1', 'tableHeader'), cell('Ячейка 2')] }] },
+  ] };
+  const source = await exported(doc, { kind: 'template', templateId: 'head-gm' });
+  source.zip['word/document.xml'] = strToU8(source.xml.replace('Второй абзац', 'Исправленный абзац'));
+  let imported = await importOwnDocx(zipSync(source.zip));
+  assert.match(JSON.stringify(imported.doc), /Исправленный абзац/);
+  assert.ok(imported.doc.content.some(node => node.type === 'table'));
+  const text = JSON.stringify(imported.doc); assert.match(text, /italic/); assert.match(text, /highlight/);
+  const once = structuredClone(imported.doc), paragraphCount = once.content.filter(node => node.type === 'paragraph').length;
+  const second = await exported(imported.doc, { kind: 'template', templateId: imported.templateId });
+  imported = await importOwnDocx(second.blob);
+  assert.deepEqual(imported.doc, once); assert.equal(imported.doc.content.filter(node => node.type === 'paragraph').length, paragraphCount);
+  assert.equal(imported.templateId, 'head-gm');
+});
+
+test('template placeholder identity survives Word splitting its visible marker across text runs', async () => {
+  const doc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'reportField', attrs: { id: 'stable-field-id', hint: 'Имя пациента', value: '' } }] }] };
+  const source = await exported(doc, { kind: 'template', templateId: 'head-gm' });
+  source.zip['word/document.xml'] = strToU8(source.xml.replace('⟦Имя пациента⟧', '⟦Имя</w:t></w:r><w:r><w:t> пациента⟧'));
+  const imported = await importOwnDocx(zipSync(source.zip));
+  const field = imported.doc.content[0].content.find(node => node.type === 'reportField');
+  assert.equal(field.attrs.id, 'stable-field-id'); assert.equal(field.attrs.hint, 'Имя пациента');
+});
+
+test('Word import honors removal of yellow highlighting instead of treating all pale fills as yellow', async () => {
+  const doc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Вариант', marks: [{ type: 'highlight', attrs: { color: '#ffff00' } }] }] }] };
+  const source = await exported(doc, { kind: 'template', templateId: 'head-gm' });
+  source.zip['word/document.xml'] = strToU8(source.xml.replace('w:fill="FFFF00"', 'w:fill="FFFFFF"'));
+  const imported = await importOwnDocx(zipSync(source.zip));
+  assert.doesNotMatch(JSON.stringify(imported.doc), /highlight/);
+});
+
+test('Word style-only edits are imported with a warning instead of restoring stale metadata silently', async () => {
+  const second = await exported(makeDocument(), { kind: 'template', templateId: 'head-gm' });
   second.zip['word/styles.xml'] = strToU8(strFromU8(second.zip['word/styles.xml']).replace('Arial', 'Georgia'));
-  await assert.rejects(importOwnDocx(zipSync(second.zip)), /Форматирование или структура/);
+  const imported = await importOwnDocx(zipSync(second.zip));
+  assert.equal(imported.editedInWord, true); assert.ok(imported.importWarnings.length); assert.deepEqual(imported.doc, makeDocument());
 });
 
 test('foreign DOCX returns null and corrupt or malformed Studio state is rejected', async () => {
@@ -297,7 +341,8 @@ test('source font faces are embedded with Word font relationships and cannot be 
   assert.match(strFromU8(zip['word/settings.xml']), /<w:embedTrueTypeFonts\/>/);
   assert.deepEqual((await importOwnDocx(blob)).doc, doc);
   zip[parts[0]][100] ^= 1;
-  await assert.rejects(importOwnDocx(zipSync(zip)), /Форматирование или структура/);
+  const imported = await importOwnDocx(zipSync(zip));
+  assert.ok(imported.importWarnings.length);
 });
 
 test('line spacing selected in the editor overrides a source paragraph baseline in Word', async () => {

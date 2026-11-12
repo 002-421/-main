@@ -31,7 +31,7 @@ export type DocxOptions = {
   /** Full source font faces keep Word layout stable on machines without that font installed. */
   fonts?: EmbeddedDocxFont[];
 };
-export type ImportedDocx = ReturnType<typeof validateDraft> & { kind: 'report' | 'template'; templateId?: string };
+export type ImportedDocx = ReturnType<typeof validateDraft> & { kind: 'report' | 'template'; templateId?: string; importWarnings?: string[]; editedInWord?: boolean };
 
 function color(value: unknown): string | undefined {
   if (typeof value !== 'string') return;
@@ -385,6 +385,145 @@ function validatedTemplateId(value: unknown): string | undefined {
   return value;
 }
 
+type XmlElement = { name: string; attrs: Record<string, string>; children: (XmlElement | string)[] };
+function decodeXml(value: string): string {
+  return value.replace(/&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (_all, entity: string) => {
+    if (entity[0] === '#') { const hex = entity[1]?.toLowerCase() === 'x'; const code = Number.parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10); return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : ''; }
+    return ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" } as Record<string, string>)[entity.toLowerCase()] ?? '';
+  });
+}
+/** Bounded, non-validating tokenizer for the small OOXML subset used by Word documents. */
+function parseXml(xml: string): XmlElement {
+  if (xml.length > MAX_STATE_BYTES * 2 || /<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error('Недопустимая структура XML в файле Word.');
+  const root: XmlElement = { name: '#root', attrs: {}, children: [] }, stack = [root];
+  const tokens = xml.match(/<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<![^>]*>|<[^>]+>|[^<]+/g) ?? [];
+  if (tokens.length > 500_000) throw new Error('В документе Word слишком много элементов.');
+  for (const token of tokens) {
+    if (token.startsWith('<!--') || token.startsWith('<?') || token.startsWith('<!')) continue;
+    if (token.startsWith('</')) { if (stack.length < 2 || stack.at(-1)!.name !== token.slice(2, -1).trim()) throw new Error('Повреждена структура XML в файле Word.'); stack.pop(); continue; }
+    if (token.startsWith('<')) {
+      const match = /^<([\w:.-]+)([\s\S]*?)\/?\s*>$/.exec(token); if (!match) throw new Error('Повреждена структура XML в файле Word.');
+      const attrs: Record<string, string> = {}; const attrRe = /([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g; let attr: RegExpExecArray | null;
+      while ((attr = attrRe.exec(match[2]))) attrs[attr[1]] = decodeXml(attr[2] ?? attr[3] ?? '');
+      const el: XmlElement = { name: match[1], attrs, children: [] }; stack.at(-1)!.children.push(el);
+      if (!/\/\s*>$/.test(token)) { if (stack.length > 64) throw new Error('Слишком глубокая структура XML в файле Word.'); stack.push(el); }
+    } else if (token) stack.at(-1)!.children.push(decodeXml(token));
+  }
+  if (stack.length !== 1) throw new Error('Повреждена структура XML в файле Word.');
+  return root;
+}
+const elements = (node: XmlElement, name: string) => node.children.filter((child): child is XmlElement => typeof child !== 'string' && child.name === name);
+const first = (node: XmlElement, name: string) => elements(node, name)[0];
+function descendants(node: XmlElement, name: string, found: XmlElement[] = []): XmlElement[] { for (const child of node.children) if (typeof child !== 'string') { if (child.name === name) found.push(child); descendants(child, name, found); } return found; }
+function xmlText(node: XmlElement): string { return node.children.map(child => typeof child === 'string' ? child : xmlText(child)).join(''); }
+function parseWordMarks(run: XmlElement): RichNode['marks'] {
+  const props = first(run, 'w:rPr'); if (!props) return [];
+  const marks: NonNullable<RichNode['marks']> = [];
+  for (const [tag, type] of [['w:b', 'bold'], ['w:i', 'italic'], ['w:u', 'underline'], ['w:strike', 'strike'], ['w:vertAlign', 'subscript']] as const) {
+    const el = first(props, tag); if (!el || el.attrs['w:val'] === '0' || el.attrs['w:val'] === 'none') continue;
+    if (tag === 'w:vertAlign') { marks.push({ type: el.attrs['w:val'] === 'superscript' ? 'superscript' : 'subscript' }); continue; }
+    marks.push({ type });
+  }
+  const style: Record<string, string> = {};
+  const fonts = first(props, 'w:rFonts'); if (fonts) { const family = fonts.attrs['w:ascii'] ?? fonts.attrs['w:hAnsi'] ?? fonts.attrs['w:eastAsia']; if (family) style.fontFamily = family; }
+  const size = first(props, 'w:sz')?.attrs['w:val']; if (size && /^\d+$/.test(size)) style.fontSize = `${Number(size) * 2 / 3}pt`;
+  const textColor = first(props, 'w:color')?.attrs['w:val']; if (textColor && /^[\da-f]{6}$/i.test(textColor)) style.color = `#${textColor}`;
+  const shading = first(props, 'w:shd'), highlight = first(props, 'w:highlight')?.attrs['w:val'];
+  const fill = shading?.attrs['w:fill']; if (highlight === 'yellow' || (fill && ['fff0a4', 'ffff00'].includes(fill.toLowerCase()))) marks.push({ type: 'highlight', attrs: { color: '#ffff00' } });
+  else if (fill && /^[\da-f]{6}$/i.test(fill) && !['auto', 'ffffff'].includes(fill.toLowerCase())) marks.push({ type: 'highlight', attrs: { color: `#${fill}` } });
+  if (Object.keys(style).length) marks.push({ type: 'textStyle', attrs: style });
+  return marks;
+}
+function parseWordParagraph(node: XmlElement): RichNode {
+  const props = first(node, 'w:pPr'), pStyle = first(props ?? node, 'w:pStyle')?.attrs['w:val'] ?? '';
+  const level = /^Heading([1-3])$/i.exec(pStyle)?.[1];
+  const attrs: Record<string, unknown> = {};
+  const align = first(props ?? node, 'w:jc')?.attrs['w:val']; if (align && ['left', 'center', 'right', 'both', 'distribute'].includes(align)) attrs.textAlign = align === 'both' || align === 'distribute' ? 'justify' : align;
+  if (level) attrs.level = Number(level);
+  const ind = first(props ?? node, 'w:ind'); if (ind?.attrs['w:firstLine']) attrs.firstLineIndentPt = Number(ind.attrs['w:firstLine']) / 20; if (ind?.attrs['w:left']) attrs.leftIndentPt = Number(ind.attrs['w:left']) / 20; if (ind?.attrs['w:right']) attrs.rightIndentPt = Number(ind.attrs['w:right']) / 20;
+  const spacing = first(props ?? node, 'w:spacing'); if (spacing?.attrs['w:before']) attrs.spaceBeforePt = Number(spacing.attrs['w:before']) / 20; if (spacing?.attrs['w:after']) attrs.spaceAfterPt = Number(spacing.attrs['w:after']) / 20; if (spacing?.attrs['w:line'] && spacing.attrs['w:lineRule'] === 'auto') attrs.lineHeight = Number(spacing.attrs['w:line']) / 240;
+  if (pStyle) attrs.sourceStyle = pStyle;
+  const content: RichNode[] = [];
+  for (const child of node.children) {
+    if (typeof child === 'string' || child.name !== 'w:r') continue;
+    const marks = parseWordMarks(child);
+    for (const item of child.children) {
+      if (typeof item === 'string') continue;
+      if (item.name === 'w:t' || item.name === 'w:delText') { const text = xmlText(item); if (text) content.push({ type: 'text', text, ...(marks?.length ? { marks } : {}) }); }
+      else if (item.name === 'w:tab') content.push({ type: 'text', text: '\t', ...(marks?.length ? { marks } : {}) });
+      else if (item.name === 'w:br' && item.attrs['w:type'] === 'page') attrs.pageBreakBefore = true;
+      else if (item.name === 'w:br' || item.name === 'w:cr') content.push({ type: 'hardBreak' });
+    }
+  }
+  if (!content.length && first(props ?? node, 'w:pBdr')) return { type: 'horizontalRule' };
+  return { type: level ? 'heading' : 'paragraph', ...(Object.keys(attrs).length ? { attrs } : {}), content };
+}
+function parseWordTable(node: XmlElement): RichNode {
+  const rows = elements(node, 'w:tr').map((row, rowIndex) => ({ type: 'tableRow', content: elements(row, 'w:tc').map(cell => {
+    const span = Number(first(cell, 'w:tcPr') && first(first(cell, 'w:tcPr')!, 'w:gridSpan')?.attrs['w:val']) || 1;
+    const paragraphs = elements(cell, 'w:p').map(parseWordParagraph);
+    const attrs = span > 1 ? { colspan: Math.min(span, 32) } : {};
+    const rowType = rowIndex === 0 && Boolean(first(first(row, 'w:trPr') ?? row, 'w:tblHeader')) ? 'tableHeader' : 'tableCell';
+    return { type: rowType, attrs, content: paragraphs.length ? paragraphs : [{ type: 'paragraph', content: [] }] };
+  }) }));
+  return { type: 'table', content: rows };
+}
+function fieldsFromDraft(doc: RichNode): { id: string; hint: string }[] {
+  const fields: { id: string; hint: string }[] = [];
+  const visit = (node: RichNode) => { if (node.type === 'reportField' && typeof node.attrs?.id === 'string') fields.push({ id: node.attrs.id, hint: String(node.attrs.hint ?? '') }); node.content?.forEach(visit); };
+  visit(doc); return fields;
+}
+function restoreTemplateFields(doc: RichNode, original: RichNode): RichNode {
+  const fields = fieldsFromDraft(original); let index = 0;
+  const visit = (node: RichNode): RichNode => {
+    if (node.type === 'paragraph' || node.type === 'heading') {
+      const content: RichNode[] = [];
+      const insertTextGroup = (group: RichNode[]) => {
+        const joined = group.map(item => item.text ?? '').join(''), parts = group.map(item => ({ from: 0, to: 0, node: item }));
+        let offset = 0; for (const part of parts) { part.from = offset; offset += part.node.text?.length ?? 0; part.to = offset; }
+        const appendRange = (start: number, end: number) => { for (const part of parts) { const left = Math.max(start, part.from), right = Math.min(end, part.to); if (right > left) content.push({ ...part.node, text: joined.slice(left, right) }); } };
+        let cursor = 0, match: RegExpExecArray | null; const marker = /⟦([^⟧]{1,200})⟧/g;
+        while ((match = marker.exec(joined))) {
+          appendRange(cursor, match.index);
+          if (fields.length) {
+            const label = match[1], matchedAt = fields.findIndex((field, at) => at >= index && field.hint === label);
+            if (matchedAt < 0 && index >= fields.length) { content.push({ type: 'text', text: match[0], ...(parts.find(part => match!.index >= part.from && match!.index < part.to)?.node.marks ? { marks: parts.find(part => match!.index >= part.from && match!.index < part.to)?.node.marks } : {}) }); cursor = marker.lastIndex; continue; }
+            const field = fields[matchedAt >= 0 ? matchedAt : index]; index = Math.max(index, (matchedAt >= 0 ? matchedAt : index) + 1);
+            const marks = parts.find(part => match!.index >= part.from && match!.index < part.to)?.node.marks;
+            content.push({ type: 'reportField', attrs: { id: field.id, hint: label || field.hint, value: '' }, ...(marks ? { marks } : {}) });
+          } else appendRange(match.index, marker.lastIndex);
+          cursor = marker.lastIndex;
+        }
+        appendRange(cursor, joined.length);
+      };
+      let textGroup: RichNode[] = [];
+      const flush = () => { if (textGroup.length) insertTextGroup(textGroup); textGroup = []; };
+      for (const child of node.content ?? []) {
+        if (child.type === 'text') textGroup.push(child);
+        else { flush(); content.push(visit(child)); }
+      }
+      flush();
+      return { ...node, content };
+    }
+    return { ...node, ...(node.content ? { content: node.content.map(visit) } : {}) };
+  };
+  return visit(doc);
+}
+function parseEditedWordDocument(xml: string, original: RichNode): { doc: RichNode; warnings: string[] } {
+  const root = parseXml(xml), body = descendants(root, 'w:body')[0]; if (!body) throw new Error('В документе Word не найдена основная часть.');
+  const content: RichNode[] = [];
+  for (const child of body.children) if (typeof child !== 'string') {
+    if (child.name === 'w:p') content.push(parseWordParagraph(child));
+    else if (child.name === 'w:tbl') content.push(parseWordTable(child));
+  }
+  if (!content.length) throw new Error('В документе Word отсутствует текст шаблона.');
+  const warnings: string[] = [];
+  const unsupported = ['w:drawing', 'w:object', 'w:altChunk', 'w:sdt', 'w:ins', 'w:del', 'w:numPr', 'w:vMerge', 'w:hyperlink', 'w:footnoteReference', 'w:endnoteReference', 'w:sym', 'w:fldSimple'].reduce((sum, name) => sum + descendants(body, name).length, 0);
+  if (unsupported) warnings.push(`Не удалось полностью сохранить ${unsupported} неподдерживаемых элементов Word (изображения, списки, объекты или исправления). Проверьте предпросмотр.`);
+  const doc = restoreTemplateFields({ type: 'doc', attrs: structuredClone(original.attrs ?? {}), content }, original);
+  return { doc, warnings };
+}
+
 /** Generate a real, editable Word document entirely on this device. */
 export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Promise<Blob> {
   const draft = { format: 'mri-report-studio', version: draftVersion, profile: options.profile ?? 'brain', doc, customModules: options.customModules ?? [], cache: options.cache ?? {}, kind: options.kind ?? 'report', templateId: validatedTemplateId(options.templateId) };
@@ -482,13 +621,20 @@ export async function importOwnDocx(input: ArrayBuffer | Uint8Array | Blob): Pro
     metadata = JSON.parse(strFromU8(Uint8Array.from(raw, c => c.charCodeAt(0))));
   } catch { throw new Error('Повреждены редактируемые данные описания в файле Word.'); }
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) throw new Error('Повреждены редактируемые данные описания в файле Word.');
-  if (metadata.hashAlgorithm !== 'SHA-256' || metadata.documentHash !== await fingerprint(zip['word/document.xml'])) {
-    throw new Error('Этот файл был изменён в Word или другом редакторе. Чтобы не потерять изменения, откройте его в Word и скопируйте текст в новое описание.');
-  }
+  if (metadata.hashAlgorithm !== 'SHA-256' || typeof metadata.documentHash !== 'string') throw new Error('Повреждены контрольные данные Word-файла.');
+  const baseDraft = validateDraft(metadata.draft);
   const actualHashes = await contentHashes(zip);
-  if (!metadata.contentHashes || Object.keys(metadata.contentHashes).length !== Object.keys(actualHashes).length || Object.entries(actualHashes).some(([name, hash]) => metadata.contentHashes[name] !== hash)) {
-    throw new Error('Форматирование или структура этого файла изменены в Word или другом редакторе. Откройте его в Word и скопируйте изменения в новое описание.');
+  const documentChanged = metadata.documentHash !== await fingerprint(zip['word/document.xml']);
+  const contentChanged = !metadata.contentHashes || Object.keys(metadata.contentHashes).length !== Object.keys(actualHashes).length || Object.entries(actualHashes).some(([name, hash]) => metadata.contentHashes[name] !== hash);
+  const kind = metadata.draft.kind === 'template' ? 'template' : 'report';
+  const templateId = validatedTemplateId(metadata.draft.templateId);
+  let importedDoc = baseDraft.doc;
+  let importWarnings: string[] = [];
+  if (documentChanged) {
+    const parsed = parseEditedWordDocument(strFromU8(zip['word/document.xml']), importedDoc);
+    importedDoc = parsed.doc; importWarnings = parsed.warnings;
   }
-  const result = validateDraft(metadata.draft);
-  return { ...result, cache: validatedCache(metadata.draft.cache), kind: metadata.draft.kind === 'template' ? 'template' : 'report', templateId: validatedTemplateId(metadata.draft.templateId) };
+  if (contentChanged && !documentChanged) importWarnings.push('В документе изменены стили или другие элементы Word. Они не входят в поддерживаемое редактируемое содержимое шаблона.');
+  const result = validateDraft({ ...metadata.draft, doc: importedDoc });
+  return { ...result, cache: validatedCache(metadata.draft.cache), kind, templateId, editedInWord: documentChanged || contentChanged, importWarnings };
 }
