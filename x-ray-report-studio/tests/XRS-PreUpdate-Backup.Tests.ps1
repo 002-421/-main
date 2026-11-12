@@ -70,6 +70,15 @@ try {
     Assert-True (@($manifestOne.files).Count -eq 4) 'Manifest file count does not match expected synthetic files.'
     $manifestText = Get-Content -LiteralPath (Join-Path $backupOne.Path 'manifest.json') -Raw -Encoding UTF8
     Assert-True (-not $manifestText.Contains($syntheticOne) -and -not $manifestText.Contains($syntheticTwo)) 'Manifest leaked synthetic file contents.'
+    $restoredSettings = Join-Path $tempRoot 'восстановление с пробелом\профиль\settings.json'
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $restoredSettings))
+    [IO.File]::Copy((Join-Path $backupOne.Path 'data\profile\settings.json'), $restoredSettings, $false)
+    Assert-True ([IO.File]::ReadAllText($restoredSettings) -ceq $syntheticOne) 'A synthetic settings file could not be restored from the verified backup.'
+    Assert-Fails { Get-XrsSha256 (Join-Path $tempRoot 'отсутствующий файл.json') } 'An absent file was accepted as hashable.'
+    $nestedRestored = Join-Path $tempRoot 'восстановление с пробелом\профиль\Local Storage\leveldb\черновик-искусственный.log'
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $nestedRestored))
+    [IO.File]::Copy((Join-Path $backupOne.Path 'data\profile\Local Storage\leveldb\черновик-искусственный.log'), $nestedRestored, $false)
+    Assert-True ([IO.File]::ReadAllText($nestedRestored) -ceq $syntheticTwo) 'A nested Cyrillic file could not be restored from the verified backup.'
 
     $phase = 'create unique second backup and verify tamper detection'
     $backupTwo = New-XrsVerifiedBackup -ProfilePath $profile -DestinationRoot $destination `
@@ -79,6 +88,8 @@ try {
     $tamperTarget = Join-Path $backupTwo.Path 'data\profile\settings.json'
     [IO.File]::AppendAllText($tamperTarget, 'tampered', [Text.UTF8Encoding]::new($false))
     Assert-Fails { Assert-XrsBackupIntegrity $backupTwo.Path } 'A modified backup passed manifest verification.'
+    Remove-Item -LiteralPath (Join-Path $backupTwo.Path 'data\dictionaries\dictionary-0001.json') -Force
+    Assert-Fails { Assert-XrsBackupIntegrity $backupTwo.Path } 'A backup with a missing file passed manifest verification.'
     $null = Assert-XrsBackupIntegrity $backupOne.Path
 
     $phase = 'refuse unsafe destinations, insufficient space and running Electron'

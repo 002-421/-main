@@ -149,8 +149,19 @@ function Get-XrsExternalDictionaries([string]$ProfileRoot, [string]$RequestedPat
 }
 
 function Get-XrsSha256([string]$Path) {
-    try { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() }
-    catch { throw 'A file could not be hashed; backup was refused.' }
+    $stream = $null
+    $sha = $null
+    try {
+        $fullPath = [IO.Path]::GetFullPath($Path)
+        $stream = [IO.File]::Open($fullPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        $sha = [Security.Cryptography.SHA256]::Create()
+        $digest = $sha.ComputeHash($stream)
+        return ([BitConverter]::ToString($digest).Replace('-', '').ToLowerInvariant())
+    } catch { throw 'A file could not be hashed; backup was refused.' }
+    finally {
+        if ($null -ne $sha) { $sha.Dispose() }
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
 }
 
 function Assert-XrsBackupIntegrity([string]$BackupPath) {
