@@ -124,6 +124,7 @@ class SetupPackageTests(unittest.TestCase):
             self.assertEqual(first.read_bytes(), second.read_bytes())
             with ZipFile(first) as archive:
                 self.assertEqual(archive.getinfo('Setup/file.txt').compress_type, ZIP_STORED)
+                self.assertEqual(archive.getinfo('Setup/file.txt').create_system, 3)
 
 
 if __name__ == '__main__':

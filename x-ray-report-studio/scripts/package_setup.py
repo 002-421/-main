@@ -57,6 +57,7 @@ def write_zip(directory, output, compression=ZIP_DEFLATED):
         for file in sorted(files, key=lambda path: path.relative_to(directory.parent).as_posix()):
             info = ZipInfo(file.relative_to(directory.parent).as_posix(),
                            date_time=(2026, 1, 1, 0, 0, 0))
+            info.create_system = 3  # Use the same ZIP creator metadata on Windows and Unix.
             info.compress_type = compression
             info.external_attr = 0o100644 << 16
             package.writestr(info, file.read_bytes(), compresslevel=compresslevel)
