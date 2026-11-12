@@ -66,6 +66,20 @@ class SetupPackageTests(unittest.TestCase):
         self.assertFalse(is_single_platform_package({'os': ['linux', 'win32'], 'cpu': ['x64', 'arm64']}))
         self.assertFalse(is_single_platform_package({}))
 
+    def test_zip_entry_order_uses_case_sensitive_posix_names(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            root = Path(directory)
+            source = root / 'case-order'
+            source.mkdir()
+            for name in ('b.txt', 'Z.txt', 'a.txt'):
+                (source / name).write_text(name, encoding='utf-8')
+            archive = root / 'case-order.zip'
+            write_zip(source, archive, ZIP_STORED)
+            with ZipFile(archive) as package:
+                self.assertEqual(package.namelist(), [
+                    'case-order/Z.txt', 'case-order/a.txt', 'case-order/b.txt'
+                ])
+
     def test_reports_safe_entry_diagnostics_without_payload_text(self):
         reference = self.root / 'diagnostic-reference.zip'
         candidate = self.root / 'diagnostic-candidate.zip'

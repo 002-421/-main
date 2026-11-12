@@ -53,13 +53,13 @@ def write_zip(directory, output, compression=ZIP_DEFLATED):
     """Use stable timestamps and regular file permissions in the download ZIP."""
     compresslevel = 9 if compression == ZIP_DEFLATED else None
     with ZipFile(output, 'w', compression, compresslevel=compresslevel) as package:
-        for file in sorted(directory.rglob('*')):
-            if file.is_file():
-                info = ZipInfo(file.relative_to(directory.parent).as_posix(),
-                               date_time=(2026, 1, 1, 0, 0, 0))
-                info.compress_type = compression
-                info.external_attr = 0o100644 << 16
-                package.writestr(info, file.read_bytes(), compresslevel=compresslevel)
+        files = (file for file in directory.rglob('*') if file.is_file())
+        for file in sorted(files, key=lambda path: path.relative_to(directory.parent).as_posix()):
+            info = ZipInfo(file.relative_to(directory.parent).as_posix(),
+                           date_time=(2026, 1, 1, 0, 0, 0))
+            info.compress_type = compression
+            info.external_attr = 0o100644 << 16
+            package.writestr(info, file.read_bytes(), compresslevel=compresslevel)
     print(f'{output.relative_to(ROOT)}: {output.stat().st_size:,} bytes', flush=True)
 
 
