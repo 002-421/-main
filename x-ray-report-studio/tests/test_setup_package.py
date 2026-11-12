@@ -6,7 +6,8 @@ from zipfile import ZIP_STORED, ZipFile
 
 from scripts.package_setup import ROOT, is_single_platform_package, write_zip
 from scripts.verify_setup_package import (
-    compare_zip_contents, verify_setup_package, write_candidate_manifest, zip_entry_diagnostics,
+    compare_zip_contents, verify_setup_package, write_candidate_manifest,
+    zip_container_diagnostics, zip_entry_diagnostics,
 )
 
 
@@ -98,6 +99,12 @@ class SetupPackageTests(unittest.TestCase):
         self.assertEqual(licenses['missingLicenseHeadings'], ['package-old 1.0'])
         self.assertNotIn('other body', str(diagnostics))
         self.assertNotIn('license body', str(diagnostics))
+
+    def test_reports_zip_container_metadata_without_entry_contents(self):
+        details = zip_container_diagnostics(self.archive, self.archive)
+        self.assertTrue(details['entryOrderMatches'])
+        self.assertEqual(details['entryMetadataDifferences'], [])
+        self.assertTrue(details['archiveCommentMatches'])
 
     def test_writes_candidate_manifest_without_touching_canonical_manifest(self):
         output = self.root / 'latest-0.4.54-candidate.json'

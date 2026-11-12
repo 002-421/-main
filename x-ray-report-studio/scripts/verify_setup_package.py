@@ -116,6 +116,41 @@ def zip_entry_diagnostics(candidate_path: Path, reference_path: Path) -> list[di
     return rows
 
 
+def zip_container_diagnostics(candidate_path: Path, reference_path: Path) -> dict[str, object]:
+    """Compare ZIP metadata only; never expose entry payloads."""
+    fields = (
+        'compress_type', 'date_time', 'create_system', 'create_version', 'extract_version',
+        'flag_bits', 'volume', 'internal_attr', 'external_attr', 'extra', 'comment',
+        'CRC', 'file_size', 'compress_size',
+    )
+    with ZipFile(candidate_path) as candidate, ZipFile(reference_path) as reference:
+        candidate_infos = candidate.infolist()
+        reference_infos = reference.infolist()
+        candidate_by_name = {info.filename: info for info in candidate_infos}
+        reference_by_name = {info.filename: info for info in reference_infos}
+        entry_differences = []
+        for name in sorted(candidate_by_name.keys() & reference_by_name.keys()):
+            left, right = candidate_by_name[name], reference_by_name[name]
+            changed = {}
+            for field in fields:
+                left_value, right_value = getattr(left, field), getattr(right, field)
+                if left_value != right_value:
+                    if isinstance(left_value, bytes):
+                        left_value, right_value = left_value.hex(), right_value.hex()
+                    changed[field] = {'candidate': left_value, 'reference': right_value}
+            if changed:
+                entry_differences.append({'name': name, 'fields': changed})
+        left_order = [info.filename for info in candidate_infos]
+        right_order = [info.filename for info in reference_infos]
+        return {
+            'entryOrderMatches': left_order == right_order,
+            'candidateOrder': left_order if left_order != right_order else [],
+            'referenceOrder': right_order if left_order != right_order else [],
+            'archiveCommentMatches': candidate.comment == reference.comment,
+            'entryMetadataDifferences': entry_differences,
+        }
+
+
 def write_candidate_manifest(url: str, version: str, sha256: str, output: Path) -> None:
     parsed = urlparse(url)
     if parsed.scheme != 'https' or parsed.hostname not in ALLOWED_HOSTS:
@@ -142,8 +177,10 @@ def main() -> None:
     if args.reference_zip:
         differences = compare_zip_contents(args.zip, args.reference_zip)
         details = zip_entry_diagnostics(args.zip, args.reference_zip)
+        container = zip_container_diagnostics(args.zip, args.reference_zip)
         print('REFERENCE ENTRY COMPARISON: ' + json.dumps(
-            {'entries': differences, 'details': details}, ensure_ascii=False, separators=(',', ':')
+            {'entries': differences, 'details': details, 'container': container},
+            ensure_ascii=False, separators=(',', ':')
         ))
     if args.candidate_url or args.manifest_out:
         if not args.candidate_url or not args.manifest_out:
