@@ -1,0 +1,46 @@
+name: XRS-07A/B Windows editor validation
+
+on:
+  push:
+    branches: [codex/xrs-07-editor-template-stability]
+  pull_request:
+    paths:
+      - 'x-ray-report-studio/**'
+      - '.github/workflows/xrs-07-windows-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-editor:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: x-ray-report-studio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: x-ray-report-studio/package-lock.json
+      - run: npm ci
+      - name: Install pinned Electron runtime
+        run: npm run desktop:install
+      - name: Install Chromium for tab lifecycle scenario
+        run: npx playwright-core install chromium
+      - run: npm run build
+      - run: npm test
+      - name: Workspace recovery and tab isolation
+        shell: pwsh
+        run: |
+          npm run test:tab-isolation
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run test:workspace-recovery
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: DOCX, PDF and Electron editor integration
+        run: npm run test:browser
+      - name: Export and preserve patient tab lifecycle (1, 2, 5, 12 tabs)
+        run: npm run test:tab-lifecycle

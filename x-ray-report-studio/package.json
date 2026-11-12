@@ -15,6 +15,7 @@
     "test:history-browser": "node tests/report-history-browser.mjs",
     "test:history-benchmark": "node --expose-gc tests/report-history-benchmark.mjs",
     "test:tab-isolation": "node tests/tab-isolation-browser.mjs",
+    "test:tab-lifecycle": "node tests/report-tab-lifecycle-browser.mjs",
     "test:workspace-recovery": "node tests/workspace-recovery-browser.mjs",
     "test:windows-integration": "node --test tests/windows-integration.test.mjs",
     "test:preupdate-backup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/XRS-PreUpdate-Backup.Tests.ps1",
