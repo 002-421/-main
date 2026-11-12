@@ -181,6 +181,7 @@ jobs:
             x-ray-report-studio/test-output/XRS-PreUpdate-Backup-Failure.txt
             x-ray-report-studio/test-output/report-history-failure.png
             x-ray-report-studio/test-output/report-history-failure.json
+            x-ray-report-studio/test-output/browser-edit-failure.json
             x-ray-report-studio/test-output/undo-scroll-failure.png
             x-ray-report-studio/test-output/undo-scroll-failure.json
             x-ray-report-studio/test-output/setup-package-ci-diagnostics.json

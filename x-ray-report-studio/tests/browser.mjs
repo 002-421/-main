@@ -19,7 +19,19 @@ page.on('pageerror',error=>errors.push(error.message));
 const patientId='head-gm.patient', doctorId='HEAD.BASE.2.FIELD.0043';
 const field=id=>page.locator(`[data-template-field][data-field-id="${id}"]`);
 async function selectField(id){await field(id).first().evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});}
-async function fillField(id,text){await selectField(id);await page.keyboard.insertText(text);}
+async function fillField(id,text){
+ await selectField(id);await page.keyboard.insertText(text);
+ const current=await field(id).innerText();
+ if(current!==text){
+  const diagnostic=await page.evaluate(({id,expected})=>{
+   const el=document.querySelector(`[data-template-field][data-field-id="${id}"]`),selection=getSelection();
+   return{fieldId:id,expectedLength:expected.length,currentText:el?.innerText,currentLength:el?.innerText?.length,filled:el?.getAttribute('data-filled'),selectedTextLength:selection?.toString().length,selectionMatchesField:selection?.toString()===el?.innerText,anchorOffset:selection?.anchorOffset,focusOffset:selection?.focusOffset,anchorNodeType:selection?.anchorNode?.nodeType,focusNodeType:selection?.focusNode?.nodeType,activeElementEditable:document.activeElement?.closest('[contenteditable]')!==null};
+  },{id,expected:text});
+  await writeFile(path.join(output,'browser-edit-failure.json'),JSON.stringify(diagnostic,null,2));
+  console.error('Synthetic field replacement diagnostic:',JSON.stringify(diagnostic));
+  throw new Error(`Synthetic field replacement failed: ${JSON.stringify(diagnostic)}`);
+ }
+}
 async function typeAtFieldCaret(id,text='Ж'){await field(id).first().evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,Math.floor((node.textContent??'').length/2));range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.type(text);}
 async function assertFirstTypingReplacesHint(id){const target=field(id).first(),hint=await target.innerText();await typeAtFieldCaret(id,'Ж');assert.equal(await target.innerText(),'Ж',`${id}: typing at an interior caret replaces the whole hint`);assert.equal(await target.getAttribute('data-filled'),'true');await page.keyboard.press('Control+z');assert.equal(await target.innerText(),hint,`${id}: undo restores the complete hint`);assert.equal(await target.getAttribute('data-filled'),'false');}
 const tabTrace=[];
