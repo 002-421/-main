@@ -42,5 +42,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: DOCX, PDF and Electron editor integration
         run: npm run test:browser
+      - name: Word-oriented preview pagination with synthetic reports
+        run: node tests/preview-pagination-browser.mjs
       - name: Export and preserve patient tab lifecycle (1, 2, 5, 12 tabs)
         run: npm run test:tab-lifecycle

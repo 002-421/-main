@@ -245,8 +245,8 @@ try{
  const templateDownload=path.join(output,'sidebar-template.docx');await rm(templateDownload,{force:true});
  await application.evaluate(({session},dest)=>session.defaultSession.once('will-download',(_event,item)=>item.setSavePath(dest)),templateDownload);
  await page.locator('#export-template-docx').click();
- let templateBytes;for(let i=0;i<200;i++){try{templateBytes=await readFile(templateDownload);if(templateBytes.length)break;}catch{}await new Promise(r=>setTimeout(r,50));}
- assert.ok(templateBytes?.length,'separate library template export completes');const originalZip=unzipSync(templateBytes),originalXml=strFromU8(originalZip['word/document.xml']);
+ let templateBytes,originalZip;for(let i=0;i<200;i++){try{templateBytes=await readFile(templateDownload);originalZip=unzipSync(templateBytes);if(originalZip['word/document.xml'])break;}catch{}await new Promise(r=>setTimeout(r,50));}
+ assert.ok(templateBytes?.length&&originalZip?.['word/document.xml'],'separate library template export completes as a valid DOCX');const originalXml=strFromU8(originalZip['word/document.xml']);
  const firstText=/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/.exec(originalXml)?.[1];assert.ok(firstText,'template DOCX contains Word text');
  const editedZip={...originalZip,'word/document.xml':strToU8(originalXml.replace(firstText,'СИНТЕТИЧЕСКИЙ ШАБЛОН ИЗ WORD'))};const editedFile=path.join(output,'sidebar-template-edited.docx');await writeFile(editedFile,zipSync(editedZip));
  const backupCount=await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-backups.v1')??'[]').length);
