@@ -76,6 +76,44 @@ def compare_zip_contents(candidate_path: Path, reference_path: Path) -> dict[str
         }
 
 
+def zip_entry_diagnostics(candidate_path: Path, reference_path: Path) -> list[dict[str, object]]:
+    """Describe differing entries without logging their contents."""
+    rows = []
+    with ZipFile(candidate_path) as candidate, ZipFile(reference_path) as reference:
+        candidate_names = set(candidate.namelist())
+        reference_names = set(reference.namelist())
+        for name in sorted(candidate_names & reference_names):
+            candidate_bytes = candidate.read(name)
+            reference_bytes = reference.read(name)
+            if candidate_bytes == reference_bytes:
+                continue
+            first_difference = next((i for i, (left, right) in enumerate(zip(candidate_bytes, reference_bytes))
+                                     if left != right), min(len(candidate_bytes), len(reference_bytes)))
+            row: dict[str, object] = {
+                'name': name,
+                'candidateBytes': len(candidate_bytes),
+                'referenceBytes': len(reference_bytes),
+                'candidateSha256': hashlib.sha256(candidate_bytes).hexdigest(),
+                'referenceSha256': hashlib.sha256(reference_bytes).hexdigest(),
+                'firstDifferentByte': first_difference,
+            }
+            if name.endswith('.txt') or name.endswith('.html'):
+                row['candidateCRLF'] = candidate_bytes.count(b'\r\n')
+                row['referenceCRLF'] = reference_bytes.count(b'\r\n')
+                row['sameAfterNewlineNormalization'] = (
+                    candidate_bytes.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+                    == reference_bytes.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+                )
+            if name.endswith('THIRD_PARTY_LICENSES.txt'):
+                heading = re.compile(r'^={60}\n([^\n]+)\n', re.MULTILINE)
+                candidate_headings = set(heading.findall(candidate_bytes.decode('utf-8', errors='replace')))
+                reference_headings = set(heading.findall(reference_bytes.decode('utf-8', errors='replace')))
+                row['addedLicenseHeadings'] = sorted(candidate_headings - reference_headings)
+                row['missingLicenseHeadings'] = sorted(reference_headings - candidate_headings)
+            rows.append(row)
+    return rows
+
+
 def write_candidate_manifest(url: str, version: str, sha256: str, output: Path) -> None:
     parsed = urlparse(url)
     if parsed.scheme != 'https' or parsed.hostname not in ALLOWED_HOSTS:
@@ -101,7 +139,10 @@ def main() -> None:
     print(f'SETUP VERIFIED: version {args.version}, {args.zip.stat().st_size} bytes, SHA256 {digest}')
     if args.reference_zip:
         differences = compare_zip_contents(args.zip, args.reference_zip)
-        print('REFERENCE ENTRY COMPARISON: ' + json.dumps(differences, ensure_ascii=False, separators=(',', ':')))
+        details = zip_entry_diagnostics(args.zip, args.reference_zip)
+        print('REFERENCE ENTRY COMPARISON: ' + json.dumps(
+            {'entries': differences, 'details': details}, ensure_ascii=False, separators=(',', ':')
+        ))
     if args.candidate_url or args.manifest_out:
         if not args.candidate_url or not args.manifest_out:
             parser.error('--candidate-url and --manifest-out must be used together.')

@@ -5,7 +5,9 @@ from pathlib import Path
 from zipfile import ZIP_STORED, ZipFile
 
 from scripts.package_setup import ROOT, write_zip
-from scripts.verify_setup_package import compare_zip_contents, verify_setup_package, write_candidate_manifest
+from scripts.verify_setup_package import (
+    compare_zip_contents, verify_setup_package, write_candidate_manifest, zip_entry_diagnostics,
+)
 
 
 class SetupPackageTests(unittest.TestCase):
@@ -57,6 +59,25 @@ class SetupPackageTests(unittest.TestCase):
         self.assertEqual(compare_zip_contents(candidate, reference), {
             'missing': ['removed.txt'], 'added': ['added.txt'], 'different': ['changed.txt']
         })
+
+    def test_reports_safe_entry_diagnostics_without_payload_text(self):
+        reference = self.root / 'diagnostic-reference.zip'
+        candidate = self.root / 'diagnostic-candidate.zip'
+        with ZipFile(reference, 'w') as archive:
+            archive.writestr('app/dist/index.html', '<p>reference</p>\r\n')
+            archive.writestr('THIRD_PARTY_LICENSES.txt', '=' * 60 + '\npackage-old 1.0\nlicense body\n')
+        with ZipFile(candidate, 'w') as archive:
+            archive.writestr('app/dist/index.html', '<p>reference</p>\n')
+            archive.writestr('THIRD_PARTY_LICENSES.txt', '=' * 60 + '\npackage-new 2.0\nother body\n')
+
+        diagnostics = zip_entry_diagnostics(candidate, reference)
+        renderer = next(row for row in diagnostics if row['name'].endswith('index.html'))
+        licenses = next(row for row in diagnostics if row['name'].endswith('THIRD_PARTY_LICENSES.txt'))
+        self.assertTrue(renderer['sameAfterNewlineNormalization'])
+        self.assertEqual(licenses['addedLicenseHeadings'], ['package-new 2.0'])
+        self.assertEqual(licenses['missingLicenseHeadings'], ['package-old 1.0'])
+        self.assertNotIn('other body', str(diagnostics))
+        self.assertNotIn('license body', str(diagnostics))
 
     def test_writes_candidate_manifest_without_touching_canonical_manifest(self):
         output = self.root / 'latest-0.4.54-candidate.json'
