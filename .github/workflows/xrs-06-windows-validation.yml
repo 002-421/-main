@@ -163,6 +163,22 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($safe -join "`n")
       - name: Electron persistent history, depth and recovery regression
         run: npm run test:history-browser
+      - name: Add sanitized persistent history diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          $diagnosticPath = 'test-output/report-history-failure.json'
+          if (-not (Test-Path -LiteralPath $diagnosticPath)) {
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Persistent history diagnostic JSON was not produced.'
+            exit 0
+          }
+          $diagnostic = Get-Content -LiteralPath $diagnosticPath -Raw | ConvertFrom-Json
+          $snapshot = $diagnostic.snapshot
+          $stack = [string]$diagnostic.errorMessage
+          $line = [regex]::Match($stack, 'report-history-browser\.mjs:(\d+):\d+').Groups[1].Value
+          $safe = 'Persistent history failure: stage=' + [string]$diagnostic.stage + ', line=' + $line + ', error=' + [string]$diagnostic.errorName + ', activeTab=' + [string]$snapshot.activeTabIndex + ', reports=' + [string]$snapshot.reportCount + ', paragraphs=' + [string]$snapshot.paragraphCount + ', scrollTop=' + [string]$snapshot.scrollTop + ', caret=' + ($snapshot.caret | ConvertTo-Json -Compress) + ', view=' + ($snapshot.activeHistoryView | ConvertTo-Json -Compress) + ', depth=' + [string]$snapshot.historyDepth
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $safe
+          Write-Output ('::error title=Persistent history diagnostics::' + $safe)
       - name: Build isolated Windows 0.4.54 test kit
         run: npm run package:windows-test-kit
       - name: Upload isolated release candidate test kit
