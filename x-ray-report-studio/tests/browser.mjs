@@ -20,16 +20,19 @@ const patientId='head-gm.patient', doctorId='HEAD.BASE.2.FIELD.0043';
 const field=id=>page.locator(`[data-template-field][data-field-id="${id}"]`);
 async function selectField(id){await field(id).first().evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});}
 async function fillField(id,text){
- await selectField(id);await page.keyboard.insertText(text);
+ await selectField(id);
+ const before=await page.evaluate(id=>{const el=document.querySelector(`[data-template-field][data-field-id="${id}"]`),selection=getSelection(),selected=selection?.toString()??'';return{fieldLength:el?.innerText?.length,filled:el?.getAttribute('data-filled'),selectedLength:selected.length,selectionMatchesField:selected===el?.innerText,anchorOffset:selection?.anchorOffset,focusOffset:selection?.focusOffset,anchorInsideField:!!selection?.anchorNode&&el?.contains(selection.anchorNode),focusInsideField:!!selection?.focusNode&&el?.contains(selection.focusNode)};},id);
+ await page.keyboard.insertText(text);
  const current=await field(id).innerText();
  if(current!==text){
   const diagnostic=await page.evaluate(({id,expected})=>{
    const el=document.querySelector(`[data-template-field][data-field-id="${id}"]`),selection=getSelection();
    return{fieldId:id,expectedLength:expected.length,currentText:el?.innerText,currentLength:el?.innerText?.length,filled:el?.getAttribute('data-filled'),selectedTextLength:selection?.toString().length,selectionMatchesField:selection?.toString()===el?.innerText,anchorOffset:selection?.anchorOffset,focusOffset:selection?.focusOffset,anchorNodeType:selection?.anchorNode?.nodeType,focusNodeType:selection?.focusNode?.nodeType,activeElementEditable:document.activeElement?.closest('[contenteditable]')!==null};
   },{id,expected:text});
-  await writeFile(path.join(output,'browser-edit-failure.json'),JSON.stringify(diagnostic,null,2));
-  console.error('Synthetic field replacement diagnostic:',JSON.stringify(diagnostic));
-  throw new Error(`Synthetic field replacement failed: ${JSON.stringify(diagnostic)}`);
+  const failure={before,after:diagnostic};
+  await writeFile(path.join(output,'browser-edit-failure.json'),JSON.stringify(failure,null,2));
+  console.error('Synthetic field replacement diagnostic:',JSON.stringify(failure));
+  throw new Error(`Synthetic field replacement failed: ${JSON.stringify(failure)}`);
  }
 }
 async function typeAtFieldCaret(id,text='Ж'){await field(id).first().evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,Math.floor((node.textContent??'').length/2));range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.type(text);}
