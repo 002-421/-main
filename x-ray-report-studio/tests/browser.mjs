@@ -270,6 +270,7 @@ try{
  const editedReportZip={...wordZip,'word/document.xml':strToU8(wordXml.replace('Тестовый Пациент','Синтетический Пациент'))};
  const editedReportFile=path.join(output,'word-edited-report.docx');await writeFile(editedReportFile,zipSync(editedReportZip));
  await page.locator('#report-file').setInputFiles(editedReportFile);
+ await page.waitForFunction(expected=>document.querySelectorAll('.report-tab').length===expected,reportTabsBefore+1);
  assert.equal(await page.locator('.report-tab').count(),reportTabsBefore+1,'Word edit opens a new tab');
  assert.match(await page.locator('.report-content').innerText(),/Синтетический Пациент/);
  assert.ok(await page.locator(`[data-report-select="${originalReportTab}"]`).count(),'the previous protocol remains open');
@@ -279,11 +280,13 @@ try{
  assert.match(await page.locator('[role="dialog"]').innerText(),/Синтетический Пациент/);
  await page.locator('[role="dialog"] footer [data-close]').click();assert.equal(await page.locator('.report-tab').count(),reportTabsBefore+1,'cancelled recovery does not open or replace a protocol');
  await page.locator('#report-file').setInputFiles(noMetadataFile);await page.locator('#confirm-recovered-report').click();
+ await page.waitForFunction(expected=>document.querySelectorAll('.report-tab').length===expected,reportTabsBefore+2);
  assert.equal(await page.locator('.report-tab').count(),reportTabsBefore+2);
  assert.match(await page.locator('.report-content').innerText(),/Синтетический Пациент/);
  const corruptMetadataZip={...editedReportZip,'customXml/mri-report-studio.xml':strToU8('<corrupt/>')};
  const corruptMetadataFile=path.join(output,'word-corrupt-metadata-report.docx');await writeFile(corruptMetadataFile,zipSync(corruptMetadataZip));
  await page.locator('#report-file').setInputFiles(corruptMetadataFile);await page.locator('#confirm-recovered-report').waitFor();await page.locator('#confirm-recovered-report').click();
+ await page.waitForFunction(expected=>document.querySelectorAll('.report-tab').length===expected,reportTabsBefore+3);
  assert.equal(await page.locator('.report-tab').count(),reportTabsBefore+3);
  await page.locator(`[data-report-select="${originalReportTab}"]`).click();
  assert.match(await page.locator('.report-content').innerText(),/Тестовый Пациент/,'Word recovery never changes the original protocol');
