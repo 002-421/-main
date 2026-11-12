@@ -5,6 +5,7 @@ import { addReportSeparators } from './report-separators.ts';
 import type { RichNode } from './model';
 import { compactTemplateTables, separateRecommendations, highlightDeletionNotes } from './table-layout.ts';
 import piRadsReference from './assets/pi-rads-v21.ts';
+import { highlightBrainAlternatives } from './template-alternatives.ts';
 
 export type ReportTemplate = {
   id: string;
@@ -60,5 +61,5 @@ export function makeTemplateDocument(templateId = DEFAULT_TEMPLATE_ID): RichNode
       src: piRadsReference, alt: 'Справочная схема PI-RADS v2.1 (2019)', width: 640, height: 291,
     } });
   }
-  return justifyDescription(addReportSeparators(highlightDeletionNotes(separateRecommendations(compactTemplateTables(document)), { ct: templateId.startsWith('ct-') })));
+  return justifyDescription(addReportSeparators(highlightBrainAlternatives(highlightDeletionNotes(separateRecommendations(compactTemplateTables(document)), { ct: templateId.startsWith('ct-') }), templateId)));
 }
