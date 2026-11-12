@@ -509,7 +509,7 @@ function restoreTemplateFields(doc: RichNode, original: RichNode): RichNode {
   };
   return visit(doc);
 }
-function parseEditedWordDocument(xml: string, original: RichNode): { doc: RichNode; warnings: string[] } {
+function parseEditedWordDocument(xml: string, original: RichNode = { type: 'doc', content: [] }): { doc: RichNode; warnings: string[] } {
   const root = parseXml(xml), body = descendants(root, 'w:body')[0]; if (!body) throw new Error('В документе Word не найдена основная часть.');
   const content: RichNode[] = [];
   for (const child of body.children) if (typeof child !== 'string') {
@@ -522,6 +522,29 @@ function parseEditedWordDocument(xml: string, original: RichNode): { doc: RichNo
   if (unsupported) warnings.push(`Не удалось полностью сохранить ${unsupported} неподдерживаемых элементов Word (изображения, списки, объекты или исправления). Проверьте предпросмотр.`);
   const doc = restoreTemplateFields({ type: 'doc', attrs: structuredClone(original.attrs ?? {}), content }, original);
   return { doc, warnings };
+}
+
+/** Recover visible Word content when Studio's optional custom XML was removed or damaged. */
+export async function recoverDocx(input: ArrayBuffer | Uint8Array | Blob): Promise<{ doc: RichNode; warnings: string[] }> {
+  if (input instanceof Blob && input.size > MAX_FILE_BYTES) throw new Error('Файл Word превышает 32 МБ.');
+  const bytes = input instanceof Blob ? new Uint8Array(await input.arrayBuffer()) : input instanceof Uint8Array ? input : new Uint8Array(input);
+  if (bytes.length > MAX_FILE_BYTES) throw new Error('Файл Word превышает 32 МБ.');
+  let oversized = false, total = 0, zip: ReturnType<typeof unzipSync>;
+  try {
+    zip = unzipSync(bytes, { filter: entry => {
+      if (entry.name !== 'word/document.xml' && entry.name !== '[Content_Types].xml' && entry.name !== '_rels/.rels') return false;
+      total += entry.originalSize;
+      if (entry.originalSize > MAX_STATE_BYTES * 2 || total > MAX_FILE_BYTES) { oversized = true; return false; }
+      return true;
+    } });
+  } catch { throw new Error('Не удалось прочитать файл Word. Возможно, файл повреждён.'); }
+  if (oversized) throw new Error('Содержимое файла Word слишком большое.');
+  if (!zip['[Content_Types].xml'] || !zip['_rels/.rels'] || !zip['word/document.xml']) throw new Error('В файле отсутствуют обязательные части DOCX.');
+  const types = strFromU8(zip['[Content_Types].xml']);
+  if (!types.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml')) throw new Error('Файл не содержит документ Microsoft Word.');
+  const parsed = parseEditedWordDocument(strFromU8(zip['word/document.xml']));
+  const doc = validateDraft({ format: 'mri-report-studio', version: draftVersion, profile: 'custom', doc: parsed.doc, customModules: [] }).doc;
+  return { doc, warnings: ['Служебные данные XRS отсутствуют или повреждены. Проверьте сведения о пациенте, поля и структуру перед открытием.', ...parsed.warnings] };
 }
 
 /** Generate a real, editable Word document entirely on this device. */

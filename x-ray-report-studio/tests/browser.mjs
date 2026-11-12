@@ -263,6 +263,32 @@ try{
  assert.match(await page.locator('.report-content').innerText(),/Тестовый Пациент/,'template restore does not modify open patient reports');
  console.log('PASS: template DOCX export, Word edit preview/cancel, verified backup, replacement and restore are isolated from patient reports.');
 
+ const originalReportTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
+ const reportTabsBefore=await page.locator('.report-tab').count();
+ const wordZip=unzipSync(saved.bytes),wordXml=strFromU8(wordZip['word/document.xml']);
+ assert.match(wordXml,/Тестовый Пациент/);
+ const editedReportZip={...wordZip,'word/document.xml':strToU8(wordXml.replace('Тестовый Пациент','Синтетический Пациент'))};
+ const editedReportFile=path.join(output,'word-edited-report.docx');await writeFile(editedReportFile,zipSync(editedReportZip));
+ await page.locator('#report-file').setInputFiles(editedReportFile);
+ assert.equal(await page.locator('.report-tab').count(),reportTabsBefore+1,'Word edit opens a new tab');
+ assert.match(await page.locator('.report-content').innerText(),/Синтетический Пациент/);
+ assert.ok(await page.locator(`[data-report-select="${originalReportTab}"]`).count(),'the previous protocol remains open');
+ const noMetadataZip={...editedReportZip};delete noMetadataZip['customXml/mri-report-studio.xml'];
+ const noMetadataFile=path.join(output,'word-no-metadata-report.docx');await writeFile(noMetadataFile,zipSync(noMetadataZip));
+ await page.locator('#report-file').setInputFiles(noMetadataFile);await page.locator('#confirm-recovered-report').waitFor();
+ assert.match(await page.locator('[role="dialog"]').innerText(),/Синтетический Пациент/);
+ await page.locator('[role="dialog"] footer [data-close]').click();assert.equal(await page.locator('.report-tab').count(),reportTabsBefore+1,'cancelled recovery does not open or replace a protocol');
+ await page.locator('#report-file').setInputFiles(noMetadataFile);await page.locator('#confirm-recovered-report').click();
+ assert.equal(await page.locator('.report-tab').count(),reportTabsBefore+2);
+ assert.match(await page.locator('.report-content').innerText(),/Синтетический Пациент/);
+ const corruptMetadataZip={...editedReportZip,'customXml/mri-report-studio.xml':strToU8('<corrupt/>')};
+ const corruptMetadataFile=path.join(output,'word-corrupt-metadata-report.docx');await writeFile(corruptMetadataFile,zipSync(corruptMetadataZip));
+ await page.locator('#report-file').setInputFiles(corruptMetadataFile);await page.locator('#confirm-recovered-report').waitFor();await page.locator('#confirm-recovered-report').click();
+ assert.equal(await page.locator('.report-tab').count(),reportTabsBefore+3);
+ await page.locator(`[data-report-select="${originalReportTab}"]`).click();
+ assert.match(await page.locator('.report-content').innerText(),/Тестовый Пациент/,'Word recovery never changes the original protocol');
+ console.log('PASS: Word-edited reports reopen; missing or damaged metadata requires preview and confirmation; original tab stays intact.');
+
  await page.locator('[data-tab="blocks"]').click();await page.locator('#new-block').click();
  await page.locator('#block-title').fill('Проверочный блок');await page.locator('#block-tags').fill('контроль нейро');
  await page.locator('#block-text').fill('Проверочное описание: [[Описание участка]].');await page.locator('#confirm-block').click();

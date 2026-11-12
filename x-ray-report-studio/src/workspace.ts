@@ -15,7 +15,7 @@ import { prepareInlineDocument as prepareInlineDocumentBase, initializeTemplateT
 import { getLiveProofIssueAtPosition, refreshProofreading, setLiveProofreading } from './live-proofreading';
 import { areas, reportTemplates, reportBlocks, makeTemplateDocument, DOCTOR_FIELD_ID, PATIENT_FIELD_ID, DEFAULT_TEMPLATE_ID } from './catalog';
 import { builtinModules, moduleNode, compiler, validateDraft, validateTemplate, draftVersion, type RichNode } from './model';
-import { exportDocx, importOwnDocx } from './docx';
+import { exportDocx, importOwnDocx, recoverDocx } from './docx';
 import { russianProofreadingLicense } from './proofreading';
 import { TEMPLATE_PERSONAL_WORDS } from './template-personal-words';
 import { calculate, formatCalculatorResult, parseCalculatorDisplay, type CalculatorOperation } from './calculator';
@@ -524,7 +524,30 @@ async function previewReport(){
  finally{cleanupExport();}
 }
 $('#preview-report').onclick=previewReport;
-$('#report-file').onchange=async e=>{const input=e.target as HTMLInputElement,file=input.files?.[0];input.value='';if(!file)return;try{if(file.size>20_000_000)throw new Error('Максимальный размер файла 20 МБ.');const result=file.name.toLowerCase().endsWith('.docx')?await importOwnDocx(await file.arrayBuffer()):validateDraft(JSON.parse(await file.text()));if(!result)throw new Error('Это сторонний файл Word. Откройте DOCX, сохранённый из МРТ Альянс, или скопируйте текст из Word.');if('kind' in result&&result.kind==='template')throw new Error('Файл является шаблоном. Используйте «Импортировать шаблон из Word», чтобы сначала проверить изменения и сохранить резервную копию.');if(templateMode)throw new Error('Завершите редактирование шаблона.');const doc=prepareInlineDocument(result.doc);editor.schema.nodeFromJSON(doc).check();if('templateId' in result&&reportTemplates.some(t=>t.id===result.templateId)){activeTemplateId=String(result.templateId);selectedAreaId=reportTemplates.find(t=>t.id===activeTemplateId)!.areaId;renderTemplates();}createReportTab(activeTemplateId,doc);closeDialog();toast('Документ открыт в отдельной вкладке.');}catch(e){toast((e as Error).message,true);}};
+$('#report-file').onchange=async event=>{
+ const input=event.target as HTMLInputElement,file=input.files?.[0];input.value='';if(!file)return;
+ try{
+  if(file.size>20_000_000)throw new Error('Максимальный размер файла 20 МБ.');
+  if(templateMode)throw new Error('Завершите редактирование шаблона.');
+  let doc:RichNode,templateId=activeTemplateId,warnings:string[]=[];
+  let requiresReview=false;
+  if(file.name.toLowerCase().endsWith('.docx')){
+   const bytes=await file.arrayBuffer();let imported:Awaited<ReturnType<typeof importOwnDocx>>=null;
+   try{imported=await importOwnDocx(bytes);}catch{requiresReview=true;}
+   if(imported?.kind==='template')throw new Error('Файл является шаблоном. Используйте «Импортировать шаблон из Word» для проверки и резервирования.');
+   if(imported){doc=imported.doc;warnings=imported.importWarnings??[];if(imported.templateId&&reportTemplates.some(t=>t.id===imported.templateId))templateId=imported.templateId;requiresReview ||= warnings.length>0;}
+   else {const recovered=await recoverDocx(bytes);doc=recovered.doc;warnings=recovered.warnings;requiresReview=true;}
+  }else doc=validateDraft(JSON.parse(await file.text())).doc;
+  const prepared=prepareInlineDocument(doc);editor.schema.nodeFromJSON(prepared).check();
+  const open=()=>{if(templateMode)return;activeTemplateId=templateId;selectedAreaId=reportTemplates.find(t=>t.id===templateId)!.areaId;renderTemplates();createReportTab(templateId,prepared);closeDialog();toast('Документ открыт в отдельной вкладке.');};
+  if(!requiresReview){open();return;}
+  const previewHost=document.createElement('div'),previewEditor=makeEditor(previewHost,prepared,()=>{});
+  const previewHtml=DOMPurify.sanitize(previewEditor.getHTML());previewEditor.destroy();
+  const body=`<p>Перед открытием проверьте восстановленный документ. Он будет открыт в новой вкладке; уже открытые протоколы сохранятся.</p>${warnings.map(message=>`<div class="notice">${esc(message)}</div>`).join('')}<div class="block-preview report-content">${previewHtml}</div>`;
+  const preview=dialog('Проверка протокола Word',body,'<button class="btn" data-close>Отмена</button><button class="btn primary" id="confirm-recovered-report">Открыть в новой вкладке</button>');
+  preview.querySelector('.dialog')!.classList.add('wide-preview');preview.querySelector('#confirm-recovered-report')!.addEventListener('click',open);
+ }catch(error){toast(`Не удалось открыть документ: ${(error as Error).message}`,true);}
+};
 $('#copy-report').onclick=async()=>{const box=document.createElement('div');box.innerHTML=DOMPurify.sanitize(editor.getHTML());box.querySelectorAll<HTMLElement>('[data-template-field]').forEach(el=>{el.style.backgroundColor=el.classList.contains('is-empty')?'#fff0a4':'transparent';});const html=`<html><body><style>body{font-family:Arial,sans-serif;font-size:12pt;line-height:1.05}p{margin:0 0 5pt}table{border-collapse:collapse}td,th{border:1px solid #bbb;padding:4px}</style>${box.innerHTML}</body></html>`;try{if(window.desktop)await window.desktop.copyReport(html,editor.getText());else await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([editor.getText()],{type:'text/plain'})})]);toast('Описание скопировано с форматированием.');}catch{toast('Выделите текст и скопируйте его сочетанием Ctrl+C.',true);}};
 async function printPDF(confirmed=false){
  if(!confirmed&&!confirmYellowExport(()=>void printPDF(true)))return;

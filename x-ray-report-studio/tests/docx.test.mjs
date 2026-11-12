@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { posix } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
-import { exportDocx, importOwnDocx, DOCX_MIME } from '../src/docx.ts';
+import { exportDocx, importOwnDocx, recoverDocx, DOCX_MIME } from '../src/docx.ts';
 import { makeDocument, collectFields, builtinModules, moduleNode, insertModule } from '../src/model.ts';
 import { makeTemplateDocument, reportTemplates } from '../src/catalog.ts';
 import { initializeReportFooter } from '../src/report-footer.ts';
@@ -225,6 +225,21 @@ test('foreign DOCX returns null and corrupt or malformed Studio state is rejecte
   await assert.rejects(importOwnDocx(zipSync(malformed)), /Повреждены/);
   await assert.rejects(importOwnDocx(rewriteMetadata({ ...zip }, metadata => { metadata.draft.doc = { type: 'no-document' }; })), /не поддерживаемый файл/);
   await assert.rejects(importOwnDocx(rewriteMetadata({ ...zip }, metadata => { metadata.draft.cache = { M02: { body: { type: 'paragraph' } } }; })), /Некорректный сохранённый модуль/);
+});
+
+test('Word content is recoverable with a preview candidate when Studio metadata is missing or damaged', async () => {
+  const doc={type:'doc',content:[p('Пациент: Учебный'),p('Описание: текст'),p('Заключение: норма')]};
+  const {zip,xml}=await exported(doc,{kind:'report',templateId:'head-gm'});
+  const edited={...zip,'word/document.xml':strToU8(xml.replace('Описание: текст','Описание: исправленный текст'))};
+  delete edited[STATE_PART];
+  assert.equal(await importOwnDocx(zipSync(edited)),null);
+  const recovered=await recoverDocx(zipSync(edited));
+  assert.match(JSON.stringify(recovered.doc),/Учебный|исправленный текст|Заключение: норма/);
+  assert.ok(recovered.warnings.length);
+  edited[STATE_PART]=strToU8('<corrupt/>');
+  await assert.rejects(importOwnDocx(zipSync(edited)),/Повреждены/);
+  assert.match(JSON.stringify((await recoverDocx(zipSync(edited))).doc),/исправленный текст/);
+  await assert.rejects(recoverDocx(new Uint8Array([1,2,3])),/Не удалось прочитать/);
 });
 
 test('source template profile retains exact page geometry, title styles, spacing, table grid and page break', async () => {
