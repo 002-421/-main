@@ -31,6 +31,8 @@ jobs:
   prepare:
     runs-on: windows-2022
     timeout-minutes: 60
+    outputs:
+      candidate_ready: ${{ steps.candidate_manifest.outcome == 'success' && steps.candidate_package.outcome == 'success' && steps.official_054_zip.outcome == 'success' }}
     defaults:
       run:
         working-directory: x-ray-report-studio
@@ -145,6 +147,8 @@ jobs:
             x-ray-report-studio/test-output/electron-paste-diagnostic.json
             x-ray-report-studio/test-output/electron-tab-trace.json
       - name: Prepare and validate inactive latest.json candidate
+        id: candidate_manifest
+        if: ${{ !cancelled() && steps.candidate_package.outcome == 'success' && steps.official_054_zip.outcome == 'success' && (success() || steps.electron_browser.outcome == 'failure') }}
         shell: powershell
         run: |
           $zipPath = 'test-output/xrs-09-release/X-ray_Report_Studio_Windows_Setup.zip'
@@ -160,8 +164,10 @@ jobs:
           $expectedBaseline = (Get-Content -LiteralPath 'test-output/xrs-09-release/latest.json.baseline.sha256' -Raw).Trim()
           if ((Get-FileHash downloads/latest.json -Algorithm SHA256).Hash -ne $expectedBaseline) { throw 'Preparation changed the checked-in latest.json.' }
       - name: Write preparation report
+        if: ${{ !cancelled() && steps.candidate_manifest.outcome == 'success' }}
         env:
           XRS_UPDATER_E2E_OUTCOME: ${{ steps.updater_e2e.outcome }}
+          XRS_BROWSER_OUTCOME: ${{ steps.electron_browser.outcome }}
         shell: powershell
         run: |
           $sha = (Get-FileHash 'test-output/xrs-09-release/X-ray_Report_Studio_Windows_Setup.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -169,11 +175,13 @@ jobs:
             'XRS-09 0.4.55 preparation: PASS'
             "Source SHA: $(git rev-parse HEAD)"
             "Setup ZIP SHA256: $sha"
+            "Windows Electron browser suite outcome: $env:XRS_BROWSER_OUTCOME"
             "Official 0.4.54 updater E2E step outcome: $env:XRS_UPDATER_E2E_OUTCOME"
             'Official latest.json: unchanged'
             'Publication: not performed'
           ) | Set-Content test-output/xrs-09-release/PREPARATION.txt -Encoding UTF8
       - uses: actions/upload-artifact@v4
+        if: ${{ always() && steps.candidate_manifest.outcome == 'success' && steps.candidate_package.outcome == 'success' && steps.official_054_zip.outcome == 'success' }}
         with:
           name: xrs-09-stable-0.4.55-release-candidate
           if-no-files-found: error
@@ -185,7 +193,7 @@ jobs:
             x-ray-report-studio/test-output/xrs-09-release/PREPARATION.txt
 
   publish:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && inputs.confirmation == 'PUBLISH-XRS-0.4.55' }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && inputs.confirmation == 'PUBLISH-XRS-0.4.55' && needs.prepare.outputs.candidate_ready == 'true' }}
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 25
