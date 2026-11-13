@@ -143,8 +143,12 @@ try {
   assert.equal(candidateMetadata.version, '0.4.55');
   const oldMainSource = await fs.readFile(path.join(oldApp, 'electron', 'main.cjs'), 'utf8');
   const publishedZipUrl = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/releases/0.4.55/downloads/X-ray_Report_Studio_Windows_Setup.zip';
+  const parsedPublishedZipUrl = new URL(publishedZipUrl);
+  assert.equal(parsedPublishedZipUrl.protocol, 'https:');
+  assert.equal(parsedPublishedZipUrl.hostname, 'raw.githubusercontent.com');
   assert.ok(oldMainSource.includes("artifact.pathname.endsWith('/downloads/X-ray_Report_Studio_Windows_Setup.zip')"), 'the exact official 0.4.54 updater retains its suffix allowlist');
-  assert.ok(new URL(publishedZipUrl).pathname.endsWith('/downloads/X-ray_Report_Studio_Windows_Setup.zip'), 'the immutable 0.4.55 URL is accepted by 0.4.54');
+  assert.ok(oldMainSource.includes("['raw.githubusercontent.com','github.com'].includes(artifact.hostname)"), 'the exact official 0.4.54 updater restricts update hosts to GitHub');
+  assert.ok(parsedPublishedZipUrl.pathname.endsWith('/downloads/X-ray_Report_Studio_Windows_Setup.zip'), 'the immutable 0.4.55 URL is accepted by 0.4.54');
   const installerText = await fs.readFile(path.join(oldSetup, 'Install.ps1'), 'utf8');
   const runtimePin = installerText.match(/electron-v([^/\\]+)-win32-x64\.zip/i)?.[1];
   assert.equal(runtimePin, runtimeVersion, 'the test runtime must match the official 0.4.54 Electron pin');
