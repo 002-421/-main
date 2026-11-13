@@ -34,8 +34,7 @@ try {
   await writeFile(path.join(stable, 'synthetic-workspace.json'), '{"synthetic":true}');
   const env = { ...process.env, APPDATA: appData, PUBLIC: path.join(synthetic, 'Public'), XRS_BETA_USER_DATA_DIR: beta, XRS_BETA_SMOKE_PID_FILE: pidFile };
   assert.equal(await stat(launcher).then(() => true, () => false), true, 'the exact Beta ZIP must contain its standard CMD launcher');
-  const command = `""${launcher}""`;
-  await promisify(execFile)('cmd.exe', ['/d', '/s', '/c', command], { cwd: appDirectory, env });
+  await promisify(execFile)('cmd.exe', ['/d', '/c', 'Start-XRS-Beta.cmd'], { cwd: appDirectory, env });
   for (let attempt = 0; attempt < 100 && !(await stat(pidFile).then(() => true, () => false)); attempt++) await new Promise(resolve => setTimeout(resolve, 100));
   assert.equal(await stat(pidFile).then(() => true, () => false), true, 'standard CMD launcher must start the packaged EXE');
   const firstPid = (await readFile(pidFile, 'utf8')).trim();
