@@ -44,11 +44,11 @@ let activeUpdateChannel = selectedChannel(channelPreference?.channel ?? (activeP
 if (TEST_KIT_ROOT) {
   app.setPath('appData', path.join(TEST_KIT_ROOT, 'AppData'));
   if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(TEST_KIT_ROOT, 'Profile'));
-  app.setPath('sessionData', path.join(app.getPath('userData'), 'Session Data'));
-} else if (!INVALID_TEST_KIT_LAUNCH && !app.commandLine.hasSwitch('user-data-dir')) {
-  app.setPath('userData', path.join(app.getPath('appData'), activeProfile === 'beta' ? 'MRI Report Studio Beta' : 'MRI Report Studio'));
-  if (activeProfile === 'beta') app.setPath('sessionData', path.join(app.getPath('userData'), 'Session Data'));
+} else if (!INVALID_TEST_KIT_LAUNCH) {
+  if (!app.commandLine.hasSwitch('user-data-dir'))
+    app.setPath('userData', path.join(app.getPath('appData'), activeProfile === 'beta' ? 'MRI Report Studio Beta' : 'MRI Report Studio'));
 }
+if (activeProfile === 'beta' || TEST_KIT_ROOT) app.setPath('sessionData', path.join(app.getPath('userData'), 'Session Data'));
 app.setName('X-ray Report Studio');
 let mainWindow;
 let rendererUnresponsive = false;
