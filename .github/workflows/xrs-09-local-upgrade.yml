@@ -80,7 +80,16 @@ jobs:
             x-ray-report-studio/test-output/report-history-failure.json
             x-ray-report-studio/test-output/report-history-failure.png
             x-ray-report-studio/test-output/browser-edit-failure.json
-            x-ray-report-studio/test-output/browser-startup-failure.json
+            x-ray-report-studio/test-output/electron-startup-dom.json
+            x-ray-report-studio/test-output/electron-startup-dom.html
+            x-ray-report-studio/test-output/electron-startup-dom.png
+            x-ray-report-studio/test-output/electron-yellow-placeholder-diagnostic.json
+            x-ray-report-studio/test-output/electron-yellow-placeholder-diagnostic.html
+            x-ray-report-studio/test-output/electron-yellow-placeholder-diagnostic.png
+            x-ray-report-studio/test-output/electron-paste-diagnostic.json
+            x-ray-report-studio/test-output/electron-tab-trace.json
+            x-ray-report-studio/test-output/v3-failed.png
+            x-ray-report-studio/test-output/v3-desktop.png
       - uses: actions/upload-artifact@v4
         with:
           name: xrs-09-stable-0.4.55-windows-x64
