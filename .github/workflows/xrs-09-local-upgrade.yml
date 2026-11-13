@@ -39,14 +39,12 @@ jobs:
       - run: npm test
       - name: Windows Electron browser integration
         run: npm run test:browser
-      - name: Workspace recovery, Undo/Redo, and tab restoration
-        run: |
-          npm run test:workspace-recovery
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm run test:history-browser
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm run test:tab-lifecycle
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Workspace recovery at 1, 5, and 12 tabs
+        run: npm run test:workspace-recovery
+      - name: Electron Undo/Redo history, selection and scroll
+        run: npm run test:history-browser
+      - name: DOCX export, tab lifecycle and workspace reload
+        run: npm run test:tab-lifecycle
       - name: Parse candidate installer with Windows PowerShell 5.1
         shell: powershell
         run: |
@@ -72,6 +70,17 @@ jobs:
           Write-Host "Setup ZIP SHA256: $sha"
       - name: Launch the extracted 0.4.55 Setup payload with Windows Electron
         run: node tests/setup-candidate-smoke.mjs
+      - name: Upload synthetic editor diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-09-windows-diagnostics
+          if-no-files-found: ignore
+          path: |
+            x-ray-report-studio/test-output/report-history-failure.json
+            x-ray-report-studio/test-output/report-history-failure.png
+            x-ray-report-studio/test-output/browser-edit-failure.json
+            x-ray-report-studio/test-output/browser-startup-failure.json
       - uses: actions/upload-artifact@v4
         with:
           name: xrs-09-stable-0.4.55-windows-x64
