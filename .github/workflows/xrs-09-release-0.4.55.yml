@@ -66,6 +66,7 @@ jobs:
       - run: npm run build
       - run: npm test
       - name: Windows Electron browser integration
+        id: electron_browser
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force test-output/xrs-09-diagnostics | Out-Null
@@ -73,12 +74,17 @@ jobs:
           $testExitCode = $LASTEXITCODE
           if ($testExitCode -ne 0) { exit $testExitCode }
       - name: Workspace recovery at 1, 5, and 12 tabs
+        if: ${{ !cancelled() && (success() || steps.electron_browser.outcome == 'failure') }}
         run: npm run test:workspace-recovery
       - name: Electron Undo/Redo history, selection, and scroll
+        if: ${{ !cancelled() && (success() || steps.electron_browser.outcome == 'failure') }}
         run: npm run test:history-browser
       - name: DOCX export, tab lifecycle, and workspace reload
+        if: ${{ !cancelled() && (success() || steps.electron_browser.outcome == 'failure') }}
         run: npm run test:tab-lifecycle
       - name: Verify release candidate is Stable 0.4.55 and channel manifest remains untouched
+        id: candidate_package
+        if: ${{ !cancelled() && (success() || steps.electron_browser.outcome == 'failure') }}
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force test-output/xrs-09-release | Out-Null
@@ -95,6 +101,8 @@ jobs:
           Write-Host "Installer ZIP SHA256: $sha"
           Get-Item test-output/xrs-09-release/X-ray_Report_Studio_Windows_Setup.zip | Select-Object Name,Length
       - name: Download and verify the official 0.4.54 Setup ZIP
+        id: official_054_zip
+        if: ${{ !cancelled() && (success() || steps.electron_browser.outcome == 'failure') }}
         shell: powershell
         run: |
           $oldZip = 'test-output/xrs-09-release/X-ray_Report_Studio_Windows_Setup-0.4.54.zip'
@@ -104,6 +112,7 @@ jobs:
           if ($sha -ne '04ae2cd7745edb92e2c115ca8a620deb0f86152b281a4747eef656f91a768cc3') { throw "Official 0.4.54 ZIP checksum mismatch: $sha" }
           Write-Host "Official 0.4.54 ZIP SHA256: $sha"
       - name: Exercise the actual packaged 0.4.54 updater through its isolated test kit
+        if: ${{ !cancelled() && steps.candidate_package.outcome == 'success' && steps.official_054_zip.outcome == 'success' && (success() || steps.electron_browser.outcome == 'failure') }}
         env:
           XRS_054_SETUP_ZIP: ${{ github.workspace }}\x-ray-report-studio\test-output\xrs-09-release\X-ray_Report_Studio_Windows_Setup-0.4.54.zip
           XRS_055_SETUP_ZIP: ${{ github.workspace }}\x-ray-report-studio\test-output\xrs-09-release\X-ray_Report_Studio_Windows_Setup.zip
