@@ -57,6 +57,27 @@ async function processIdsFor(executable) {
   return stdout.split(/\s+/).filter(Boolean).map(Number).filter(Number.isInteger);
 }
 
+async function findUnreadableSyntheticProfileFiles(profileRoot, maxFiles = 2000) {
+  const failures = [];
+  let checked = 0;
+  async function walk(directory) {
+    if (checked >= maxFiles || failures.length >= 8) return;
+    const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (checked >= maxFiles || failures.length >= 8) break;
+      const filename = path.join(directory, entry.name);
+      if (entry.isDirectory()) await walk(filename);
+      else if (entry.isFile()) {
+        checked++;
+        try { await fs.readFile(filename); }
+        catch (error) { failures.push({ path: path.relative(profileRoot, filename).split(path.sep).join('/'), code: error.code ?? 'read-failed' }); }
+      }
+    }
+  }
+  await walk(profileRoot);
+  return failures;
+}
+
 async function waitForProcessState(executable, expectedRunning, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -385,6 +406,8 @@ try {
       current: newExecutable ? await processIdsFor(newExecutable).catch(() => []) : [],
     },
   };
+  if (/\bEBUSY\b/.test(String(error?.message ?? '')))
+    diagnostic.unreadableSyntheticProfileFiles = await findUnreadableSyntheticProfileFiles(path.join(kitRoot, 'Profile')).catch(() => []);
   const updateLogDirectory = path.join(kitRoot, 'Profile', 'logs');
   diagnostic.updateLogs = await fs.readdir(updateLogDirectory, { withFileTypes: true }).then(async entries => {
     const files = entries.filter(entry => entry.isFile() && /^update-.*\.log$/.test(entry.name));
