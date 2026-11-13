@@ -216,7 +216,11 @@ try{
  assert.ok((await page.locator('.report-content').innerText()).includes('XRS06_SYNTHETIC_B'),'other document text survives the same restart');
  await page.locator(`[data-report-select="${aId}"]`).click();
  const formatParagraph=page.locator('.report-content p').filter({hasText:'XRS06_SYNTHETIC_A'}).first();
- await formatParagraph.evaluate(el=>{const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){const start=node.textContent.indexOf('XRS06_SYNTHETIC_A');if(start>=0){const range=document.createRange();range.setStart(node,start);range.setEnd(node,start+'XRS06_SYNTHETIC_A'.length);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);return;}}throw new Error('Synthetic text was not found for the format Undo test');});
+ await formatParagraph.scrollIntoViewIfNeeded();
+ const formatTarget=await formatParagraph.evaluate(el=>{const marker='XRS06_SYNTHETIC_A',walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){const start=node.textContent.indexOf(marker);if(start>=0){const first=document.createRange(),last=document.createRange();first.setStart(node,start);first.setEnd(node,start+1);last.setStart(node,start+marker.length-1);last.setEnd(node,start+marker.length);const a=first.getBoundingClientRect(),b=last.getBoundingClientRect();return{start:{x:a.left+0.5,y:(a.top+a.bottom)/2},end:{x:b.right-0.5,y:(b.top+b.bottom)/2},marker};}}throw new Error('Synthetic text was not found for the format Undo test');});
+ await page.mouse.move(formatTarget.start.x,formatTarget.start.y);await page.mouse.down();await page.mouse.move(formatTarget.end.x,formatTarget.end.y,{steps:Math.max(2,formatTarget.marker.length)});await page.mouse.up();
+ await page.waitForFunction(expected=>getSelection()?.toString()===expected,formatTarget.marker);
+ assert.equal(await page.evaluate(()=>document.activeElement?.classList.contains('report-content')),true,'real mouse selection keeps focus in the ProseMirror editor');
  await page.locator('[data-command="bold"]').click();
  assert.ok(await formatParagraph.locator('strong', {hasText:'XRS06_SYNTHETIC_A'}).count(),'formatting creates an undoable document operation');
  await page.keyboard.press('Control+z');
