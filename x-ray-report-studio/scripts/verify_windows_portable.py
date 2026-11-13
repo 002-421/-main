@@ -27,10 +27,17 @@ def main():
             names = {name.replace('\\', '/') for name in package.namelist()}
             required = {
                 root + 'X-ray Report Studio.exe',
-                root + 'chrome_elf.dll',
+                # Electron 45's official Windows distribution no longer ships
+                # chrome_elf.dll or a separate resources/electron.asar.
+                # Verify the runtime resources that are present in that layout.
+                root + 'chrome_100_percent.pak',
+                root + 'chrome_200_percent.pak',
+                root + 'd3dcompiler_47.dll',
+                root + 'electron_wer.dll',
+                root + 'ffmpeg.dll',
                 root + 'icudtl.dat',
+                root + 'resources.pak',
                 root + 'resources/default_app.asar',
-                root + 'resources/electron.asar',
                 root + 'snapshot_blob.bin',
                 root + 'v8_context_snapshot.bin',
                 root + 'locales/en-US.pak',
