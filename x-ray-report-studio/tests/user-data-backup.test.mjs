@@ -24,7 +24,40 @@ test('local update backup includes the Chromium Local Storage database holding r
  assert.equal(await fs.readFile(path.join(result.directory,'data','profile','dictionary.json'),'utf8'),'["слово"]');
  assert.equal(await fs.readFile(path.join(result.directory,'data','shared-dictionary.json'),'utf8'),'["общий"]');
  await assert.rejects(fs.stat(path.join(result.directory,'data','profile','logs')),{code:'ENOENT'});
- assert.deepEqual(await verifyUserDataBackup(result.directory),{files:5,bytes:Buffer.byteLength('workspace templates settings stamps')+Buffer.byteLength('synthetic per-report undo operation history')+Buffer.byteLength('["слово"]')+Buffer.byteLength('["общий"]')+Buffer.byteLength('{"word":"C:\\\\Отчёты"}')});
+ assert.deepEqual(await verifyUserDataBackup(result.directory),{files:5,bytes:Buffer.byteLength('workspace templates settings stamps')+Buffer.byteLength('synthetic per-report undo operation history')+Buffer.byteLength('["слово"]')+Buffer.byteLength('["общий"]')+Buffer.byteLength('{"word":"C:\\\\Отчёты"}'),excludedFiles:0});
+});
+
+test('backup records and excludes only Chromium LevelDB LOCK while preserving database files',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-leveldb-lock-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const profile=path.join(root,'Профиль пользователя','MRI Report Studio'),backups=path.join(root,'Резервные копии');
+ const leveldb=path.join(profile,'Session Data','Local Storage','leveldb');
+ await fs.mkdir(leveldb,{recursive:true});
+ await fs.writeFile(path.join(leveldb,'LOCK'),'synthetic transient chromium lock');
+ await fs.writeFile(path.join(leveldb,'000003.log'),'synthetic workspace database records');
+ await fs.writeFile(path.join(leveldb,'CURRENT'),'MANIFEST-000001');
+ await fs.mkdir(path.join(profile,'custom'),{recursive:true});
+ await fs.writeFile(path.join(profile,'custom','LOCK'),'not a LevelDB lock; preserve it');
+
+ const backup=await createUserDataBackup({userDataDir:profile,backupRoot:backups,version:'0.4.54'});
+ const data=path.join(backup.directory,'data','profile');
+ await assert.rejects(fs.stat(path.join(data,'Session Data','Local Storage','leveldb','LOCK')),{code:'ENOENT'});
+ assert.equal(await fs.readFile(path.join(data,'Session Data','Local Storage','leveldb','000003.log'),'utf8'),'synthetic workspace database records');
+ assert.equal(await fs.readFile(path.join(data,'Session Data','Local Storage','leveldb','CURRENT'),'utf8'),'MANIFEST-000001');
+ assert.equal(await fs.readFile(path.join(data,'custom','LOCK'),'utf8'),'not a LevelDB lock; preserve it');
+ const manifest=JSON.parse(await fs.readFile(path.join(backup.directory,'manifest.json'),'utf8'));
+ assert.deepEqual(manifest.excludedFiles,[{path:'profile/Session Data/Local Storage/leveldb/LOCK',reason:'ephemeral-leveldb-lock'}]);
+ assert.deepEqual(await verifyUserDataBackup(backup.directory),{files:3,bytes:Buffer.byteLength('synthetic workspace database records')+Buffer.byteLength('MANIFEST-000001')+Buffer.byteLength('not a LevelDB lock; preserve it'),excludedFiles:1});
+
+ // Verify that an ordinary restore of the backed-up data preserves database contents;
+ // the omitted lock is recreated by LevelDB when it opens the restored directory.
+ const restored=path.join(root,'restored-profile');
+ await fs.cp(data,restored,{recursive:true});
+ assert.equal(await fs.readFile(path.join(restored,'Session Data','Local Storage','leveldb','000003.log'),'utf8'),'synthetic workspace database records');
+ await assert.rejects(fs.stat(path.join(restored,'Session Data','Local Storage','leveldb','LOCK')),{code:'ENOENT'});
+
+ manifest.excludedFiles[0].reason='unverified-skip';
+ await fs.writeFile(path.join(backup.directory,'manifest.json'),JSON.stringify(manifest));
+ await assert.rejects(verifyUserDataBackup(backup.directory),/недопустимое исключение/);
 });
 
 test('backup failure preserves earlier usable backup and removes only the incomplete staging directory',async t=>{
