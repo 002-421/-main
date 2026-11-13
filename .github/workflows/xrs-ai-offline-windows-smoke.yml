@@ -64,7 +64,7 @@ jobs:
           if (-not (Test-Path "$app/package.json")) { throw 'XRS app directory is missing in the source checkout' }
 
       - name: Set up Node.js
-        uses: actions/setup-node@1e60f620b9541d6b0554f09ddf31f235eecbc00c
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
 
