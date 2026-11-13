@@ -78,7 +78,7 @@ try {
       return { reportsInWorkspace: 2, creation: 'real UI action' };
     });
 
-    const descriptionText = 'Иследование  проведено , очаг очаг. Очаг 5 мм справа в лобной доле. На уровне L4-L5 определяется грыжа межпозвонкового диска. гиперинтенсвный участок.';
+    const descriptionText = 'МРТ: Иследование  проведено , очаг очаг. Очаг 5 мм справа в лобной доле. На уровне L4-L5 определяется грыжа межпозвонкового диска. гиперинтенсвный участок.';
     const conclusionText = 'Очаг 5 мм слева в лобной доле. Грыж межпозвонковых дисков не выявлено.';
     const replaceSectionText = async (id, text) => {
       const section = page.locator(`#editor .ProseMirror section[data-section-id="${id}"]`);
