@@ -66,7 +66,12 @@ jobs:
       - run: npm run build
       - run: npm test
       - name: Windows Electron browser integration
-        run: npm run test:browser
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force test-output/xrs-09-diagnostics | Out-Null
+          npm run test:browser 2>&1 | Tee-Object -FilePath test-output/xrs-09-diagnostics/test-browser.log
+          $testExitCode = $LASTEXITCODE
+          if ($testExitCode -ne 0) { exit $testExitCode }
       - name: Workspace recovery at 1, 5, and 12 tabs
         run: npm run test:workspace-recovery
       - name: Electron Undo/Redo history, selection, and scroll
@@ -102,7 +107,27 @@ jobs:
         env:
           XRS_054_SETUP_ZIP: ${{ github.workspace }}\x-ray-report-studio\test-output\xrs-09-release\X-ray_Report_Studio_Windows_Setup-0.4.54.zip
           XRS_055_SETUP_ZIP: ${{ github.workspace }}\x-ray-report-studio\test-output\xrs-09-release\X-ray_Report_Studio_Windows_Setup.zip
-        run: node tests/updater-0.4.54-e2e.mjs
+          XRS_E2E_DIAGNOSTICS: ${{ github.workspace }}\x-ray-report-studio\test-output\xrs-09-diagnostics
+        shell: pwsh
+        run: |
+          npm run test:updater-0.4.54-e2e 2>&1 | Tee-Object -FilePath test-output/xrs-09-diagnostics/updater-e2e.log
+          $testExitCode = $LASTEXITCODE
+          if ($testExitCode -ne 0) { exit $testExitCode }
+      - name: Upload synthetic Windows failure diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-09-windows-failure-diagnostics-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            x-ray-report-studio/test-output/xrs-09-diagnostics/**
+            x-ray-report-studio/test-output/v3-failed.png
+            x-ray-report-studio/test-output/electron-startup-dom.*
+            x-ray-report-studio/test-output/electron-yellow-placeholder-diagnostic.*
+            x-ray-report-studio/test-output/browser-edit-failure.json
+            x-ray-report-studio/test-output/electron-paste-diagnostic.json
+            x-ray-report-studio/test-output/electron-tab-trace.json
       - name: Prepare and validate inactive latest.json candidate
         shell: powershell
         run: |

@@ -31,6 +31,7 @@ let page;
 let oldExecutable;
 let newExecutable;
 let relaunchProcessId = null;
+let phase = 'initialize isolated test kit';
 
 function sha256(bytes) {
   return require('node:crypto').createHash('sha256').update(bytes).digest('hex');
@@ -123,6 +124,7 @@ async function fillSyntheticPatient(marker) {
 
 try {
   assert.equal(process.platform, 'win32', 'the official updater E2E must run on Windows');
+  phase = 'verify official 0.4.54 package and candidate 0.4.55 package';
   const oldBytes = await fs.readFile(oldSetupZip);
   assert.equal(sha256(oldBytes), EXPECTED_054_SHA256, 'the updater under test must come from the official 0.4.54 ZIP');
   const runtimeVersion = JSON.parse(await fs.readFile(path.join(process.cwd(), 'node_modules', 'electron', 'package.json'), 'utf8')).version;
@@ -153,6 +155,7 @@ try {
   const runtimePin = installerText.match(/electron-v([^/\\]+)-win32-x64\.zip/i)?.[1];
   assert.equal(runtimePin, runtimeVersion, 'the test runtime must match the official 0.4.54 Electron pin');
 
+  phase = 'prepare the isolated packaged 0.4.54 runtime';
   const appRuntime = path.join(kitRoot, 'App_0.4.54');
   await fs.mkdir(appRuntime, { recursive: true });
   await fs.cp(path.join(process.cwd(), 'node_modules', 'electron', 'dist'), appRuntime, { recursive: true });
@@ -181,6 +184,7 @@ try {
     notes: 'Синтетическая проверка штатного updater 0.4.54.',
   }, null, 2) + '\n');
 
+  phase = 'launch the official 0.4.54 executable in the isolated test kit';
   application = await _electron.launch({
     executablePath: oldExecutable,
     cwd: appRuntime,
@@ -197,6 +201,7 @@ try {
     settings.autoUpdate = false;
     localStorage.setItem(key, JSON.stringify(settings));
   }, storageKeys);
+  phase = 'create synthetic documents, template, settings, and dictionary';
   await fillSyntheticPatient('XRS_SYNTHETIC_PATIENT_ALPHA');
   await page.locator('#new-report').click();
   await page.locator('.report-tab').nth(1).waitFor();
@@ -217,6 +222,7 @@ try {
   await page.locator('#save-template').click();
   await page.waitForFunction(key => localStorage.getItem(key)?.includes('XRS_SYNTHETIC_TEMPLATE_SENTINEL'), storageKeys.templates);
 
+  phase = 'discover and explicitly confirm update 0.4.54 to 0.4.55';
   await page.locator('#settings').click();
   await page.locator('#doctor-name').fill('XRS Synthetic Doctor');
   await page.locator('#save-settings').click();
@@ -249,6 +255,7 @@ try {
     void dialog.accept();
   });
   await page.locator('#install-update').click();
+  phase = 'verify SHA-checked side-by-side installation and shortcut switch';
   await page.waitForFunction(async () => await window.desktop.getApplicationVersion() === '0.4.55', null, { timeout: 120000 });
   assert.equal(installConfirmation?.type, 'confirm', 'the test accepts an explicit confirmation for unsaved report exports');
   assert.match(installConfirmation.message, /не экспортированы в Word или PDF/);
@@ -265,6 +272,7 @@ try {
   const backupRoot = path.join(kitRoot, 'AppData', 'X-ray Report Studio Backups');
   assert.ok((await fs.readdir(backupRoot)).length > 0, 'the actual updater created a verified user-data backup');
 
+  phase = 'restart 0.4.55 and verify profile plus rollback availability';
   await application.close();
   application = await _electron.launch({ executablePath: newExecutable, cwd: path.dirname(newExecutable), args: [], env: { ...process.env, XRS_TEST_ROOT: kitRoot } });
   page = await application.firstWindow();
@@ -274,6 +282,7 @@ try {
   const rollbackInfo = await page.evaluate(() => window.desktop.rollbackInfo());
   assert.equal(rollbackInfo.previousVersion, '0.4.54');
 
+  phase = 'execute user-confirmed rollback to 0.4.54';
   const currentProcess = application.process();
   const processExit = new Promise(resolve => currentProcess.once('exit', resolve));
   await page.locator('#settings').click();
@@ -304,6 +313,7 @@ try {
   assert.equal(path.resolve(await readShortcutTarget(shortcut)).toLowerCase(), path.resolve(oldExecutable).toLowerCase(), 'the user shortcut points back to 0.4.54');
   assert.ok((await fs.readdir(backupRoot)).length >= 2, 'rollback creates a separate verified profile backup');
 
+  phase = 'relaunch 0.4.54 and verify restored user profile';
   await execFileAsync('taskkill.exe', ['/PID', String(relaunchProcessId), '/T', '/F'], { windowsHide: true });
   await waitForProcessState(oldExecutable, false);
   relaunchProcessId = null;
@@ -313,6 +323,36 @@ try {
   await assertEditorData('0.4.54', syntheticMarkers);
 
   console.log('PASS: official 0.4.54 updater discovered and prompted for 0.4.55, installed the SHA-verified package side-by-side, switched the shortcut, preserved synthetic workspace/tabs/template/settings/dictionary, launched 0.4.55, rolled back, relaunched 0.4.54, and recovered the same synthetic profile.');
+} catch (error) {
+  const diagnosticsDirectory = process.env.XRS_E2E_DIAGNOSTICS || path.join(process.cwd(), 'test-output', 'xrs-09-diagnostics');
+  await fs.mkdir(diagnosticsDirectory, { recursive: true }).catch(() => {});
+  const diagnostic = {
+    phase,
+    platform: process.platform,
+    error: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : String(error),
+    official054Sha256: EXPECTED_054_SHA256,
+    syntheticDataOnly: true,
+    testKitRoot: kitRoot,
+    processIds: {
+      old: oldExecutable ? await processIdsFor(oldExecutable).catch(() => []) : [],
+      current: newExecutable ? await processIdsFor(newExecutable).catch(() => []) : [],
+    },
+  };
+  if (page && !page.isClosed()) {
+    diagnostic.renderer = await page.evaluate(() => ({
+      title: document.title,
+      text: document.body?.innerText?.slice(0, 12000),
+      reportTabs: [...document.querySelectorAll('.report-tab')].map(tab => tab.innerText),
+      saveState: document.querySelector('#save-state')?.textContent,
+      reportText: document.querySelector('.report-content')?.innerText?.slice(0, 12000),
+      rendererErrors: window.__xrsRendererErrors ?? [],
+    })).catch(() => null);
+    await page.screenshot({ path: path.join(diagnosticsDirectory, 'updater-0.4.54-e2e-failure.png'), fullPage: true }).catch(() => {});
+    await fs.writeFile(path.join(diagnosticsDirectory, 'updater-0.4.54-e2e-failure.html'), await page.content().catch(() => ''), 'utf8').catch(() => {});
+  }
+  await fs.writeFile(path.join(diagnosticsDirectory, 'updater-0.4.54-e2e-failure.json'), JSON.stringify(diagnostic, null, 2), 'utf8').catch(() => {});
+  console.error('Updater 0.4.54 E2E diagnostics:', JSON.stringify(diagnostic, null, 2));
+  throw error;
 } finally {
   if (application) await application.close().catch(() => {});
   await stopTestProcesses();
