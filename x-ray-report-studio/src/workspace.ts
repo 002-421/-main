@@ -305,11 +305,12 @@ if (localStorage.getItem('xrs.ai-review.experimental') === 'enabled') {
   migrateButton.onclick=showMigration;
   const tracks=new TrackChangesEngine();
   trigger.onclick=()=>{
-    const available=new Set<ReviewCategory>(['spelling','punctuation','style']);
+    const available=new Set<ReviewCategory>(reviewCategories.map(([id])=>id));
     const stored=read<unknown>('xrs.ai-review.categories.v1',[...available]);
     const categories=new Set<ReviewCategory>((Array.isArray(stored)?stored:[...available]).filter((id):id is ReviewCategory=>available.has(id as ReviewCategory)));
-    const choices=reviewCategories.map(([id,label])=>`<label><input type="checkbox" data-ai-category="${id}" ${categories.has(id)?'checked':''} ${available.has(id)?'':'disabled'}> ${label}${available.has(id)?'':' (пока недоступно)'}</label>`).join('');
-    const d=dialog('AI Review', `<label>Режим <select id="ai-mode"><option value="local">Локальная проверка</option><option value="cloud" disabled>Облачный ИИ (отключён)</option></select></label><fieldset><legend>Категории проверки</legend>${choices}</fieldset><p>Локальные правила находят только часть ошибок и не оценивают клиническую точность. Медицински значимые варианты показаны как замечания без применяемой правки. Все данные остаются на этом компьютере; каждую правку подтверждает врач.</p><div id="ai-results"></div>`, '<button class="btn" data-close>Закрыть</button><button class="btn" id="ai-cancel" disabled>Отменить проверку</button><button class="btn primary" id="ai-check">Проверить протокол</button>');
+    const experimental=new Set<ReviewCategory>(['terminology','consistency','clinical']);
+    const choices=reviewCategories.map(([id,label])=>`<label><input type="checkbox" data-ai-category="${id}" ${categories.has(id)?'checked':''}> ${label}${experimental.has(id)?' <span data-ai-experimental="true">Экспериментальная проверка</span>':''}</label>`).join('');
+    const d=dialog('AI Review', `<label>Режим <select id="ai-mode"><option value="local">Локальная проверка</option><option value="cloud" disabled>Облачный ИИ (отключён)</option></select></label><fieldset><legend>Категории проверки</legend>${choices}</fieldset><p>Локальные правила ограничены и не подтверждают клиническую точность. Категории с пометкой «Экспериментальная проверка» не являются клинически валидированными. Медицинские замечания не исправляют документ автоматически; решение принимает врач.</p><div id="ai-results"></div>`, '<button class="btn" data-close>Закрыть</button><button class="btn" id="ai-cancel" disabled>Отменить проверку</button><button class="btn primary" id="ai-check">Проверить протокол</button>');
     let currentCheck:AbortController|undefined;
     const checkButton=d.querySelector<HTMLButtonElement>('#ai-check')!;
     const cancelButton=d.querySelector<HTMLButtonElement>('#ai-cancel')!;
