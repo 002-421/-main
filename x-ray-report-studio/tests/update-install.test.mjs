@@ -60,6 +60,29 @@ test('update stages a side-by-side app but leaves shortcut commit to the caller'
   assert.ok(await fs.stat(result.executable));
 });
 
+test('0.4.54 to 0.4.55 local candidate keeps the previous app and synthetic user profile intact', async t => {
+  const f=await fixture(); t.after(()=>fs.rm(f.directory,{recursive:true,force:true}));
+  const profile=path.join(f.directory,'MRI Report Studio');
+  await fs.mkdir(profile,{recursive:true});
+  const userFiles={
+    'workspace.json':'synthetic open reports and tab state',
+    'templates.json':'synthetic custom template',
+    'settings.json':'synthetic export and editor settings',
+    'dictionary.json':'["synthetic-word"]',
+  };
+  for(const [name,value] of Object.entries(userFiles))await fs.writeFile(path.join(profile,name),value);
+  const hashes=new Map(await Promise.all(Object.keys(userFiles).map(async name=>[name,await fs.readFile(path.join(profile,name))])));
+  await fs.writeFile(path.join(f.currentRoot,'resources','app','package.json'),JSON.stringify({version:'0.4.54'}));
+  await fs.writeFile(path.join(f.packageRoot,'package.json'),JSON.stringify({version:'0.4.55'}));
+
+  const installed=await installUpdateArchive({archive:f.archive,currentRoot:f.currentRoot,version:'0.4.55',extractArchive:fakeExtractor(f.packageRoot)});
+  assert.equal(installed.version,'0.4.55');
+  assert.equal(await fs.readFile(path.join(installed.root,'resources','app','electron','main.cjs'),'utf8'),'new app');
+  assert.equal(await fs.readFile(path.join(f.currentRoot,'resources','app','electron','main.cjs'),'utf8'),'old app');
+  assert.equal(JSON.parse(await fs.readFile(path.join(f.currentRoot,'resources','app','package.json'),'utf8')).version,'0.4.54');
+  for(const [name,bytes] of hashes)assert.deepEqual(await fs.readFile(path.join(profile,name)),bytes,`${name} remains byte-for-byte unchanged`);
+});
+
 test('invalid update package leaves the current installation untouched', async t => {
   const f = await fixture();
   t.after(() => fs.rm(f.directory, { recursive: true, force: true }));

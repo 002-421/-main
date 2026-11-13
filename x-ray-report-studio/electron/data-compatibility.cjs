@@ -8,6 +8,8 @@ const APPLICATION_DATA_CONTRACTS = Object.freeze({
   '0.4.53': Object.freeze([CURRENT_DATA_CONTRACT]),
   // Undo history is kept under a separate optional localStorage key. Older readers preserve report documents; the fingerprint check safely drops stale history after an older app edits a report.
   '0.4.54': Object.freeze([CURRENT_DATA_CONTRACT]),
+  // The local 0.4.55 upgrade keeps the same persisted report contract; undo history is optional.
+  '0.4.55': Object.freeze([CURRENT_DATA_CONTRACT]),
   // Beta uses a separate profile; the persisted report format is unchanged.
   '0.4.55-beta.1': Object.freeze([CURRENT_DATA_CONTRACT]),
 });

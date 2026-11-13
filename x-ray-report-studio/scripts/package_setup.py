@@ -5,6 +5,7 @@ Install.cmd downloads and verifies the official pinned Electron on Windows.
 """
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED, ZIP_STORED, ZipInfo
+import argparse
 import json
 import re
 import shutil
@@ -70,9 +71,42 @@ def normalized_text(path):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--candidate-output', type=Path,
+                        help='Write only the Windows Setup ZIP into this repository-local directory; do not touch downloads or latest.json.')
+    parser.add_argument('--candidate-version',
+                        help='Version to place in the candidate package, e.g. 0.4.55 when building from a beta development branch.')
+    args = parser.parse_args()
     if not BUILD.is_file():
         raise RuntimeError('dist/index.html is missing. Run npm run build first.')
     metadata = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))
+    app_version = args.candidate_version or metadata['version']
+    if not re.fullmatch(r'\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?', app_version):
+        raise RuntimeError('The requested candidate version is invalid.')
+    candidate_mode = args.candidate_output is not None
+    if candidate_mode:
+        candidate_output = args.candidate_output.resolve()
+        try:
+            candidate_output.relative_to(ROOT)
+        except ValueError as error:
+            raise RuntimeError('Candidate output must stay inside the repository workspace.') from error
+        candidate_output.mkdir(parents=True, exist_ok=True)
+        stage = candidate_output / 'staging'
+        if stage.exists():
+            shutil.rmtree(stage)
+        stage.mkdir()
+    else:
+        DOWNLOADS.mkdir(exist_ok=True)
+        RELEASE.mkdir(exist_ok=True)
+        legacy_release = RELEASE / 'MRI Alliance'
+        if legacy_release.exists(): shutil.rmtree(legacy_release)
+        for old_package in RELEASE.glob('MRI_Alliance*'):
+            if old_package.is_dir(): shutil.rmtree(old_package)
+            else: old_package.unlink()
+        stage = RELEASE / 'download-packages'
+        if stage.exists():
+            shutil.rmtree(stage)
+        stage.mkdir()
     runtime_version = json.loads((ROOT / 'node_modules/electron/package.json').read_text(encoding='utf-8'))['version']
     installer = (ROOT / 'scripts/install_windows.ps1').read_text(encoding='utf-8')
     pinned = re.search(r'/download/v([^/]+)/electron-v([^/]+)-win32-x64\.zip', installer)
@@ -81,17 +115,6 @@ def main():
     if not re.search(r"\$expected = '[a-f0-9]{64}'", installer):
         raise RuntimeError('The installer SHA256 pin is missing.')
 
-    DOWNLOADS.mkdir(exist_ok=True)
-    RELEASE.mkdir(exist_ok=True)
-    legacy_release = RELEASE / 'MRI Alliance'
-    if legacy_release.exists(): shutil.rmtree(legacy_release)
-    for old_package in RELEASE.glob('MRI_Alliance*'):
-        if old_package.is_dir(): shutil.rmtree(old_package)
-        else: old_package.unlink()
-    stage = RELEASE / 'download-packages'
-    if stage.exists():
-        shutil.rmtree(stage)
-    stage.mkdir()
     setup = stage / 'X-ray Report Studio Setup'
     (setup / 'app/dist').mkdir(parents=True)
     (setup / 'app/electron').mkdir()
@@ -108,7 +131,7 @@ def main():
         (setup / 'app/electron' / source.name).write_text(normalized_text(source), encoding='utf-8', newline='\n')
     (setup / 'app/package.json').write_text(json.dumps({
         'name': metadata['name'], 'productName': 'X-ray Report Studio',
-        'version': metadata['version'], 'main': 'electron/main.cjs', 'private': True,
+        'version': app_version, 'main': 'electron/main.cjs', 'private': True,
     }, indent=2) + '\n', encoding='utf-8', newline='\n')
     (setup / 'README_RU.txt').write_text(normalized_text(ROOT / 'README_RU.txt'), encoding='utf-8', newline='\n')
     (setup / 'Install.ps1').write_bytes(b'\xef\xbb\xbf' + installer.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\r\n').encode('utf-8'))
@@ -133,7 +156,7 @@ def main():
         raise RuntimeError('The inline installer exceeds the Windows command-line limit.')
     (setup / 'Install.cmd').write_bytes(command.encode('ascii'))
     start_here = (
-        f'УСТАНОВКА X-RAY REPORT STUDIO {metadata["version"]}\n\n'
+        f'УСТАНОВКА X-RAY REPORT STUDIO {app_version}\n\n'
         '1. Распакуйте весь архив.\n'
         '2. Запустите Install.cmd двойным щелчком.\n'
         '3. Дождитесь загрузки официальной среды запуска (около 150 МБ).\n'
@@ -146,16 +169,27 @@ def main():
         'Изменения системной части вступят в силу при следующем запуске. '
         'Локальный рабочий черновик и настройки шаблонов сохраняются в профиле приложения.\n\n'
         'Install.ps1 — читаемый исходник команды. Папку app нужно оставить рядом с Install.cmd.\n')
+    if candidate_mode and app_version == '0.4.55':
+        start_here += (
+            '\nЭто локальный тестовый пакет Stable 0.4.55 для домашней установки поверх Stable 0.4.54. '
+            'Перед продолжением Install.cmd попросит закрыть приложение и ввести точное подтверждение. '
+            'Новая программа устанавливается в отдельную папку; файлы 0.4.54 и пользовательский профиль не удаляются. '
+            'Установка не обращается к latest.json и не меняет канал обновлений на других компьютерах.\n')
     (setup / 'START_HERE_RU.txt').write_bytes(b'\xef\xbb\xbf' + start_here.replace('\n', '\r\n').encode('utf-8'))
     notices = collect_licenses()
     (setup / 'THIRD_PARTY_LICENSES.txt').write_text(notices, encoding='utf-8', newline='\n')
-    setup_zip = DOWNLOADS / 'X-ray_Report_Studio_Windows_Setup.zip'
+    setup_zip = ((candidate_output / 'X-ray_Report_Studio_Windows_Setup.zip') if candidate_mode
+                 else DOWNLOADS / 'X-ray_Report_Studio_Windows_Setup.zip')
     # Store the setup archive without DEFLATE: zlib versions can produce
     # different compressed bytes on Linux and Windows for identical files,
     # which makes cross-run SHA256 comparisons unreliable.
     write_zip(setup, setup_zip, ZIP_STORED)
+    if candidate_mode:
+        shutil.rmtree(stage)
+        print('Candidate mode: downloads/latest.json and published download files were not touched.')
+        return
     manifest = {
-        'version': metadata['version'],
+        'version': app_version,
         'url': 'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip',
         'sha256': hashlib.sha256(setup_zip.read_bytes()).hexdigest(),
     }

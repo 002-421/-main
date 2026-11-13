@@ -13,6 +13,7 @@ const {applicationSupportsDataContract}=require('../electron/data-compatibility.
 test('0.4.54 keeps the existing profile contract because Undo history is optional and stored separately',()=>{
  assert.equal(applicationSupportsDataContract('0.4.53',CURRENT_DATA_CONTRACT,1),true);
  assert.equal(applicationSupportsDataContract('0.4.54',CURRENT_DATA_CONTRACT,1),true);
+ assert.equal(applicationSupportsDataContract('0.4.55',CURRENT_DATA_CONTRACT,1),true,'the local upgrade uses the same persisted contract');
  assert.equal(applicationSupportsDataContract('0.4.53','xrs-local-undo-history-v1',1),false);
 });
 

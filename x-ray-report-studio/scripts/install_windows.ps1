@@ -3,6 +3,41 @@ $ProgressPreference = 'SilentlyContinue'
 try {
     $package = $env:MRI_STUDIO_PACKAGE
     if ([string]::IsNullOrWhiteSpace($package)) { $package = $PSScriptRoot }
+    $appPackage = Get-Content -LiteralPath (Join-Path $package 'app\package.json') -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    if ($appPackage.version -eq '0.4.55') {
+        # Guard this local test candidate against accidental installation on another machine.
+        $desktop = [Environment]::GetFolderPath('Desktop')
+        $shortcutPath = Join-Path $desktop 'X-ray Report Studio.lnk'
+        if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { throw 'Test upgrade requires an existing Stable 0.4.54 desktop shortcut.' }
+        try {
+            $shell = New-Object -ComObject WScript.Shell
+            $currentShortcut = $shell.CreateShortcut($shortcutPath)
+            $currentExecutable = [IO.Path]::GetFullPath($currentShortcut.TargetPath)
+            $currentRoot = [IO.Path]::GetDirectoryName($currentExecutable)
+            $currentPackage = Get-Content -LiteralPath (Join-Path $currentRoot 'resources\app\package.json') -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+        } catch { throw 'Could not verify the installed version from its shortcut; upgrade stopped.' }
+        if ($currentPackage.version -ne '0.4.54' -or [IO.Path]::GetFileName($currentExecutable) -ine 'X-ray Report Studio.exe') {
+            throw 'The 0.4.55 test package only upgrades Stable 0.4.54. Installation did not start.'
+        }
+        $channelFile = Join-Path $env:APPDATA 'X-ray Report Studio Channel.json'
+        if (Test-Path -LiteralPath $channelFile -PathType Leaf) {
+            try { $channel = Get-Content -LiteralPath $channelFile -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop }
+            catch { throw 'Update channel settings are damaged; upgrade stopped.' }
+            if ($channel.channel -eq 'beta' -or $channel.profile -eq 'beta') { throw 'Beta is selected for this profile; Stable 0.4.55 test stopped.' }
+        }
+        try { $running = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop) }
+        catch { throw 'Could not inspect Windows processes; upgrade stopped.' }
+        $prefix = [IO.Path]::GetFullPath($currentRoot).TrimEnd('\') + '\'
+        foreach ($process in $running) {
+            $processPath = [string]$process.ExecutablePath
+            if ($process.Name -ieq 'X-ray Report Studio.exe' -or
+                ($process.Name -ieq 'electron.exe' -and $processPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase))) {
+                throw 'Close X-ray Report Studio before installing the test update.'
+            }
+        }
+        $confirmation = Read-Host 'TEST VERSION 0.4.55: only this computer shortcut changes; 0.4.54 stays installed. Type UPDATE 0.4.54 TO 0.4.55 to continue'
+        if ($confirmation -cne 'UPDATE 0.4.54 TO 0.4.55') { throw 'Confirmation was not received; installation cancelled.' }
+    }
     $desktop = [Environment]::GetFolderPath('Desktop')
     if ([string]::IsNullOrWhiteSpace($desktop)) { throw 'Desktop folder is unavailable.' }
     $parent = Join-Path $desktop 'X-ray Report Studio'
