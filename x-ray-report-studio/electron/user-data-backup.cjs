@@ -37,7 +37,19 @@ async function copyTree(source, destination, relativeBase, files) {
   if (!stat.isFile()) throw new Error('В профиле обнаружен неподдерживаемый тип файла; резервирование отменено.');
   await fs.mkdir(path.dirname(destination), { recursive: true });
   await fs.copyFile(source, destination, require('node:fs').constants.COPYFILE_EXCL);
-  const [sourceBytes, copyBytes] = await Promise.all([fs.readFile(source), fs.readFile(destination)]);
+  const readForVerification = async filename => {
+    try { return await fs.readFile(filename); }
+    catch (error) {
+      // Kept as a non-enumerable diagnostic for the synthetic Windows E2E;
+      // normal updater messages and sanitized logs never include user paths.
+      Object.defineProperty(error, 'backupRelativePath', {
+        value: path.relative(relativeBase, filename).split(path.sep).join('/'),
+        configurable: true,
+      });
+      throw error;
+    }
+  };
+  const [sourceBytes, copyBytes] = await Promise.all([readForVerification(source), readForVerification(destination)]);
   const sourceHash = digest(sourceBytes);
   if (sourceHash !== digest(copyBytes)) throw new Error('Не удалось проверить целостность локальной резервной копии.');
   files.push({ path: path.relative(relativeBase, destination).split(path.sep).join('/'), bytes: copyBytes.length, sha256: sourceHash });

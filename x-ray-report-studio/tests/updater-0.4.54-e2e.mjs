@@ -397,6 +397,7 @@ try {
     phase,
     platform: process.platform,
     error: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : String(error),
+    backupRelativePath: error?.backupRelativePath ?? '',
     updaterFailure,
     official054Sha256: EXPECTED_054_SHA256,
     syntheticDataOnly: true,
@@ -431,6 +432,7 @@ try {
   const annotationText = JSON.stringify({
     phase: diagnostic.phase,
     error: diagnostic.error,
+    backupRelativePath: diagnostic.backupRelativePath,
     installState: diagnostic.installState ? {
       status: diagnostic.installState.status,
       currentVersion: diagnostic.installState.current?.version,
