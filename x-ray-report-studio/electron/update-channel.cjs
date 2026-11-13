@@ -28,10 +28,18 @@ function validateManifest(manifest, kind, testKitRoot = '') {
     let artifact;
     try { artifact = new URL(manifest.url); } catch { throw new Error('Недопустимая ссылка на установочный файл.'); }
     const required = kind === 'beta' ? BETA_ARCHIVE : STABLE_ARCHIVE;
-    const expectedGithub = `/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio${required}`;
-    const expectedRaw = `/002-421/-main/codex/mri-report-studio/x-ray-report-studio${required}`;
-    if (artifact.protocol !== 'https:' || !((artifact.hostname === 'github.com' && artifact.pathname === expectedGithub)
-        || (artifact.hostname === 'raw.githubusercontent.com' && artifact.pathname === expectedRaw))
+    const githubBase = '/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio';
+    const rawBase = '/002-421/-main/codex/mri-report-studio/x-ray-report-studio';
+    const archivePaths = [
+      `${githubBase}${required}`,
+      `${rawBase}${required}`,
+      ...(kind === 'stable' ? [
+        `${githubBase}/releases/${manifest.version}${STABLE_ARCHIVE}`,
+        `${rawBase}/releases/${manifest.version}${STABLE_ARCHIVE}`,
+      ] : []),
+    ];
+    if (artifact.protocol !== 'https:' || !((artifact.hostname === 'github.com' && archivePaths.includes(artifact.pathname))
+        || (artifact.hostname === 'raw.githubusercontent.com' && archivePaths.includes(artifact.pathname)))
         || artifact.username || artifact.password || artifact.search || artifact.hash)
       throw new Error('Недопустимая ссылка на установочный файл.');
     url = artifact.toString();

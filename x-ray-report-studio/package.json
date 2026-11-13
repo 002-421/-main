@@ -18,6 +18,7 @@
     "test:tab-lifecycle": "node tests/report-tab-lifecycle-browser.mjs",
     "test:workspace-recovery": "node tests/workspace-recovery-browser.mjs",
     "test:windows-integration": "node --test tests/windows-integration.test.mjs",
+    "test:updater-0.4.54-e2e": "node tests/updater-0.4.54-e2e.mjs",
     "test:preupdate-backup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/XRS-PreUpdate-Backup.Tests.ps1",
     "test:preupdate-backup-core": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/XRS-PreUpdate-Backup.Tests.ps1 -TestGroup Core",
     "test:preupdate-backup-cli-success": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/XRS-PreUpdate-Backup.Tests.ps1 -TestGroup CliSuccess",

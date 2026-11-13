@@ -1,0 +1,269 @@
+name: XRS-09 prepare Stable 0.4.55
+
+on:
+  push:
+    branches: [codex/xrs-09-local-upgrade]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Preparation only by default. Publishing requires a separate confirmed dispatch.
+        required: true
+        type: choice
+        default: prepare
+        options: [prepare, publish]
+      source_sha:
+        description: Full commit SHA from codex/xrs-09-local-upgrade to package and test.
+        required: true
+        type: string
+      confirmation:
+        description: For publication only, enter PUBLISH-XRS-0.4.55.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xrs-09-release-0.4.55
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: x-ray-report-studio
+    steps:
+      - name: Checkout release candidate source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+          fetch-depth: 0
+      - name: Confirm candidate commit belongs to the XRS-09 branch
+        shell: powershell
+        run: |
+          git fetch origin refs/heads/codex/xrs-09-local-upgrade:refs/remotes/origin/codex/xrs-09-local-upgrade
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git merge-base --is-ancestor HEAD origin/codex/xrs-09-local-upgrade
+          if ($LASTEXITCODE -ne 0) { throw 'The selected source commit is not present on codex/xrs-09-local-upgrade.' }
+          Write-Host "Preparing source commit $(git rev-parse HEAD)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: x-ray-report-studio/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - name: Install pinned Windows Electron and Chromium
+        run: |
+          npm run desktop:install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npx playwright-core install chromium
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run: npm run build
+      - run: npm test
+      - name: Windows Electron browser integration
+        run: npm run test:browser
+      - name: Workspace recovery at 1, 5, and 12 tabs
+        run: npm run test:workspace-recovery
+      - name: Electron Undo/Redo history, selection, and scroll
+        run: npm run test:history-browser
+      - name: DOCX export, tab lifecycle, and workspace reload
+        run: npm run test:tab-lifecycle
+      - name: Verify release candidate is Stable 0.4.55 and channel manifest remains untouched
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force test-output/xrs-09-release | Out-Null
+          $manifestBefore = (Get-FileHash downloads/latest.json -Algorithm SHA256).Hash
+          $manifestBefore | Set-Content -LiteralPath test-output/xrs-09-release/latest.json.baseline.sha256 -Encoding ascii
+          python scripts/package_setup.py --candidate-output test-output/xrs-09-release --candidate-version 0.4.55
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify_setup_package.py --zip test-output/xrs-09-release/X-ray_Report_Studio_Windows_Setup.zip --source-electron electron --version 0.4.55
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $manifestAfter = (Get-FileHash downloads/latest.json -Algorithm SHA256).Hash
+          if ($manifestAfter -ne $manifestBefore) { throw 'Candidate packaging changed the checked-in latest.json.' }
+          $sha = (Get-FileHash test-output/xrs-09-release/X-ray_Report_Studio_Windows_Setup.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$sha  X-ray_Report_Studio_Windows_Setup.zip" | Out-File test-output/xrs-09-release/SHA256.txt -Encoding ascii
+          Write-Host "Installer ZIP SHA256: $sha"
+          Get-Item test-output/xrs-09-release/X-ray_Report_Studio_Windows_Setup.zip | Select-Object Name,Length
+      - name: Download and verify the official 0.4.54 Setup ZIP
+        shell: powershell
+        run: |
+          $oldZip = 'test-output/xrs-09-release/X-ray_Report_Studio_Windows_Setup-0.4.54.zip'
+          $oldUrl = 'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-0.4.54.zip'
+          Invoke-WebRequest -Uri $oldUrl -OutFile $oldZip
+          $sha = (Get-FileHash -LiteralPath $oldZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -ne '04ae2cd7745edb92e2c115ca8a620deb0f86152b281a4747eef656f91a768cc3') { throw "Official 0.4.54 ZIP checksum mismatch: $sha" }
+          Write-Host "Official 0.4.54 ZIP SHA256: $sha"
+      - name: Exercise the actual packaged 0.4.54 updater through its isolated test kit
+        env:
+          XRS_054_SETUP_ZIP: ${{ github.workspace }}\x-ray-report-studio\test-output\xrs-09-release\X-ray_Report_Studio_Windows_Setup-0.4.54.zip
+          XRS_055_SETUP_ZIP: ${{ github.workspace }}\x-ray-report-studio\test-output\xrs-09-release\X-ray_Report_Studio_Windows_Setup.zip
+        run: node tests/updater-0.4.54-e2e.mjs
+      - name: Prepare and validate inactive latest.json candidate
+        shell: powershell
+        run: |
+          $zipPath = 'test-output/xrs-09-release/X-ray_Report_Studio_Windows_Setup.zip'
+          $sha = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $candidate = [ordered]@{
+            version = '0.4.55'
+            url = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/releases/0.4.55/downloads/X-ray_Report_Studio_Windows_Setup.zip'
+            sha256 = $sha
+          }
+          $candidate | ConvertTo-Json | Set-Content -LiteralPath 'test-output/xrs-09-release/latest.json' -Encoding UTF8
+          node -e 'const fs=require("node:fs");const {validateManifest}=require("./electron/update-channel.cjs");const manifest=JSON.parse(fs.readFileSync("test-output/xrs-09-release/latest.json","utf8"));const accepted=validateManifest(manifest,"stable");if(accepted.version!=="0.4.55")process.exit(1);console.log("Updater accepted versioned release URL and ZIP SHA256: "+accepted.sha256);'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $expectedBaseline = (Get-Content -LiteralPath 'test-output/xrs-09-release/latest.json.baseline.sha256' -Raw).Trim()
+          if ((Get-FileHash downloads/latest.json -Algorithm SHA256).Hash -ne $expectedBaseline) { throw 'Preparation changed the checked-in latest.json.' }
+      - name: Write preparation report
+        shell: powershell
+        run: |
+          $sha = (Get-FileHash 'test-output/xrs-09-release/X-ray_Report_Studio_Windows_Setup.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          @(
+            'XRS-09 0.4.55 preparation: PASS'
+            "Source SHA: $(git rev-parse HEAD)"
+            "Setup ZIP SHA256: $sha"
+            'Official latest.json: unchanged'
+            'Publication: not performed'
+          ) | Set-Content test-output/xrs-09-release/PREPARATION.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xrs-09-stable-0.4.55-release-candidate
+          if-no-files-found: error
+          path: |
+            x-ray-report-studio/test-output/xrs-09-release/X-ray_Report_Studio_Windows_Setup.zip
+            x-ray-report-studio/test-output/xrs-09-release/SHA256.txt
+            x-ray-report-studio/test-output/xrs-09-release/latest.json
+            x-ray-report-studio/test-output/xrs-09-release/latest.json.baseline.sha256
+            x-ray-report-studio/test-output/xrs-09-release/PREPARATION.txt
+
+  publish:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && inputs.confirmation == 'PUBLISH-XRS-0.4.55' }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Checkout official Stable update branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/mri-report-studio
+      - name: Download the candidate built and tested in this workflow run
+        uses: actions/download-artifact@v4
+        with:
+          name: xrs-09-stable-0.4.55-release-candidate
+          path: ${{ runner.temp }}/xrs-09-release
+      - name: Verify baseline 0.4.54 and preserve its manifest
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('x-ray-report-studio/downloads')
+          manifest=json.loads((root/'latest.json').read_text(encoding='utf-8'))
+          old_sha='04ae2cd7745edb92e2c115ca8a620deb0f86152b281a4747eef656f91a768cc3'
+          assert manifest['version']=='0.4.54' and manifest['sha256']==old_sha, 'Stable baseline is not the expected 0.4.54'
+          old_archive=root/'X-ray_Report_Studio_Windows_Setup-0.4.54.zip'
+          assert hashlib.sha256(old_archive.read_bytes()).hexdigest()==old_sha, 'Versioned 0.4.54 backup ZIP is missing or invalid'
+          backup=root/'latest-0.4.54-before-0.4.55.json'
+          if backup.exists(): assert json.loads(backup.read_text(encoding='utf-8'))==manifest, 'Existing immutable manifest backup differs'
+          else: backup.write_bytes((root/'latest.json').read_bytes())
+          print('Verified and preserved the 0.4.54 manifest and ZIP')
+          PY
+      - name: Verify candidate ZIP bytes and stage immutable versioned archive
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,pathlib,shutil
+          artifact=pathlib.Path('${{ runner.temp }}/xrs-09-release')
+          manifest=json.loads((artifact/'latest.json').read_text(encoding='utf-8-sig'))
+          candidate=artifact/'X-ray_Report_Studio_Windows_Setup.zip'
+          sha=hashlib.sha256(candidate.read_bytes()).hexdigest()
+          assert manifest['version']=='0.4.55' and manifest['sha256']==sha, 'Candidate manifest and actual Setup ZIP differ'
+          destination=pathlib.Path('x-ray-report-studio/releases/0.4.55/downloads/X-ray_Report_Studio_Windows_Setup.zip')
+          destination.parent.mkdir(parents=True,exist_ok=True)
+          if destination.exists(): assert hashlib.sha256(destination.read_bytes()).hexdigest()==sha, 'Refusing to overwrite a different 0.4.55 archive'
+          else: shutil.copyfile(candidate,destination)
+          print('Staged versioned 0.4.55 ZIP with SHA256 '+sha)
+          PY
+          git add x-ray-report-studio/releases/0.4.55/downloads/X-ray_Report_Studio_Windows_Setup.zip x-ray-report-studio/downloads/latest-0.4.54-before-0.4.55.json
+          if git diff --cached --quiet; then echo 'Verified immutable files already exist'; else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'release(xrs): stage verified 0.4.55 archive and preserve 0.4.54'
+            git push origin HEAD:refs/heads/codex/mri-report-studio
+          fi
+      - name: Verify public 0.4.55 ZIP before changing latest.json
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,pathlib,time,urllib.request
+          manifest=json.loads(pathlib.Path('${{ runner.temp }}/xrs-09-release/latest.json').read_text(encoding='utf-8-sig'))
+          url=manifest['url']; expected=manifest['sha256']; ok=False
+          for attempt in range(12):
+              try:
+                  with urllib.request.urlopen(url+'?verify='+str(attempt),timeout=120) as response: payload=response.read()
+                  if hashlib.sha256(payload).hexdigest()==expected: ok=True; break
+              except Exception as error: print('Public ZIP not ready:',type(error).__name__,flush=True)
+              time.sleep(10)
+          assert ok, 'Public versioned ZIP did not match the verified SHA256; the old latest.json remains active.'
+          print('Public versioned ZIP verified before manifest activation')
+          PY
+      - name: Activate latest.json last
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('x-ray-report-studio/downloads')
+          candidate=json.loads(pathlib.Path('${{ runner.temp }}/xrs-09-release/latest.json').read_text(encoding='utf-8-sig'))
+          current=json.loads((root/'latest.json').read_text(encoding='utf-8'))
+          assert current['version']=='0.4.54','Official manifest changed after preparation; stopping.'
+          archive=pathlib.Path('x-ray-report-studio/releases/0.4.55/downloads/X-ray_Report_Studio_Windows_Setup.zip')
+          assert hashlib.sha256(archive.read_bytes()).hexdigest()==candidate['sha256'],'Staged ZIP changed after public verification.'
+          (root/'latest.json').write_text(json.dumps(candidate,indent=2)+'\n',encoding='utf-8')
+          PY
+          git add x-ray-report-studio/downloads/latest.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'release(xrs): activate verified 0.4.55 update manifest'
+          git push origin HEAD:refs/heads/codex/mri-report-studio
+      - name: Verify public manifest and ZIP; restore 0.4.54 manifest if verification fails
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,pathlib,time,urllib.request
+          url='https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json'
+          expected_sha=json.loads(pathlib.Path('${{ runner.temp }}/xrs-09-release/latest.json').read_text(encoding='utf-8-sig'))['sha256']
+          verified=False
+          for attempt in range(12):
+              try:
+                  with urllib.request.urlopen(url+'?verify='+str(attempt),timeout=60) as response: manifest=json.load(response)
+                  if manifest.get('version')=='0.4.55' and manifest.get('sha256')==expected_sha: verified=True; break
+              except Exception as error: print('Public manifest not ready:',type(error).__name__,flush=True)
+              time.sleep(10)
+          assert verified,'Public latest.json does not yet advertise the verified candidate; inspect the release branch and restore latest-0.4.54-before-0.4.55.json if needed.'
+          print('Public latest.json points to the verified 0.4.55 ZIP')
+          PY
+      - name: Restore 0.4.54 manifest if publication verification failed
+        if: ${{ failure() }}
+        run: |
+          set -euo pipefail
+          git fetch origin codex/mri-report-studio
+          git reset --hard origin/codex/mri-report-studio
+          python3 - <<'PY'
+          import json,pathlib
+          root=pathlib.Path('x-ray-report-studio/downloads')
+          current=json.loads((root/'latest.json').read_text(encoding='utf-8'))
+          backup=root/'latest-0.4.54-before-0.4.55.json'
+          if current.get('version')=='0.4.55' and backup.is_file():
+              (root/'latest.json').write_bytes(backup.read_bytes())
+              print('Restoring previous 0.4.54 latest.json after failed publication verification')
+          else:
+              print('No 0.4.55 manifest activation to roll back')
+          PY
+          if ! git diff --quiet -- x-ray-report-studio/downloads/latest.json; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add x-ray-report-studio/downloads/latest.json
+            git commit -m 'revert(xrs): restore 0.4.54 update manifest after failed verification'
+            git push origin HEAD:refs/heads/codex/mri-report-studio
+          fi

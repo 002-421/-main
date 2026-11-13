@@ -10,6 +10,7 @@ const { changeUpdateChannel } = require('../electron/channel-preference.cjs');
 const { downloadHttps } = require('../electron/update-download.cjs');
 const sha256 = 'a'.repeat(64);
 const stable = validateManifest({ version: '0.4.54', url: 'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip', sha256 }, 'stable');
+const stableVersioned = validateManifest({ version: '0.4.55', url: 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/releases/0.4.55/downloads/X-ray_Report_Studio_Windows_Setup.zip', sha256 }, 'stable');
 const beta = validateManifest({ version: '0.4.55-beta.1', url: 'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Beta_Setup.zip', sha256 }, 'beta');
 
 test('Stable never advertises Beta while Beta accepts newer prereleases and stable releases', () => {
@@ -35,6 +36,8 @@ test('prerelease ordering is monotonic and malformed versions are rejected', () 
 
 test('manifest validation preserves fixed trusted hosts, filenames and checksums', () => {
   assert.equal(beta.sha256, sha256);
+  assert.equal(stableVersioned.url, 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/releases/0.4.55/downloads/X-ray_Report_Studio_Windows_Setup.zip');
+  assert.ok(new URL(stableVersioned.url).pathname.endsWith('/downloads/X-ray_Report_Studio_Windows_Setup.zip'), '0.4.54 accepts the immutable URL suffix');
   for (const url of [
     'http://github.com/002-421/-main/downloads/X-ray_Report_Studio_Windows_Beta_Setup.zip',
     'https://evil.example/downloads/X-ray_Report_Studio_Windows_Beta_Setup.zip',
@@ -42,6 +45,11 @@ test('manifest validation preserves fixed trusted hosts, filenames and checksums
     beta.url.replace('/codex/mri-report-studio/', '/main/'),
     `${beta.url}?other=1`,
   ]) assert.throws(() => validateManifest({ version: beta.version, url, sha256 }, 'beta'), /Недопустимая ссылка/);
+  for (const [version, url] of [
+    ['0.4.55', stableVersioned.url.replace('/releases/0.4.55/', '/releases/0.4.56/')],
+    ['0.4.56', stableVersioned.url],
+    ['0.4.55', stableVersioned.url.replace('/releases/0.4.55/', '/archive/releases/0.4.55/')],
+  ]) assert.throws(() => validateManifest({ version, url, sha256 }, 'stable'), /Недопустимая ссылка/);
   assert.throws(() => validateManifest({ version: beta.version, url: beta.url, sha256: 'bad' }, 'beta'), /некорректные данные/);
   assert.throws(() => validateManifest({ version: beta.version, url: beta.url, sha256 }, 'stable'), /некорректные данные/);
   assert.equal(validateManifest({ version: beta.version, url: 'XRS_Test_Update_0.4.55-beta.2.zip', sha256 }, 'beta', '/tmp/Тест с пробелом').url.startsWith('file:'), true);
