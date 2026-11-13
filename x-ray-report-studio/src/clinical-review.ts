@@ -60,14 +60,25 @@ export class ClinicalConsistencyEngine {
   }
 }
 export class ClinicalLogicEngine {
-  validate(blocks:ReviewBlocks):Finding[]{const out:Finding[]=[];for(const blockId of ['description','conclusion'] as const){const text=blocks[blockId],cs=clauses(text);
-    for(let i=0;i<cs.length;i++)for(let j=i+1;j<cs.length;j++){const x=cs[i],y=cs[j];if(!entity.test(x.text)||!entity.test(y.text))continue;const kx=entityKey(x.text),ky=entityKey(y.text);if(kx.split(':')[0]!==ky.split(':')[0]||kx.split(':')[1]!==ky.split(':')[1])continue;
-      const xNeg=negated(x.text),yNeg=negated(y.text);if(xNeg===yNeg)continue;
-      // Exclude explicit comparison with prior studies and tentative statements.
-      if(/(?:ранее|предыдущ|в динамике|по сравнению|вероятно|возможно|может соответствовать|нельзя исключить)/iu.test(`${x.text} ${y.text}`))continue;
-      const sides=[side(x.text),side(y.text)].filter(Boolean);if(sides.length===2&&((/прав|справа/u.test(sides[0]))!==( /прав|справа/u.test(sides[1]))))continue;
-      const dx=dimensions(x.text),dy=dimensions(y.text);if(dx.length===1&&dy.length===1&&dx[0]!==dy[0])continue;
-      out.push(finding(blockId,text,y.start,y.start+y.text.length,'clinical','Возможны несовместимые утверждения о наличии одной и той же находки. Проверьте контекст вручную.',x.text.trim()));
+  validate(blocks:ReviewBlocks):Finding[]{
+    const out:Finding[]=[];
+    const uncertain=/(?:не исключа|возможн|вероятн|предполож|может соответств|без отрицательной динамики|ранее|предыдущ|в динамике|по сравнению)/iu;
+    const pathology=(s:string)=>{const m=/(грыж\p{L}*|протрузи\p{L}*|экструзи\p{L}*|очаг\p{L}*|образовани\p{L}*|кист\p{L}*|узел\p{L}*|консолидаци\p{L}*|опухол\p{L}*)/iu.exec(s);if(!m)return '';const v=m[0].toLocaleLowerCase('ru');return v.startsWith('грыж')?'грыжа':v.startsWith('протрузи')?'протрузия':v.startsWith('экструзи')?'экструзия':v.startsWith('очаг')?'очаг':v.startsWith('образовани')?'образование':v.startsWith('кист')?'киста':v.startsWith('узел')?'узел':v.startsWith('консолидаци')?'консолидация':'опухоль';};
+    const explicit=(s:string)=>/(?:определя\p{L}*|выявля\p{L}*|визуализиру\p{L}*|обнаруж\p{L}*|имеется|налич\p{L}*)/iu.test(s)&&!negated(s);
+    const desc=clauses(blocks.description),concl=clauses(blocks.conclusion);
+    for(const [blockId,text,cs] of [['description',blocks.description,desc],['conclusion',blocks.conclusion,concl]] as const){
+      for(let i=0;i<cs.length;i++)for(let j=i+1;j<cs.length;j++){const x=cs[i],y=cs[j];if(!entity.test(x.text)||!entity.test(y.text)||uncertain.test(`${x.text} ${y.text}`))continue;const kx=entityKey(x.text),ky=entityKey(y.text);if(kx.split(':')[0]!==ky.split(':')[0]||kx.split(':')[1]!==ky.split(':')[1]||pathology(x.text)!==pathology(y.text))continue;if(negated(x.text)===negated(y.text))continue;out.push(finding(blockId,text,y.start,y.start+y.text.length,'clinical','Возможны несовместимые утверждения о наличии одной и той же находки.',x.text.trim()));}
     }
-  }return out;}
+    for(const d of desc)for(const c of concl){const type=pathology(d.text);if(!type||type!==pathology(c.text)||uncertain.test(`${d.text} ${c.text}`))continue;if(negated(d.text)===negated(c.text))continue;if((!explicit(d.text)&&!negated(d.text))||(!explicit(c.text)&&!negated(c.text)))continue;
+      const region=/(?:лобн\p{L}*|теменн\p{L}*|височн\p{L}*|затылочн\p{L}*|мозжечк\p{L}*|гипофиз\p{L}*|печен\p{L}*|селезенк\p{L}*|легк\p{L}*|почк\p{L}*|плевр\p{L}*|коленн\p{L}*|плечев\p{L}*|шейн\p{L}*|грудн\p{L}*|поясничн\p{L}*)/iu;
+      const da=region.exec(d.text)?.[0]?.toLocaleLowerCase('ru')??'',ca=region.exec(c.text)?.[0]?.toLocaleLowerCase('ru')??'';if(da&&ca&&da!==ca)continue;
+      const spineRegion=(s:string)=>/шейн/iu.test(s)?'cervical':/грудн/iu.test(s)?'thoracic':/поясничн/iu.test(s)?'lumbar':'';
+      const regionSide=spineRegion(da||ca);const explicitLevels=[...levels(d.text),...levels(c.text)];if(regionSide&&explicitLevels.some(value=>regionSide==='cervical'?!/^C/u.test(value):regionSide==='thoracic'?!/^TH/u.test(value):!/^L/u.test(value)))continue;
+      const ds=side(d.text),cs=side(c.text);if(ds&&cs&&((/прав|справа/u.test(ds))!==(/прав|справа/u.test(cs))))continue;
+      const dl=levels(d.text),cl=levels(c.text);if(dl.length>1||cl.length>1||(dl.length>0&&cl.length>0&&dl[0]!==cl[0]))continue;
+      const dd=dimensions(d.text),cd=dimensions(c.text);if(dd.length&&cd.length&&dd.join('|')!==cd.join('|'))continue;
+      out.push(finding('conclusion',blocks.conclusion,c.start,c.start+c.text.length,'clinical','Описание и заключение по-разному указывают наличие одной и той же находки.',d.text.trim()));
+    }
+    return out;
+  }
 }
