@@ -1,0 +1,349 @@
+{
+  "description": "Independent synthetic holdout; labels fixed before execution. 20 cases per analyzer.",
+  "terminology": [
+    {
+      "id": "term-tp01",
+      "text": "МРТ гиперинтенсивный очаг",
+      "expected": false
+    },
+    {
+      "id": "term-tp02",
+      "text": "КТ гиподенсивный узел",
+      "expected": false
+    },
+    {
+      "id": "term-tp03",
+      "text": "МРТ интрамедуллярный очаг",
+      "expected": false
+    },
+    {
+      "id": "term-tp04",
+      "text": "КТ остеодеструкция позвонка",
+      "expected": false
+    },
+    {
+      "id": "term-tp05",
+      "text": "МРТ субарахноидальное пространство",
+      "expected": false
+    },
+    {
+      "id": "term-tp06",
+      "text": "КТ консолидация легочной ткани",
+      "expected": false
+    },
+    {
+      "id": "term-tp07",
+      "text": "МРТ перивентрикулярный очаг",
+      "expected": false
+    },
+    {
+      "id": "term-tp08",
+      "text": "КТ гиперденсивное образование",
+      "expected": false
+    },
+    {
+      "id": "term-tp09",
+      "text": "МРТ экстрадуральный компонент",
+      "expected": false
+    },
+    {
+      "id": "term-tp10",
+      "text": "КТ аорта и плевра",
+      "expected": false
+    },
+    {
+      "id": "term-tp11",
+      "text": "МРТ: гиперинтенсвный очаг",
+      "expected": true
+    },
+    {
+      "id": "term-tp12",
+      "text": "КТ: гиподенсивный узел, термин: гиподенсивныйй",
+      "expected": true
+    },
+    {
+      "id": "term-tp13",
+      "text": "МРТ: субарахноидальныйй отдел",
+      "expected": true
+    },
+    {
+      "id": "term-tp14",
+      "text": "КТ: остеодиструкция",
+      "expected": true
+    },
+    {
+      "id": "term-tp15",
+      "text": "МРТ: интрамедуллярнй сигнал",
+      "expected": true
+    },
+    {
+      "id": "term-tp16",
+      "text": "КТ: гиперденсивнй фокус",
+      "expected": true
+    },
+    {
+      "id": "term-tp17",
+      "text": "МРТ: перивентрикулярнй очаг",
+      "expected": true
+    },
+    {
+      "id": "term-tp18",
+      "text": "КТ: консолидациия",
+      "expected": true
+    },
+    {
+      "id": "term-tp19",
+      "text": "МРТ: экстрадуралный компонент",
+      "expected": true
+    },
+    {
+      "id": "term-tp20",
+      "text": "КТ: гиподенсивнй участок",
+      "expected": true
+    }
+  ],
+  "consistency": [
+    {
+      "id": "cons-tp01",
+      "description": "МРТ: В правой лобной доле очаг 4 мм.",
+      "conclusion": "МРТ: Очаг в левой лобной доле 4 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp02",
+      "description": "МРТ: Экструзия диска L4-L5 6 мм.",
+      "conclusion": "МРТ: Экструзия диска L5-S1 6 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp03",
+      "description": "КТ: В печени образование 12 мм.",
+      "conclusion": "КТ: В печени образование 18 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp04",
+      "description": "МРТ: Очаг в теменной доле 3 мм.",
+      "conclusion": "МРТ: Очаг в теменной доле 7 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp05",
+      "description": "МРТ: Протрузия L3-L4 2 мм.",
+      "conclusion": "МРТ: Протрузия L4-L5 2 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp06",
+      "description": "КТ: Узел в правом легком 5 мм.",
+      "conclusion": "КТ: Узел в левом легком 5 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp07",
+      "description": "КТ: Киста почки 8 мм.",
+      "conclusion": "КТ: Киста почки 10 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp08",
+      "description": "МРТ: Очаг в височной доле 1 см.",
+      "conclusion": "МРТ: Очаг в височной доле 10 мм.",
+      "expected": false
+    },
+    {
+      "id": "cons-tp09",
+      "description": "МРТ: Грыжа L4-L5 4 мм.",
+      "conclusion": "МРТ: Грыжа L5-S1 4 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp10",
+      "description": "КТ: Узел печени 1,2 см.",
+      "conclusion": "КТ: Узел печени 12 мм.",
+      "expected": false
+    },
+    {
+      "id": "cons-tp11",
+      "description": "МРТ: Очаг в правой теменной доле 2 мм.",
+      "conclusion": "МРТ: Очаг в левой теменной доле 2 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp12",
+      "description": "КТ: Образование селезенки 14 мм.",
+      "conclusion": "КТ: Образование селезенки 11 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp13",
+      "description": "МРТ: Экструзия L5-S1 5 мм.",
+      "conclusion": "МРТ: Экструзия L4-L5 5 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp14",
+      "description": "КТ: Узел в левом легком 6 мм.",
+      "conclusion": "КТ: Узел в правом легком 6 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp15",
+      "description": "МРТ: Очаг мозжечка 7 мм.",
+      "conclusion": "МРТ: Очаг мозжечка 9 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp16",
+      "description": "МРТ: Протрузия L2-L3 3 мм.",
+      "conclusion": "МРТ: Протрузия L2-L3 5 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp17",
+      "description": "КТ: Киста почки 1,5 см.",
+      "conclusion": "КТ: Киста почки 15 мм.",
+      "expected": false
+    },
+    {
+      "id": "cons-tp18",
+      "description": "МРТ: Очаг лобной доли 4 мм.",
+      "conclusion": "МРТ: Очаг затылочной доли 4 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp19",
+      "description": "КТ: Узел плевры справа 3 мм.",
+      "conclusion": "КТ: Узел плевры слева 3 мм.",
+      "expected": true
+    },
+    {
+      "id": "cons-tp20",
+      "description": "МРТ: Грыжа C5-C6 2 мм.",
+      "conclusion": "МРТ: Грыжа C6-C7 2 мм.",
+      "expected": true
+    }
+  ],
+  "clinical": [
+    {
+      "id": "logic-tp01",
+      "description": "МРТ: На уровне L4-L5 определяется грыжа межпозвонкового диска.",
+      "conclusion": "МРТ: Грыж межпозвонковых дисков не выявлено.",
+      "expected": true
+    },
+    {
+      "id": "logic-tp02",
+      "description": "КТ: В печени образование определяется.",
+      "conclusion": "КТ: В печени образование не выявлено.",
+      "expected": true
+    },
+    {
+      "id": "logic-tp03",
+      "description": "МРТ: В лобной доле определяется очаг.",
+      "conclusion": "МРТ: Очаг в лобной доле не выявлен.",
+      "expected": true
+    },
+    {
+      "id": "logic-tp04",
+      "description": "КТ: В правом легком определяется узел.",
+      "conclusion": "КТ: Узел правого легкого отсутствует.",
+      "expected": true
+    },
+    {
+      "id": "logic-tp05",
+      "description": "МРТ: Киста гипофиза визуализируется.",
+      "conclusion": "МРТ: Киста гипофиза не определяется.",
+      "expected": true
+    },
+    {
+      "id": "logic-tp06",
+      "description": "КТ: В селезенке определяется образование.",
+      "conclusion": "КТ: Образование селезенки не выявлено.",
+      "expected": true
+    },
+    {
+      "id": "logic-tp07",
+      "description": "МРТ: Грыжа L4-L5 определяется.",
+      "conclusion": "МРТ: Грыж не выявлено.",
+      "expected": true
+    },
+    {
+      "id": "logic-tp08",
+      "description": "КТ: В плевре определяется узел.",
+      "conclusion": "КТ: Узел плевры отсутствует.",
+      "expected": true
+    },
+    {
+      "id": "logic-tp09",
+      "description": "МРТ: Очаг в теменной доле выявляется.",
+      "conclusion": "МРТ: Очаг теменной доли не визуализируется.",
+      "expected": true
+    },
+    {
+      "id": "logic-tp10",
+      "description": "КТ: В почке определяется киста.",
+      "conclusion": "КТ: Киста почки не обнаружена.",
+      "expected": true
+    },
+    {
+      "id": "logic-tn01",
+      "description": "МРТ: Грыжа L4-L5 определяется. На L5-S1 грыжи нет.",
+      "conclusion": "МРТ: Грыжа L4-L5.",
+      "expected": false
+    },
+    {
+      "id": "logic-tn02",
+      "description": "МРТ: Протрузия L4-L5 определяется.",
+      "conclusion": "МРТ: Экструзия L4-L5 не выявлена.",
+      "expected": false
+    },
+    {
+      "id": "logic-tn03",
+      "description": "МРТ: Грыжа L4-L5 не исключается.",
+      "conclusion": "МРТ: Возможная грыжа L4-L5.",
+      "expected": false
+    },
+    {
+      "id": "logic-tn04",
+      "description": "МРТ: Без отрицательной динамики.",
+      "conclusion": "МРТ: Ранее известная грыжа L4-L5.",
+      "expected": false
+    },
+    {
+      "id": "logic-tn05",
+      "description": "МРТ: Грыжа поясничного отдела определяется.",
+      "conclusion": "МРТ: Грыжа шейного отдела не выявлена.",
+      "expected": false
+    },
+    {
+      "id": "logic-tn06",
+      "description": "КТ: В печени киста определяется.",
+      "conclusion": "КТ: Киста почки не выявлена.",
+      "expected": false
+    },
+    {
+      "id": "logic-tn07",
+      "description": "МРТ: В правой лобной доле очаг определяется.",
+      "conclusion": "МРТ: Очаг левой лобной доли не выявлен.",
+      "expected": false
+    },
+    {
+      "id": "logic-tn08",
+      "description": "МРТ: На L4-L5 грыжа определяется.",
+      "conclusion": "МРТ: На L5-S1 грыжа не выявлена.",
+      "expected": false
+    },
+    {
+      "id": "logic-tn09",
+      "description": "КТ: Возможно образование печени.",
+      "conclusion": "КТ: Нельзя исключить образование печени.",
+      "expected": false
+    },
+    {
+      "id": "logic-tn10",
+      "description": "МРТ: Отдельный очаг в лобной доле и киста в гипофизе.",
+      "conclusion": "МРТ: Киста гипофиза не выявлена.",
+      "expected": false
+    }
+  ]
+}
