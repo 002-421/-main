@@ -1,10 +1,10 @@
-name: XRS AI Offline Windows smoke
+name: XRS AI Offline Windows diagnostics
 
 on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: Exact source commit to build
+        description: Exact application commit to build and test
         required: true
         type: string
         default: efabb9d5bbb842b4b05f8a8bfd88f075ea23f1c0
@@ -13,35 +13,24 @@ permissions:
   contents: read
 
 jobs:
-  windows-x64-smoke:
+  build-package:
     if: github.ref == 'refs/heads/codex/xrs-ai-review-04b'
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
-      - name: Validate the requested source revision
+      - name: Validate requested source revision
         shell: pwsh
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           if ($env:SOURCE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'source_sha must be a full lowercase commit SHA' }
 
-      - name: Checkout workflow tools from the selected workflow ref
+      - name: Checkout CI tools from the selected workflow ref
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.sha }}
           path: ci-tools
           persist-credentials: false
-
-      - name: Verify workflow ref and tools checkout
-        shell: pwsh
-        env:
-          WORKFLOW_REF: ${{ github.ref }}
-          WORKFLOW_SHA: ${{ github.sha }}
-        run: |
-          $actual = (git -C ci-tools rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:WORKFLOW_SHA) { throw "Workflow tools SHA mismatch: expected $env:WORKFLOW_SHA, got $actual" }
-          Write-Output "Workflow ref: $env:WORKFLOW_REF"
-          Write-Output "Workflow/tools SHA: $actual"
 
       - name: Checkout exact application source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -50,16 +39,20 @@ jobs:
           path: source
           persist-credentials: false
 
-      - name: Verify clean exact application checkout
+      - name: Verify both checkouts
         shell: pwsh
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
         run: |
-          $app = 'source/x-ray-report-studio'
-          $actual = (git -C source rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:SOURCE_SHA) { throw "Expected $env:SOURCE_SHA, got $actual" }
-          if ((git -C source status --porcelain).Length -ne 0) { throw 'Application source checkout is not clean' }
-          if (-not (Test-Path "$app/package.json")) { throw 'XRS app directory is missing in the source checkout' }
+          $source = (git -C source rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $source -cne $env:SOURCE_SHA) { throw "Source SHA mismatch: expected $env:SOURCE_SHA, got $source" }
+          $tools = (git -C ci-tools rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $tools -cne $env:WORKFLOW_SHA) { throw "CI tools SHA mismatch: expected $env:WORKFLOW_SHA, got $tools" }
+          if ((git -C source status --porcelain).Length -ne 0) { throw 'Application checkout is not clean' }
+          if (-not (Test-Path 'source/x-ray-report-studio/package.json')) { throw 'Application directory is missing' }
+          Write-Output "Application source SHA: $source"
+          Write-Output "CI tools/workflow SHA: $tools"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -79,31 +72,213 @@ jobs:
         run: npm run build
         working-directory: source/x-ray-report-studio
 
-      - name: Run the complete test suite
+      - name: Run complete test suite
         run: npm test
         working-directory: source/x-ray-report-studio
 
-      - name: Recheck clean application source tree
+      - name: Confirm application source revision remains unchanged
         shell: pwsh
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
-          if ((git -C source rev-parse HEAD).Trim() -cne $env:SOURCE_SHA) { throw 'Application source HEAD changed during checks' }
-          if ((git -C source status --porcelain).Length -ne 0) { throw 'Build or tests modified the application source checkout' }
+          $actual = (git -C source rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:SOURCE_SHA) { throw 'Application source HEAD changed during validation' }
+          if ((git -C source status --porcelain).Length -ne 0) { throw 'Validation modified the application source checkout' }
 
       - name: Package portable Electron runtime
         run: python scripts/package_windows.py
         working-directory: source/x-ray-report-studio
 
-      - name: Verify ZIP and run isolated offline application smoke test
+      - name: Verify ZIP and create test-only manifest
         shell: pwsh
-        run: ./ci-tools/x-ray-report-studio/scripts/windows-ai-review-smoke.ps1 -SourcePath ../../source/x-ray-report-studio -Archive release/X-ray_Report_Studio_Windows_x64.zip
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          $app = 'source/x-ray-report-studio'
+          $zip = Join-Path $app 'release/X-ray_Report_Studio_Windows_x64.zip'
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $manifest = [ordered]@{
+            artifact_kind = 'EXPERIMENTAL_TEST_ONLY_NOT_FUNCTIONALLY_ACCEPTED'
+            source_sha = $env:SOURCE_SHA
+            ci_tools_sha = $env:WORKFLOW_SHA
+            zip_file = 'X-ray_Report_Studio_Windows_x64.zip'
+            sha256 = $hash
+            zip_verification = 'PENDING'
+            functional_acceptance = 'PENDING'
+          }
+          $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $app 'release/XRS_AI_OFFLINE_TEST_MANIFEST.json') -Encoding utf8
+          Set-Content -LiteralPath (Join-Path $app 'release/EXPERIMENTAL_NOT_FUNCTIONALLY_ACCEPTED.txt') -Value 'Test-only portable ZIP. Functional acceptance is pending. Not a release.' -Encoding utf8
+          python (Join-Path $app 'scripts/verify_windows_portable.py') $zip --expected-html (Join-Path $app 'dist/index.html')
+          if ($LASTEXITCODE -ne 0) { throw 'Portable ZIP verification failed' }
+          $manifest.zip_verification = 'PASS'
+          $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $app 'release/XRS_AI_OFFLINE_TEST_MANIFEST.json') -Encoding utf8
+          Write-Output "Portable ZIP SHA-256: $hash"
 
-      - name: Upload test-only portable ZIP
-        if: success()
+      - name: Upload experimental portable ZIP independently of later smoke jobs
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: xrs-ai-offline-windows-${{ inputs.source_sha }}
-          path: source/x-ray-report-studio/release/X-ray_Report_Studio_Windows_x64.zip
-          if-no-files-found: error
+          name: xrs-ai-offline-experimental-${{ inputs.source_sha }}
+          path: |
+            source/x-ray-report-studio/release/X-ray_Report_Studio_Windows_x64.zip
+            source/x-ray-report-studio/release/XRS_AI_OFFLINE_TEST_MANIFEST.json
+            source/x-ray-report-studio/release/EXPERIMENTAL_NOT_FUNCTIONALLY_ACCEPTED.txt
+          if-no-files-found: warn
+          retention-days: 3
+
+  windows-diagnostics:
+    if: github.ref == 'refs/heads/codex/xrs-ai-review-04b' && needs.build-package.result == 'success'
+    needs: build-package
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Checkout CI tools from the selected workflow ref
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: ci-tools
+          persist-credentials: false
+
+      - name: Checkout exact application source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: source
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
+      - name: Install Playwright Core from the locked application dependencies
+        run: npm ci
+        working-directory: source/x-ray-report-studio
+
+      - name: Download the exact portable artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: xrs-ai-offline-experimental-${{ inputs.source_sha }}
+          path: portable-artifact
+
+      - name: Verify artifact checksum and source identity
+        id: verify-artifact
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          $manifest = Get-Content 'portable-artifact/XRS_AI_OFFLINE_TEST_MANIFEST.json' -Raw | ConvertFrom-Json
+          if ($manifest.source_sha -cne $env:SOURCE_SHA) { throw 'Portable artifact source SHA mismatch' }
+          if ($manifest.ci_tools_sha -cne $env:WORKFLOW_SHA) { throw 'Portable artifact tools SHA mismatch' }
+          if ($manifest.zip_verification -cne 'PASS') { throw 'Portable artifact did not pass ZIP verification' }
+          if ($manifest.functional_acceptance -cne 'PENDING') { throw 'Unexpected artifact acceptance status' }
+          $zip = 'portable-artifact/X-ray_Report_Studio_Windows_x64.zip'
+          $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -cne $manifest.sha256) { throw 'Portable artifact SHA-256 mismatch' }
+          if (-not (Test-Path 'portable-artifact/EXPERIMENTAL_NOT_FUNCTIONALLY_ACCEPTED.txt')) { throw 'Experimental artifact marker is missing' }
+          $sourceHead = (git -C source rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sourceHead -cne $env:SOURCE_SHA) { throw 'Diagnostics source checkout SHA mismatch' }
+          $toolsHead = (git -C ci-tools rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $toolsHead -cne $env:WORKFLOW_SHA) { throw 'Diagnostics tools checkout SHA mismatch' }
+
+      - name: Run diagnostics and retain only allowlisted files
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path 'ci-tools/x-ray-report-studio/artifacts/windows-diagnostics' -Force | Out-Null
+          if ('${{ steps.verify-artifact.outcome }}' -eq 'success' -and (Test-Path 'portable-artifact/X-ray_Report_Studio_Windows_x64.zip')) {
+            ./ci-tools/x-ray-report-studio/scripts/windows-ai-review-smoke.ps1 -Mode Diagnostics -Archive "$PWD/portable-artifact/X-ray_Report_Studio_Windows_x64.zip" -SourcePath "$PWD/source/x-ray-report-studio" -DiagnosticsPath "$PWD/ci-tools/x-ray-report-studio/artifacts/windows-diagnostics"
+            if ($LASTEXITCODE -ne 0) { throw 'Windows diagnostics stage failed; see the diagnostics artifact' }
+          } else {
+            Set-Content 'ci-tools/x-ray-report-studio/artifacts/windows-diagnostics/stage.json' '{"status":"BLOCKED","reason":"artifact missing or checksum/source verification failed"}'
+            throw 'Portable artifact is unavailable or failed integrity checks for diagnostics'
+          }
+
+      - name: Upload Windows diagnostics even after application failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: xrs-ai-offline-diagnostics-${{ inputs.source_sha }}
+          path: ci-tools/x-ray-report-studio/artifacts/windows-diagnostics/
+          if-no-files-found: warn
+          retention-days: 3
+
+  functional-acceptance:
+    if: github.ref == 'refs/heads/codex/xrs-ai-review-04b' && needs.build-package.result == 'success'
+    needs: build-package
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout CI tools from the selected workflow ref
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: ci-tools
+          persist-credentials: false
+
+      - name: Checkout exact application source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: source
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
+      - name: Install Playwright Core from the locked application dependencies
+        run: npm ci
+        working-directory: source/x-ray-report-studio
+
+      - name: Download the exact portable artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: xrs-ai-offline-experimental-${{ inputs.source_sha }}
+          path: portable-artifact
+
+      - name: Verify artifact checksum and source identity
+        id: verify-artifact
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          $manifest = Get-Content 'portable-artifact/XRS_AI_OFFLINE_TEST_MANIFEST.json' -Raw | ConvertFrom-Json
+          if ($manifest.source_sha -cne $env:SOURCE_SHA) { throw 'Portable artifact source SHA mismatch' }
+          if ($manifest.ci_tools_sha -cne $env:WORKFLOW_SHA) { throw 'Portable artifact tools SHA mismatch' }
+          if ($manifest.zip_verification -cne 'PASS') { throw 'Portable artifact did not pass ZIP verification' }
+          if ($manifest.functional_acceptance -cne 'PENDING') { throw 'Unexpected artifact acceptance status' }
+          $zip = 'portable-artifact/X-ray_Report_Studio_Windows_x64.zip'
+          $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -cne $manifest.sha256) { throw 'Portable artifact SHA-256 mismatch' }
+          if (-not (Test-Path 'portable-artifact/EXPERIMENTAL_NOT_FUNCTIONALLY_ACCEPTED.txt')) { throw 'Experimental artifact marker is missing' }
+          $sourceHead = (git -C source rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sourceHead -cne $env:SOURCE_SHA) { throw 'Acceptance source checkout SHA mismatch' }
+          $toolsHead = (git -C ci-tools rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $toolsHead -cne $env:WORKFLOW_SHA) { throw 'Acceptance tools checkout SHA mismatch' }
+
+      - name: Run independent functional acceptance cases
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path 'ci-tools/x-ray-report-studio/artifacts/windows-acceptance' -Force | Out-Null
+          if ('${{ steps.verify-artifact.outcome }}' -eq 'success' -and (Test-Path 'portable-artifact/X-ray_Report_Studio_Windows_x64.zip')) {
+            ./ci-tools/x-ray-report-studio/scripts/windows-ai-review-smoke.ps1 -Mode Acceptance -Archive "$PWD/portable-artifact/X-ray_Report_Studio_Windows_x64.zip" -SourcePath "$PWD/source/x-ray-report-studio" -DiagnosticsPath "$PWD/ci-tools/x-ray-report-studio/artifacts/windows-acceptance"
+            if ($LASTEXITCODE -ne 0) { throw 'One or more functional acceptance cases failed; see the acceptance artifact' }
+          } else {
+            Set-Content 'ci-tools/x-ray-report-studio/artifacts/windows-acceptance/results.json' '[{"name":"artifact","status":"BLOCKED","reason":"artifact missing or checksum/source verification failed"}]'
+            throw 'Portable artifact is unavailable or failed integrity checks for functional acceptance'
+          }
+
+      - name: Upload functional acceptance results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: xrs-ai-offline-acceptance-${{ inputs.source_sha }}
+          path: ci-tools/x-ray-report-studio/artifacts/windows-acceptance/
+          if-no-files-found: warn
           retention-days: 3
