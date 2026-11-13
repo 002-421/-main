@@ -1,4 +1,5 @@
 import type { RichNode } from './model';
+import { MedicalTerminologyEngine, ClinicalConsistencyEngine, ClinicalLogicEngine } from './clinical-review.ts';
 
 export type ReviewBlockId = 'description' | 'conclusion';
 export type ReviewBlocks = Record<ReviewBlockId, string>;
@@ -103,14 +104,22 @@ export class CloudAIProvider implements AIProvider { async review(_blocks: Revie
 
 export class ReviewEngine {
   private readonly provider: AIProvider;
-  constructor(provider: AIProvider = new MockAIProvider()) { this.provider = provider; }
+  private readonly medical: { terminology: Pick<MedicalTerminologyEngine,'validate'>; consistency: Pick<ClinicalConsistencyEngine,'validate'>; clinical: Pick<ClinicalLogicEngine,'validate'> };
+  constructor(provider: AIProvider = new MockAIProvider(), medical = { terminology:new MedicalTerminologyEngine(), consistency:new ClinicalConsistencyEngine(), clinical:new ClinicalLogicEngine() }) { this.provider = provider; this.medical = medical; }
   async review(doc: RichNode, categories: ReadonlySet<ReviewCategory> = new Set(reviewCategories.map(([id]) => id)), signal?: AbortSignal): Promise<{ blocks: ReviewBlocks; suggestions: Suggestion[] }> {
     signal?.throwIfAborted();
     const blocks = new ReportBlockExtractor().extract(doc);
     new PrivacyGuard().check(blocks);
-    const findings = [...new TemplateValidator().validate(blocks), ...new ConsistencyEngine().validate(blocks), ...await this.provider.review(blocks, signal)];
+    const findings:Finding[]=[];
+    if(categories.has('style')) findings.push(...new TemplateValidator().validate(blocks));
+    if(categories.has('consistency')) findings.push(...new ConsistencyEngine().validate(blocks),...this.medical.consistency.validate(blocks));
+    if(categories.has('terminology')) findings.push(...this.medical.terminology.validate(blocks));
+    if(categories.has('clinical')) findings.push(...this.medical.clinical.validate(blocks));
+    if(['spelling','punctuation','style'].some(category=>categories.has(category as ReviewCategory)))findings.push(...await this.provider.review(blocks, signal));
     signal?.throwIfAborted();
-    const suggestions = findings.filter(f => { const group=categoryGroup(f.category); return group && categories.has(group) && allowed.has(f.blockId) && Number.isInteger(f.from) && Number.isInteger(f.to) && f.from >= 0 && f.to <= blocks[f.blockId].length && f.from <= f.to && blocks[f.blockId].slice(f.from, f.to) === f.original; }).map(f => ({ ...f, id: crypto.randomUUID(), state: 'pending' as const }));
+    const unique=new Map<string,Finding>();
+    for(const finding of findings){const group=categoryGroup(finding.category);if(!group||!categories.has(group)||!allowed.has(finding.blockId)||!Number.isInteger(finding.from)||!Number.isInteger(finding.to)||finding.from<0||finding.to>blocks[finding.blockId].length||finding.from>finding.to||blocks[finding.blockId].slice(finding.from,finding.to)!==finding.original)continue;const key=JSON.stringify([finding.blockId,finding.operation,group,finding.from,finding.to,finding.original,finding.proposed]);if(!unique.has(key))unique.set(key,finding);}
+    const suggestions=[...unique.values()].map(f=>({ ...f, id: crypto.randomUUID(), state: 'pending' as const }));
     return { blocks, suggestions };
   }
 }
