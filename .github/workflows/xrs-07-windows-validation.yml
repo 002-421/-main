@@ -50,6 +50,17 @@ jobs:
         run: npm run test:tab-lifecycle
       - name: Verified profile backup tests
         run: npm run test:preupdate-backup
+      - name: Parse Beta PowerShell scripts with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $files = @('tests/Start-XRS-Beta.Tests.ps1', 'scripts/Start-XRS-Beta.ps1', 'scripts/XRS-PreUpdate-Backup.ps1')
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error ("{0}: {1}" -f $file, $_.Message) }; exit 1 }
+          }
+          Write-Host 'PASS: Beta PowerShell scripts parse in Windows PowerShell.'
       - name: Beta onboarding with synthetic Windows profiles
         shell: pwsh
         run: |

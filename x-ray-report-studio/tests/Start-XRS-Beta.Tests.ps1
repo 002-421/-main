@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $oldAppData = $env:APPDATA
 $oldPublic = $env:PUBLIC
 $temporary = Join-Path $env:TEMP ('XRS Beta Тест ' + [guid]::NewGuid().ToString('N'))
