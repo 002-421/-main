@@ -158,8 +158,10 @@ jobs:
             url = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/releases/0.4.55/downloads/X-ray_Report_Studio_Windows_Setup.zip'
             sha256 = $sha
           }
-          $env:XRS_CANDIDATE_SHA256 = $sha
-          node -e 'const fs=require("node:fs");const {validateManifest}=require("./electron/update-channel.cjs");const manifest={version:"0.4.55",url:"https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/releases/0.4.55/downloads/X-ray_Report_Studio_Windows_Setup.zip",sha256:process.env.XRS_CANDIDATE_SHA256};fs.writeFileSync("test-output/xrs-09-release/latest.json",JSON.stringify(manifest,null,2)+"\n","utf8");const accepted=validateManifest(manifest,"stable");if(accepted.version!=="0.4.55")process.exit(1);console.log("Updater accepted versioned release URL and ZIP SHA256: "+accepted.sha256);'
+          $manifestPath = 'test-output/xrs-09-release/latest.json'
+          $manifestJson = ConvertTo-Json -InputObject $candidate -Depth 4
+          [System.IO.File]::WriteAllText($manifestPath, $manifestJson + "`n", [System.Text.UTF8Encoding]::new($false))
+          node scripts/validate_update_manifest.cjs $manifestPath 0.4.55
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $expectedBaseline = (Get-Content -LiteralPath 'test-output/xrs-09-release/latest.json.baseline.sha256' -Raw).Trim()
           if ((Get-FileHash downloads/latest.json -Algorithm SHA256).Hash -ne $expectedBaseline) { throw 'Preparation changed the checked-in latest.json.' }
