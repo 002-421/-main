@@ -40,7 +40,21 @@ try {
             Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
         } else { [IO.File]::Move($temporary, $channel) }
     } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
-    if (-not $ValidationOnly) { Start-Process -FilePath $app }
+    if (-not $ValidationOnly) {
+        $startArguments = @()
+        if (-not [string]::IsNullOrWhiteSpace($env:XRS_BETA_USER_DATA_DIR)) {
+            $testProfile = [IO.Path]::GetFullPath($env:XRS_BETA_USER_DATA_DIR)
+            if (-not [IO.Path]::IsPathRooted($testProfile) -or (Test-XrsPathWithin $testProfile $stable) -or (Test-XrsPathWithin $stable $testProfile)) {
+                throw 'The isolated Beta profile path is invalid.'
+            }
+            $null = [IO.Directory]::CreateDirectory($testProfile)
+            $startArguments = @('--user-data-dir="' + $testProfile + '"')
+        }
+        $started = Start-Process -FilePath $app -ArgumentList $startArguments -PassThru
+        if (-not [string]::IsNullOrWhiteSpace($env:XRS_BETA_SMOKE_PID_FILE)) {
+            [IO.File]::WriteAllText($env:XRS_BETA_SMOKE_PID_FILE, [string]$started.Id, [Text.UTF8Encoding]::new($false))
+        }
+    }
     Write-Host 'BETA PROFILE READY; Stable data and installation were not changed.'
     exit 0
 } catch {

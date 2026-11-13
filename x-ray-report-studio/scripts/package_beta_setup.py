@@ -1,49 +1,42 @@
-"""Prepare a Beta update candidate without touching downloads/latest.json."""
+"""Package the complete unpublished Windows Beta portable build from package_windows.py."""
 from pathlib import Path
-from zipfile import ZIP_STORED
+from zipfile import ZIP_DEFLATED
 import hashlib
 import json
 import tempfile
 
-from package_setup import ROOT, collect_licenses, normalized_text, write_zip
+from package_setup import ROOT, write_zip
 
 OUT = ROOT / 'test-output'
 ARCHIVE = OUT / 'X-ray_Report_Studio_Windows_Beta_Setup.zip'
 MANIFEST = OUT / 'XRS-08-beta-candidate.json'
-URL = 'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Beta_Setup.zip'
 
 
 def main():
-    metadata = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))
-    version = metadata['version']
+    version = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))['version']
     if version != '0.4.55-beta.1':
         raise RuntimeError('This candidate packager is limited to 0.4.55-beta.1.')
-    if not (ROOT / 'dist/index.html').is_file():
-        raise RuntimeError('Build the application before packaging Beta.')
+    portable = ROOT / 'release' / 'X-ray Report Studio'
+    required = [portable / 'X-ray Report Studio.exe', portable / 'resources' / 'app' / 'electron' / 'main.cjs',
+                portable / 'Start-XRS-Beta.cmd', portable / 'Start-XRS-Beta.ps1',
+                portable / 'XRS-PreUpdate-Backup.ps1']
+    missing = [str(path.relative_to(ROOT)) for path in required if not path.is_file()]
+    if missing:
+        raise RuntimeError('Build the complete Windows portable package first; missing: ' + ', '.join(missing))
     OUT.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='xrs-beta-package-') as temporary:
-        setup = Path(temporary) / 'X-ray Report Studio Setup'
-        app = setup / 'app'
-        (app / 'electron').mkdir(parents=True)
-        (app / 'dist').mkdir()
-        for source in sorted((ROOT / 'electron').glob('*.cjs')):
-            (app / 'electron' / source.name).write_text(normalized_text(source), encoding='utf-8', newline='\n')
-        if not (app / 'electron/main.cjs').exists():
-            raise RuntimeError('Electron entry point is missing.')
-        (app / 'dist/index.html').write_bytes((ROOT / 'dist/index.html').read_bytes())
-        (app / 'dist/x-ray-report-studio.ico').write_bytes((ROOT / 'public/x-ray-report-studio.ico').read_bytes())
-        (app / 'package.json').write_text(json.dumps({
-            'name': metadata['name'], 'productName': 'X-ray Report Studio',
-            'version': version, 'main': 'electron/main.cjs', 'private': True,
-        }, indent=2) + '\n', encoding='utf-8')
-        (setup / 'THIRD_PARTY_LICENSES.txt').write_text(collect_licenses(), encoding='utf-8')
-        write_zip(setup, ARCHIVE, ZIP_STORED)
+        stage_root = Path(temporary)
+        stage = stage_root / portable.name
+        import shutil
+        shutil.copytree(portable, stage)
+        write_zip(stage, ARCHIVE, ZIP_DEFLATED)
     digest = hashlib.sha256(ARCHIVE.read_bytes()).hexdigest()
     MANIFEST.write_text(json.dumps({
-        'version': version, 'url': URL, 'sha256': digest,
-        'notes': 'Тестовая версия XRS-07 и переключение Stable/Beta. Публикация ожидает отдельного разрешения.',
+        'format': 'xrs-portable-beta-candidate', 'version': version,
+        'archive': ARCHIVE.name, 'bytes': ARCHIVE.stat().st_size, 'sha256': digest,
+        'notes': 'Неопубликованный portable Windows Beta artifact; не является пакетом встроенного updater.',
     }, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    print(f'Beta candidate: {ARCHIVE} SHA256={digest}', flush=True)
+    print(f'Beta portable candidate: {ARCHIVE} SHA256={digest}', flush=True)
 
 
 if __name__ == '__main__':
