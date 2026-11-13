@@ -10,6 +10,7 @@ import { strToU8, unzipSync, zipSync } from 'fflate';
 
 const require = createRequire(import.meta.url);
 const { extractWithTar } = require('../electron/update-install.cjs');
+const { createUserDataBackup } = require('../electron/user-data-backup.cjs');
 const execFileAsync = promisify(execFile);
 const EXPECTED_054_SHA256 = '04ae2cd7745edb92e2c115ca8a620deb0f86152b281a4747eef656f91a768cc3';
 const TEST_MARKER = JSON.stringify({ format: 'xrs-isolated-test-kit', allowLocalUpdateFiles: true }, null, 2) + '\n';
@@ -262,6 +263,17 @@ try {
   assert.ok((await fs.readFile(dictionaryFile, 'utf8')).includes('xrs-shared-word'), 'the isolated test kit contains a synthetic shared dictionary');
   const syntheticMarkers = ['XRS_SYNTHETIC_PATIENT_ALPHA', 'XRS_SYNTHETIC_PATIENT_BETA'];
   await assertEditorData('0.4.54', syntheticMarkers);
+  phase = 'preflight the actual profile backup helper while packaged 0.4.54 remains open';
+  const profileBackupRoot = path.join(kitRoot, 'AppData', 'X-ray Report Studio Backups');
+  await createUserDataBackup({
+    userDataDir: path.join(kitRoot, 'Profile'),
+    sharedDictionaryFile: dictionaryFile,
+    backupRoot: profileBackupRoot,
+    allowedBackupRoot: path.join(kitRoot, 'AppData'),
+    forbiddenRoots: [appRuntime],
+    version: '0.4.54',
+    id: 'e2e-preflight',
+  });
 
   await fs.writeFile(path.join(updates, 'latest.json'), JSON.stringify({
     version: '0.4.55',
@@ -298,7 +310,7 @@ try {
   newExecutable = stateAfterInstall.current.executable;
   const shortcut = path.join(kitRoot, 'Shortcuts', 'X-ray Report Studio.lnk');
   assert.equal(path.resolve(await readShortcutTarget(shortcut)).toLowerCase(), path.resolve(newExecutable).toLowerCase(), 'the user shortcut points to 0.4.55');
-  const backupRoot = path.join(kitRoot, 'AppData', 'X-ray Report Studio Backups');
+  const backupRoot = profileBackupRoot;
   const firstBackup = (await fs.readdir(backupRoot)).find(name => !name.startsWith('.staging-'));
   assert.ok(firstBackup, 'the actual updater created a verified user-data backup');
   const firstBackupRoot = path.join(backupRoot, firstBackup);
