@@ -34,12 +34,16 @@ try {
   await writeFile(path.join(stable, 'synthetic-workspace.json'), '{"synthetic":true}');
   const env = { ...process.env, APPDATA: appData, PUBLIC: path.join(synthetic, 'Public'), XRS_BETA_USER_DATA_DIR: beta, XRS_BETA_SMOKE_PID_FILE: pidFile };
   assert.equal(await stat(launcher).then(() => true, () => false), true, 'the exact Beta ZIP must contain its standard CMD launcher');
-  await promisify(execFile)('cmd.exe', ['/d', '/c', 'call', `"${launcher}"`], { cwd: appDirectory, env });
+  const command = `""${launcher}""`;
+  await promisify(execFile)('cmd.exe', ['/d', '/s', '/c', command], { cwd: appDirectory, env });
   for (let attempt = 0; attempt < 100 && !(await stat(pidFile).then(() => true, () => false)); attempt++) await new Promise(resolve => setTimeout(resolve, 100));
   assert.equal(await stat(pidFile).then(() => true, () => false), true, 'standard CMD launcher must start the packaged EXE');
   const firstPid = (await readFile(pidFile, 'utf8')).trim();
   assert.match(firstPid, /^\d+$/);
+  const launchedPath = (await promisify(execFile)('powershell.exe', ['-NoLogo', '-NoProfile', '-Command', `(Get-Process -Id ${firstPid} -ErrorAction Stop).Path`])).stdout.trim();
+  assert.equal(await canonical(launchedPath), await canonical(executable), 'CMD and PowerShell must start the packaged Beta EXE');
   await promisify(execFile)('taskkill.exe', ['/PID', firstPid, '/T', '/F']);
+  await assert.rejects(promisify(execFile)('powershell.exe', ['-NoLogo', '-NoProfile', '-Command', `(Get-Process -Id ${firstPid} -ErrorAction Stop).Path`]), 'the process started through CMD must be stopped');
 
   application = await launchBeta(env);
   let page = await application.firstWindow();
