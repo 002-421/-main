@@ -53,25 +53,69 @@ try {
   page.on('request', request => {
     if (/^https?:/i.test(request.url())) externalRendererRequests.push(request.url());
   });
-  await page.locator('#modality-select').waitFor({ state: 'attached', timeout: 60_000 });
+  const editor = page.locator('#editor .ProseMirror');
+  await editor.waitFor({ state: 'visible', timeout: 60_000 });
+  await page.locator('#report-tabs .report-tab-select').first().waitFor({ state: 'visible', timeout: 60_000 });
   assert.equal(await page.locator('#ai-review-open').count(), 0, 'AI Review feature flag must remain off in a fresh profile');
 
-  await page.evaluate(() => {
+  const initial = await page.evaluate(() => ({
+    text: document.querySelector('#editor .ProseMirror')?.textContent ?? '',
+    sectionIds: [...document.querySelectorAll('#editor .ProseMirror section[data-section-id]')].map(section => section.getAttribute('data-section-id')),
+    workspace: localStorage.getItem('mri-report-studio.workspace.v1'),
+  }));
+  assert.ok(initial.text.trim(), 'Fresh profile did not render the initial report document');
+  assert.ok(initial.sectionIds.includes('description') && initial.sectionIds.includes('conclusion'), 'Initial report is missing its structured review sections');
+  assert.equal(initial.workspace, null, 'Fresh profile unexpectedly contains a persisted workspace before user interaction');
+
+  // XRS creates the initial report in memory. It persists the workspace on a
+  // user action, so use the real New Report control before testing recovery.
+  await page.locator('#new-report').click();
+  await page.waitForFunction(() => {
     const workspaceKey = 'mri-report-studio.workspace.v1';
     const workspace = JSON.parse(localStorage.getItem(workspaceKey) || 'null');
-    const active = workspace?.reports?.find(report => report.id === workspace.activeId) ?? workspace?.reports?.[0];
-    if (!active?.doc?.content) throw new Error('Fresh isolated profile did not create a report document');
-    const description = active.doc.content.find(node => node.type === 'reportSection' && node.attrs?.id === 'description');
-    const conclusion = active.doc.content.find(node => node.type === 'reportSection' && node.attrs?.id === 'conclusion');
-    if (!description || !conclusion) throw new Error('Packaged report does not expose reviewed section IDs');
-    const paragraph = text => [{ type: 'paragraph', content: [{ type: 'text', text }] }];
-    description.content = paragraph('Иследование  проведено , очаг очаг. Очаг 5 мм справа в лобной доле. На уровне L4-L5 определяется грыжа межпозвонкового диска. гиперинтенсвный участок.');
-    conclusion.content = paragraph('Очаг 5 мм слева в лобной доле. Грыж межпозвонковых дисков не выявлено.');
-    localStorage.setItem(workspaceKey, JSON.stringify(workspace));
-    localStorage.setItem('xrs.ai-review.experimental', 'enabled');
-    localStorage.setItem('xrs.ai-review.categories.v1', JSON.stringify(['spelling','punctuation','style','terminology','consistency','clinical']));
-    localStorage.setItem('mri-alliance.settings.v3', JSON.stringify({ autoUpdate: false }));
-  });
+    return workspace?.reports?.length === 2 && workspace.reports.some(report => report.id === workspace.activeId);
+  }, null, { timeout: 15_000 });
+
+  const descriptionText = 'Иследование  проведено , очаг очаг. Очаг 5 мм справа в лобной доле. На уровне L4-L5 определяется грыжа межпозвонкового диска. гиперинтенсвный участок.';
+  const conclusionText = 'Очаг 5 мм слева в лобной доле. Грыж межпозвонковых дисков не выявлено.';
+  const replaceSectionText = async (id, text) => {
+    const section = page.locator(`#editor .ProseMirror section[data-section-id="${id}"]`);
+    await section.waitFor({ state: 'visible', timeout: 15_000 });
+    const selected = await section.evaluate(element => {
+      const editorRoot = element.closest('.ProseMirror');
+      const selection = window.getSelection();
+      if (!editorRoot || !selection) return false;
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      editorRoot.focus();
+      return true;
+    });
+    assert.equal(selected, true, `Could not select the ${id} section in the editor`);
+    await page.keyboard.insertText(text);
+  };
+  await replaceSectionText('description', descriptionText);
+  await replaceSectionText('conclusion', conclusionText);
+  await page.waitForFunction(({ description, conclusion }) => {
+    const workspace = JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1') || 'null');
+    const active = workspace?.reports?.find(report => report.id === workspace.activeId);
+    const flatten = node => `${node?.text ?? ''}${(node?.content ?? []).map(flatten).join('')}`;
+    const descriptionSection = active?.doc?.content?.find(node => node.type === 'reportSection' && node.attrs?.id === 'description');
+    const conclusionSection = active?.doc?.content?.find(node => node.type === 'reportSection' && node.attrs?.id === 'conclusion');
+    return flatten(descriptionSection).includes(description) && flatten(conclusionSection).includes(conclusion);
+  }, { description: descriptionText, conclusion: conclusionText }, { timeout: 15_000 });
+  await page.reload();
+  await page.locator('#editor .ProseMirror section[data-section-id="description"]').waitFor({ state: 'visible', timeout: 60_000 });
+  await page.waitForFunction(({ description, conclusion }) => {
+    const workspace = JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1') || 'null');
+    const active = workspace?.reports?.find(report => report.id === workspace.activeId);
+    const flatten = node => `${node?.text ?? ''}${(node?.content ?? []).map(flatten).join('')}`;
+    const descriptionSection = active?.doc?.content?.find(node => node.type === 'reportSection' && node.attrs?.id === 'description');
+    const conclusionSection = active?.doc?.content?.find(node => node.type === 'reportSection' && node.attrs?.id === 'conclusion');
+    return flatten(descriptionSection).includes(description) && flatten(conclusionSection).includes(conclusion);
+  }, { description: descriptionText, conclusion: conclusionText }, { timeout: 15_000 });
+  await page.evaluate(() => localStorage.setItem('xrs.ai-review.experimental', 'enabled'));
   await page.reload();
   await page.locator('#ai-review-open').waitFor({ state: 'visible', timeout: 60_000 });
   await page.locator('#ai-review-open').click();
@@ -133,6 +177,7 @@ try {
   }
   await page.locator('[data-ai-category="punctuation"]').uncheck();
   await page.reload();
+  await page.locator('#ai-review-open').waitFor({ state: 'visible', timeout: 60_000 });
   await page.locator('#ai-review-open').click();
   assert.equal(await page.locator('[data-ai-category="punctuation"]').isChecked(), false, 'Category selection did not persist in the isolated profile');
   const savedCategories = await page.evaluate(() => JSON.parse(localStorage.getItem('xrs.ai-review.categories.v1') || '[]'));
