@@ -27,28 +27,41 @@ jobs:
           if ($env:SOURCE_SHA -cne $expected) { throw "source_sha must equal $expected" }
           if ($env:SOURCE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'source_sha must be a full lowercase commit SHA' }
 
-      - name: Checkout workflow smoke-test tools
+      - name: Checkout workflow tools from the selected workflow ref
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.sha }}
           path: ci-tools
           persist-credentials: false
 
-      - name: Checkout the exact source commit
+      - name: Verify workflow ref and tools checkout
+        shell: pwsh
+        env:
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          $actual = (git -C ci-tools rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:WORKFLOW_SHA) { throw "Workflow tools SHA mismatch: expected $env:WORKFLOW_SHA, got $actual" }
+          Write-Output "Workflow ref: $env:WORKFLOW_REF"
+          Write-Output "Workflow/tools SHA: $actual"
+
+      - name: Checkout exact application source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ inputs.source_sha }}
           path: source
           persist-credentials: false
 
-      - name: Verify clean exact source checkout
+      - name: Verify clean exact application checkout
         shell: pwsh
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
+          $app = 'source/x-ray-report-studio'
           $actual = (git -C source rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $actual -cne $env:SOURCE_SHA) { throw "Expected $env:SOURCE_SHA, got $actual" }
-          if ((git -C source status --porcelain).Length -ne 0) { throw 'Source checkout is not clean' }
+          if ((git -C source status --porcelain).Length -ne 0) { throw 'Application source checkout is not clean' }
+          if (-not (Test-Path "$app/package.json")) { throw 'XRS app directory is missing in the source checkout' }
 
       - name: Set up Node.js
         uses: actions/setup-node@1e60f620b9541d6b0554f09ddf31f235eecbc00c
@@ -62,37 +75,37 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci
-        working-directory: source
+        working-directory: source/x-ray-report-studio
 
       - name: Build renderer
         run: npm run build
-        working-directory: source
+        working-directory: source/x-ray-report-studio
 
       - name: Run the complete test suite
         run: npm test
-        working-directory: source
+        working-directory: source/x-ray-report-studio
 
-      - name: Recheck clean source tree
+      - name: Recheck clean application source tree
         shell: pwsh
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
-          if ((git -C source rev-parse HEAD).Trim() -cne $env:SOURCE_SHA) { throw 'Source HEAD changed during checks' }
-          if ((git -C source status --porcelain).Length -ne 0) { throw 'Build or tests modified the source checkout' }
+          if ((git -C source rev-parse HEAD).Trim() -cne $env:SOURCE_SHA) { throw 'Application source HEAD changed during checks' }
+          if ((git -C source status --porcelain).Length -ne 0) { throw 'Build or tests modified the application source checkout' }
 
       - name: Package portable Electron runtime
         run: python scripts/package_windows.py
-        working-directory: source
+        working-directory: source/x-ray-report-studio
 
       - name: Verify ZIP and run isolated offline application smoke test
         shell: pwsh
-        run: ./ci-tools/scripts/windows-ai-review-smoke.ps1 -SourcePath ../source -Archive release/X-ray_Report_Studio_Windows_x64.zip
+        run: ./ci-tools/x-ray-report-studio/scripts/windows-ai-review-smoke.ps1 -SourcePath ../../source/x-ray-report-studio -Archive release/X-ray_Report_Studio_Windows_x64.zip
 
       - name: Upload test-only portable ZIP
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: xrs-ai-offline-windows-${{ inputs.source_sha }}
-          path: source/release/X-ray_Report_Studio_Windows_x64.zip
+          path: source/x-ray-report-studio/release/X-ray_Report_Studio_Windows_x64.zip
           if-no-files-found: error
           retention-days: 3
