@@ -32,6 +32,7 @@ let oldExecutable;
 let newExecutable;
 let relaunchProcessId = null;
 let phase = 'initialize isolated test kit';
+let updaterFailure = '';
 
 function sha256(bytes) {
   return require('node:crypto').createHash('sha256').update(bytes).digest('hex');
@@ -115,6 +116,7 @@ async function waitForInstallCommit(stateFile, timeoutMs = 120000) {
     lastState = await fs.readFile(stateFile, 'utf8').then(JSON.parse, () => null);
     if (lastState?.status === 'pending-first-start' && lastState.current?.version === '0.4.55'
         && lastState.previous?.version === '0.4.54') return lastState;
+    if (updaterFailure) throw new Error(`The packaged updater rejected installation: ${updaterFailure}`);
     await new Promise(resolve => setTimeout(resolve, 250));
   }
   throw new Error(`Updater did not commit the side-by-side switch. Last install state: ${JSON.stringify(lastState)}`);
@@ -178,6 +180,14 @@ try {
   const oldRuntimeApp = path.join(appRuntime, 'resources', 'app');
   await fs.mkdir(oldRuntimeApp, { recursive: true });
   await fs.cp(oldApp, oldRuntimeApp, { recursive: true });
+  // Add a diagnostic-only console tap to the copied preload. The packaged
+  // 0.4.54 main process, updater, installer and IPC call remain unchanged.
+  const copiedPreload = path.join(oldRuntimeApp, 'electron', 'preload.cjs');
+  const preloadSource = await fs.readFile(copiedPreload, 'utf8');
+  const progressListener = "ipcRenderer.on('updates:progress', (_event, progress) => callback(progress));";
+  assert.equal(preloadSource.split(progressListener).length - 1, 1, 'official 0.4.54 preload update-progress bridge is present once');
+  await fs.writeFile(copiedPreload, preloadSource.replace(progressListener,
+    "ipcRenderer.on('updates:progress', (_event, progress) => { if (progress.stage === 'error') console.error('[XRS_TEST_UPDATE_ERROR]' + String(progress.message ?? '')); callback(progress); });"), 'utf8');
   await fs.writeFile(path.join(oldRuntimeApp, 'xrs-test-mode.json'), TEST_MARKER, 'utf8');
   const dictionaryFile = path.join(kitRoot, 'Shared Dictionary', 'dictionary.json');
   await fs.mkdir(path.dirname(dictionaryFile), { recursive: true });
@@ -208,6 +218,10 @@ try {
     env: { ...process.env, XRS_TEST_ROOT: kitRoot },
   });
   page = await application.firstWindow();
+  page.on('console', message => {
+    const text = message.text();
+    if (text.startsWith('[XRS_TEST_UPDATE_ERROR]')) updaterFailure = text.slice('[XRS_TEST_UPDATE_ERROR]'.length);
+  });
   await page.locator('.report-content').waitFor();
   assert.equal(await page.evaluate(() => window.desktop.getApplicationVersion()), '0.4.54');
 
@@ -350,6 +364,7 @@ try {
     phase,
     platform: process.platform,
     error: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : String(error),
+    updaterFailure,
     official054Sha256: EXPECTED_054_SHA256,
     syntheticDataOnly: true,
     testKitRoot: kitRoot,
