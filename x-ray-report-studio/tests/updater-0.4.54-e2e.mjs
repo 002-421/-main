@@ -352,6 +352,23 @@ try {
   }
   await fs.writeFile(path.join(diagnosticsDirectory, 'updater-0.4.54-e2e-failure.json'), JSON.stringify(diagnostic, null, 2), 'utf8').catch(() => {});
   console.error('Updater 0.4.54 E2E diagnostics:', JSON.stringify(diagnostic, null, 2));
+  const annotationText = JSON.stringify({
+    phase: diagnostic.phase,
+    error: diagnostic.error,
+    renderer: diagnostic.renderer ? {
+      title: diagnostic.renderer.title,
+      saveState: diagnostic.renderer.saveState,
+      tabs: diagnostic.renderer.reportTabs,
+      reportText: diagnostic.renderer.reportText?.slice(0, 4000),
+    } : null,
+  });
+  const annotation = annotationText.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A').replaceAll(':', '%3A').replaceAll(',', '%2C');
+  process.stdout.write(`::error title=0.4.54 updater E2E failure::${annotation}\n`);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    await fs.appendFile(process.env.GITHUB_STEP_SUMMARY,
+      `## 0.4.54 updater E2E failed at: ${phase}\n\n\`\`\`json\n${JSON.stringify({ error: diagnostic.error, renderer: diagnostic.renderer }, null, 2)}\n\`\`\`\n`)
+      .catch(() => {});
+  }
   throw error;
 } finally {
   if (application) await application.close().catch(() => {});
