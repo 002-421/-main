@@ -137,7 +137,21 @@ try {
       await page.locator('#ai-review-open').waitFor({ state: 'visible', timeout: 60_000 });
       await page.locator('#ai-review-open').click();
       assert.equal(await page.locator('#ai-mode').inputValue(), 'local');
-      assert.equal(await page.locator('#ai-mode option[value="cloud"]').isDisabled(), true);
+      const cloudOption = page.locator('#ai-mode option[value="cloud"]');
+      assert.equal(await cloudOption.count(), 1, 'Cloud option must exist');
+      assert.deepEqual(
+        await cloudOption.evaluate(option => ({
+          hasDisabledAttribute: option.hasAttribute('disabled'),
+          disabled: option.disabled,
+          matchesDisabled: option.matches(':disabled'),
+        })),
+        {
+          hasDisabledAttribute: true,
+          disabled: true,
+          matchesDisabled: true,
+        },
+        'Cloud option must be disabled in the DOM',
+      );
       assert.equal(await page.locator('[data-ai-category]').count(), 6);
       reviewAvailable = true;
       return { featureFlag: 'test-only', provider: 'local', categories: 6, cloud: 'disabled' };
