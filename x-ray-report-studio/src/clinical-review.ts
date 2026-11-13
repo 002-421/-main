@@ -32,8 +32,21 @@ export class MedicalTerminologyEngine {
   validate(blocks:ReviewBlocks):Finding[]{
     const modality=modalityFor(blocks);if(!modality)return [];
     const output:Finding[]=[];
+    const entries=imagingLexicons[modality];
+    const inflections=(term:string)=>{const endings=term.endsWith('ый')?['ая','ое','ые','ого','ому','ым','ом','ую','ой','ых','ыми']:term.endsWith('ий')?['яя','ее','ие','его','ему','им','ем','юю','ей','их','ими']:[];return [term,...endings.map(x=>term.slice(0,-2)+x)].map(x=>x.toLocaleLowerCase('ru-RU'));};
+    const known=new Map<string,string>();
+    for(const entry of entries)for(const term of [entry.canonical,...entry.variants])for(const form of inflections(term))known.set(form,entry.canonical.toLocaleLowerCase('ru-RU'));
+    const distance=(a:string,b:string):number=>{
+      const x=[...a.toLocaleLowerCase('ru-RU').replace(/ё/g,'е')],y=[...b.toLocaleLowerCase('ru-RU').replace(/ё/g,'е')];
+      if(Math.abs(x.length-y.length)>2)return 3;
+      let prev2:number[]|null=null,prev=Array.from({length:y.length+1},(_,i)=>i);
+      for(let i=1;i<=x.length;i++){const row=[i];for(let j=1;j<=y.length;j++){let v=Math.min(row[j-1]+1,prev[j]+1,prev[j-1]+(x[i-1]===y[j-1]?0:1));if(prev2&&i>1&&j>1&&x[i-1]===y[j-2]&&x[i-2]===y[j-1])v=Math.min(v,prev2[j-2]+1);row.push(v);}prev2=prev;prev=row;}
+      return prev[y.length];
+    };
+    const typo=(word:string)=>{const limit=word.length>=13?2:1;let best=limit+1,candidates=new Set<string>();for(const [form,canonical] of known){const d=distance(word,form);if(d<best){best=d;candidates=new Set([canonical]);}else if(d===best)candidates.add(canonical);}return best<=limit&&candidates.size===1?[...candidates][0]:null;};
     for(const blockId of ['description','conclusion'] as const){const text=blocks[blockId];const seen=new Map<string,{form:string,start:number}>();
       for(const entry of imagingLexicons[modality])for(const variant of entry.variants)for(const m of text.matchAll(rx(variant))){const key=entry.canonical.toLocaleLowerCase('ru');const prev=seen.get(key);if(prev&&prev.form!==m[0]&&prev.form.toLocaleLowerCase('ru')!==m[0].toLocaleLowerCase('ru'))output.push(finding(blockId,text,m.index!,m.index!+m[0].length,'terminology',`Непоследовательное написание структуры: «${prev.form}» и «${m[0]}». Проверьте вручную.`));else seen.set(key,{form:m[0],start:m.index!});}
+      for(const match of text.matchAll(/[А-Яа-яЁё]+/gu)){const word=match[0];if(known.has(word.toLocaleLowerCase('ru-RU'))||word.length<8)continue;const candidate=typo(word);if(candidate)output.push(finding(blockId,text,match.index!,match.index!+word.length,'terminology',`Возможно, термин «${word}» является опечаткой зарегистрированного термина «${candidate}». Проверьте вручную.`));}
     }
     // Unknown terms are deliberately not labeled as misspellings.
     return output;
