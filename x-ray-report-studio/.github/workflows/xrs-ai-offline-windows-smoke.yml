@@ -1,0 +1,98 @@
+name: XRS AI Offline Windows smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact source commit to build
+        required: true
+        type: string
+        default: 3ad5a5685fe1e46522ccceb448c8ebe3221ae310
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64-smoke:
+    if: github.ref == 'refs/heads/codex/xrs-ai-review-04b'
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Validate the requested source revision
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          $expected = '3ad5a5685fe1e46522ccceb448c8ebe3221ae310'
+          if ($env:SOURCE_SHA -cne $expected) { throw "source_sha must equal $expected" }
+          if ($env:SOURCE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'source_sha must be a full lowercase commit SHA' }
+
+      - name: Checkout workflow smoke-test tools
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: ci-tools
+          persist-credentials: false
+
+      - name: Checkout the exact source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: source
+          persist-credentials: false
+
+      - name: Verify clean exact source checkout
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          $actual = (git -C source rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:SOURCE_SHA) { throw "Expected $env:SOURCE_SHA, got $actual" }
+          if ((git -C source status --porcelain).Length -ne 0) { throw 'Source checkout is not clean' }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@1e60f620b9541d6b0554f09ddf31f235eecbc00c
+        with:
+          node-version: 22
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+
+      - name: Install locked dependencies
+        run: npm ci
+        working-directory: source
+
+      - name: Build renderer
+        run: npm run build
+        working-directory: source
+
+      - name: Run the complete test suite
+        run: npm test
+        working-directory: source
+
+      - name: Recheck clean source tree
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          if ((git -C source rev-parse HEAD).Trim() -cne $env:SOURCE_SHA) { throw 'Source HEAD changed during checks' }
+          if ((git -C source status --porcelain).Length -ne 0) { throw 'Build or tests modified the source checkout' }
+
+      - name: Package portable Electron runtime
+        run: python scripts/package_windows.py
+        working-directory: source
+
+      - name: Verify ZIP and run isolated offline application smoke test
+        shell: pwsh
+        run: ./ci-tools/scripts/windows-ai-review-smoke.ps1 -SourcePath ../source -Archive release/X-ray_Report_Studio_Windows_x64.zip
+
+      - name: Upload test-only portable ZIP
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: xrs-ai-offline-windows-${{ inputs.source_sha }}
+          path: source/release/X-ray_Report_Studio_Windows_x64.zip
+          if-no-files-found: error
+          retention-days: 3
