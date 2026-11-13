@@ -123,6 +123,7 @@ jobs:
           path: |
             x-ray-report-studio/test-output/xrs-09-diagnostics/**
             x-ray-report-studio/test-output/v3-failed.png
+            x-ray-report-studio/test-output/v3-failed-dom.*
             x-ray-report-studio/test-output/electron-startup-dom.*
             x-ray-report-studio/test-output/electron-yellow-placeholder-diagnostic.*
             x-ray-report-studio/test-output/browser-edit-failure.json

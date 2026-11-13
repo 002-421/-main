@@ -434,7 +434,21 @@ try{
  console.log('PASS: rich selection library save and local report persistence.');
 }catch(error){
  const detail=error instanceof Error?(error.stack??error.message):String(error),annotation=detail.replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A').replaceAll(':','%3A').replaceAll(',','%2C');
- await page.screenshot({path:path.join(output,'v3-failed.png')});console.error('Renderer errors:',errors);console.error('Electron integration first failure:',detail);process.stdout.write(`::error title=Electron integration first failure::${annotation}\n`);
+ const failureDom=await page.evaluate(()=>({
+  syntheticTest:true,
+  title:document.title,
+  documentName:document.querySelector('#document-name')?.textContent,
+  selectedTemplate:document.querySelector('.template-card.selected strong')?.textContent,
+  activeReportId:document.querySelector('.report-tab.active [data-report-select]')?.getAttribute('data-report-select'),
+  tabs:[...document.querySelectorAll('.report-tab')].map(tab=>tab.innerText),
+  reportText:document.querySelector('.report-content')?.innerText,
+  reportHTML:document.querySelector('.report-content')?.outerHTML,
+  templateFields:[...document.querySelectorAll('.report-content [data-template-field]')].map(field=>({id:field.getAttribute('data-field-id'),text:field.textContent,filled:field.getAttribute('data-filled')})),
+  rendererErrors:errors,
+ })).catch(captureError=>({syntheticTest:true,captureError:String(captureError),rendererErrors:errors}));
+ await writeFile(path.join(output,'v3-failed-dom.json'),JSON.stringify(failureDom,null,2));
+ await writeFile(path.join(output,'v3-failed-dom.html'),`<!doctype html><meta charset="utf-8"><title>Synthetic Electron failure</title>${failureDom.reportHTML??'<p>report DOM unavailable</p>'}`);
+ await page.screenshot({path:path.join(output,'v3-failed.png')});console.error('Renderer errors:',errors);console.error('Synthetic Electron failure DOM:',JSON.stringify({...failureDom,reportHTML:failureDom.reportHTML?.slice(0,12000)},null,2));console.error('Electron integration first failure:',detail);process.stdout.write(`::error title=Electron integration first failure::${annotation}\n`);
  if(process.env.GITHUB_STEP_SUMMARY)await appendFile(process.env.GITHUB_STEP_SUMMARY,`## Electron integration failure\n\n\`\`\`text\n${detail}\n\`\`\`\n`);
  throw error;
 }finally{await application.close();}
