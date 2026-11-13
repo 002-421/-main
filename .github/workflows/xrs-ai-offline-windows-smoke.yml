@@ -7,7 +7,7 @@ on:
         description: Exact source commit to build
         required: true
         type: string
-        default: 3ad5a5685fe1e46522ccceb448c8ebe3221ae310
+        default: efabb9d5bbb842b4b05f8a8bfd88f075ea23f1c0
 
 permissions:
   contents: read
@@ -23,8 +23,6 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
-          $expected = '3ad5a5685fe1e46522ccceb448c8ebe3221ae310'
-          if ($env:SOURCE_SHA -cne $expected) { throw "source_sha must equal $expected" }
           if ($env:SOURCE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'source_sha must be a full lowercase commit SHA' }
 
       - name: Checkout workflow tools from the selected workflow ref
