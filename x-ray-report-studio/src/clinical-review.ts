@@ -55,12 +55,29 @@ export class MedicalTerminologyEngine {
 const negated=(s:string)=>/(?:не\s+(?:выявлен\p{L}*|определя\p{L}*|визуализиру\p{L}*|обнаруж\p{L}*)|отсутств\p{L}*|без\s+(?:очаг\p{L}*|признак\p{L}*|патологическ\p{L}*))/iu.test(s);
 function clauses(text:string){const re=/(?:[^.!?\n]|\.(?=\d))+[.!?]?/gu;return [...text.matchAll(re)].map(m=>({text:m[0],start:m.index!}));}
 const entity=/(?<!\p{L})(?:очаг\p{L}*|образовани\p{L}*|грыж\p{L}*|протрузи\p{L}*|экструзи\p{L}*|консолидаци\p{L}*|узел\p{L}*|кист\p{L}*|опухол\p{L}*)(?!\p{L})/iu;
-const side=(s:string)=>/прав(?:ой|ого|ом|ая|ое|ые|ую|ых)?|справа|лев(?:ой|ого|ом|ая|ое|ые|ую|ых)?|слева/iu.exec(s)?.[0]?.toLocaleLowerCase('ru')??'';
+const sidePattern=/(?<!\p{L})(?:справа|слева|прав(?:ый|ого|ому|ым|ом|ая|ой|ую|ое|ые|ых|ыми)|лев(?:ый|ого|ому|ым|ом|ая|ой|ую|ое|ые|ых|ыми))(?!\p{L})/giu;
+const side=(s:string)=>{
+  const entityMatches=[...s.matchAll(new RegExp(entity.source,'giu'))];
+  if(entityMatches.length!==1)return '';
+  const directions=new Set([...s.matchAll(sidePattern)].map(match=>/^(?:прав|справа)/iu.test(match[0])?'прав':'лев'));
+  return directions.size===1?[...directions][0]:'';
+};
 function dimensions(s:string){return [...s.normalize('NFC').matchAll(/(?<![\p{L}\d])\d+(?:[,.]\d+)?[\u0020\u00a0\u202f]*(?:мм|см)(?!\p{L})|(?<![\p{L}\d])\d+(?:[,.]\d+)?[\u0020\u00a0\u202f]*[×xх][\u0020\u00a0\u202f]*\d+(?:[,.]\d+)?(?:[\u0020\u00a0\u202f]*[×xх][\u0020\u00a0\u202f]*\d+(?:[,.]\d+)?)?[\u0020\u00a0\u202f]*(?:мм|см)?/giu)].map(m=>{const raw=m[0].replace(/[\u0020\u00a0\u202f]/gu,'').replace(/,/g,'.');const unit=/см/iu.test(raw)?10:1;return [...raw.matchAll(/\d+(?:\.\d+)?/gu)].map(n=>String(Number(n[0])*unit)).join('×')+'mm';});}
 const level=/\b(?:C[1-7]|Th(?:1[0-2]|[1-9])|L[1-5])\s*[-–]\s*(?:C[1-7]|Th(?:1[0-2]|[1-9])|L[1-5]|S1)\b/giu;
 function levels(s:string){return [...s.matchAll(level)].map(m=>m[0].toUpperCase().replace(/\s|–/g,'-'));}
 const anatomy=/(?:лобн\w*|теменн\w*|височн\w*|затылочн\w*|мозжечк\w*|гипофиз\w*|печен\w*|селезенк\w*|легк\w*|почк\w*|плевр\w*|коленн\w*|плечев\w*)/iu;
 function entityKey(s:string){const e=entity.exec(s)?.[0]?.toLocaleLowerCase('ru')??'';const a=anatomy.exec(s)?.[0]?.toLocaleLowerCase('ru')??'';return `${e}:${a}:${side(s)}`;}
+const explicitAnatomyForms=new Map<string,string>();
+for(const [canonical,forms] of [
+  ['lung',['легкое','легкого','легкому','легким','легком','легкие','легких','легкими','лёгкое','лёгкого','лёгкому','лёгким','лёгком','лёгкие','лёгких','лёгкими']],
+  ['spleen',['селезенка','селезенки','селезенке','селезенку','селезенкой','селезенкою']],
+  ['pleura',['плевра','плевры','плевре','плевру','плеврой','плеврою']],
+  ['kidney',['почка','почки','почке','почку','почкой','почкою','почек','почках']],
+] as const)for(const form of forms)explicitAnatomyForms.set(form,canonical);
+const anatomicalIdentity=(text:string)=>{
+  const match=/(?:лобн\p{L}*|теменн\p{L}*|височн\p{L}*|затылочн\p{L}*|мозжечк\p{L}*|гипофиз\p{L}*|печен\p{L}*|селезенк\p{L}*|легк\p{L}*|почк\p{L}*|плевр\p{L}*|коленн\p{L}*|плечев\p{L}*|шейн\p{L}*|грудн\p{L}*|поясничн\p{L}*)/iu.exec(text)?.[0]?.toLocaleLowerCase('ru').replace(/ё/g,'е')??'';
+  return explicitAnatomyForms.get(match)??match;
+};
 export class ClinicalConsistencyEngine {
   validate(blocks:ReviewBlocks):Finding[]{const out:Finding[]=[];const a=clauses(blocks.description),b=clauses(blocks.conclusion);
     for(const left of a){if(!entity.test(left.text))continue;const key=entityKey(left.text);const related=b.filter(right=>entity.test(right.text)&&entityKey(right.text).split(':')[0]===key.split(':')[0]&&entityKey(right.text).split(':')[1]===key.split(':')[1]);
@@ -83,8 +100,7 @@ export class ClinicalLogicEngine {
       for(let i=0;i<cs.length;i++)for(let j=i+1;j<cs.length;j++){const x=cs[i],y=cs[j];if(!entity.test(x.text)||!entity.test(y.text)||uncertain.test(`${x.text} ${y.text}`))continue;const kx=entityKey(x.text),ky=entityKey(y.text);if(kx.split(':')[0]!==ky.split(':')[0]||kx.split(':')[1]!==ky.split(':')[1]||pathology(x.text)!==pathology(y.text))continue;if(negated(x.text)===negated(y.text))continue;out.push(finding(blockId,text,y.start,y.start+y.text.length,'clinical','Возможны несовместимые утверждения о наличии одной и той же находки.',x.text.trim()));}
     }
     for(const d of desc)for(const c of concl){const type=pathology(d.text);if(!type||type!==pathology(c.text)||uncertain.test(`${d.text} ${c.text}`))continue;if(negated(d.text)===negated(c.text))continue;if((!explicit(d.text)&&!negated(d.text))||(!explicit(c.text)&&!negated(c.text)))continue;
-      const region=/(?:лобн\p{L}*|теменн\p{L}*|височн\p{L}*|затылочн\p{L}*|мозжечк\p{L}*|гипофиз\p{L}*|печен\p{L}*|селезенк\p{L}*|легк\p{L}*|почк\p{L}*|плевр\p{L}*|коленн\p{L}*|плечев\p{L}*|шейн\p{L}*|грудн\p{L}*|поясничн\p{L}*)/iu;
-      const da=region.exec(d.text)?.[0]?.toLocaleLowerCase('ru')??'',ca=region.exec(c.text)?.[0]?.toLocaleLowerCase('ru')??'';if(da&&ca&&da!==ca)continue;
+      const da=anatomicalIdentity(d.text),ca=anatomicalIdentity(c.text);if(da&&ca&&da!==ca)continue;
       const spineRegion=(s:string)=>/шейн/iu.test(s)?'cervical':/грудн/iu.test(s)?'thoracic':/поясничн/iu.test(s)?'lumbar':'';
       const regionSide=spineRegion(da||ca);const explicitLevels=[...levels(d.text),...levels(c.text)];if(regionSide&&explicitLevels.some(value=>regionSide==='cervical'?!/^C/u.test(value):regionSide==='thoracic'?!/^TH/u.test(value):!/^L/u.test(value)))continue;
       const ds=side(d.text),cs=side(c.text);if(ds&&cs&&((/прав|справа/u.test(ds))!==(/прав|справа/u.test(cs))))continue;
