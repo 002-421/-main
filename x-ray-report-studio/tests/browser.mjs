@@ -433,7 +433,7 @@ try{
  await page.screenshot({path:path.join(output,'v3-desktop.png')});
  console.log('PASS: rich selection library save and local report persistence.');
 }catch(error){
- const detail=error instanceof Error?(error.stack??error.message):String(error),annotation=detail.replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A').replaceAll(':','%3A').replaceAll(',','%2C');
+ const detail=error instanceof Error?(error.stack??error.message):String(error);
  const failureDom=await page.evaluate(()=>({
   syntheticTest:true,
   title:document.title,
@@ -448,6 +448,8 @@ try{
  })).catch(captureError=>({syntheticTest:true,captureError:String(captureError),rendererErrors:errors}));
  await writeFile(path.join(output,'v3-failed-dom.json'),JSON.stringify(failureDom,null,2));
  await writeFile(path.join(output,'v3-failed-dom.html'),`<!doctype html><meta charset="utf-8"><title>Synthetic Electron failure</title>${failureDom.reportHTML??'<p>report DOM unavailable</p>'}`);
+ const annotationData=JSON.stringify({detail,activeReportId:failureDom.activeReportId,tabs:failureDom.tabs,fields:failureDom.templateFields,reportText:failureDom.reportText?.slice(0,4000),rendererErrors:failureDom.rendererErrors});
+ const annotation=annotationData.replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A').replaceAll(':','%3A').replaceAll(',','%2C');
  await page.screenshot({path:path.join(output,'v3-failed.png')});console.error('Renderer errors:',errors);console.error('Synthetic Electron failure DOM:',JSON.stringify({...failureDom,reportHTML:failureDom.reportHTML?.slice(0,12000)},null,2));console.error('Electron integration first failure:',detail);process.stdout.write(`::error title=Electron integration first failure::${annotation}\n`);
  if(process.env.GITHUB_STEP_SUMMARY)await appendFile(process.env.GITHUB_STEP_SUMMARY,`## Electron integration failure\n\n\`\`\`text\n${detail}\n\`\`\`\n`);
  throw error;
