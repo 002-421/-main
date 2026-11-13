@@ -14,8 +14,9 @@ const root = process.cwd();
 const archive = path.join(root, 'test-output', 'X-ray_Report_Studio_Windows_Beta_Setup.zip');
 const synthetic = await mkdtemp(path.join(os.tmpdir(), 'XRS-Beta-Smoke-'));
 const extracted = path.join(synthetic, 'Распакованный Beta комплект');
-const executable = path.join(extracted, 'X-ray Report Studio.exe');
-const launcher = path.join(extracted, 'Start-XRS-Beta.cmd');
+const appDirectory = path.join(extracted, 'X-ray Report Studio');
+const executable = path.join(appDirectory, 'X-ray Report Studio.exe');
+const launcher = path.join(appDirectory, 'Start-XRS-Beta.cmd');
 const pidFile = path.join(synthetic, 'beta-process.pid');
 const appData = path.join(synthetic, 'Roaming');
 const stable = path.join(appData, 'MRI Report Studio');
@@ -23,7 +24,7 @@ const beta = path.join(appData, 'MRI Report Studio Beta');
 let application;
 const launchArgs = [`--user-data-dir=${beta}`, '--no-sandbox'];
 async function launchBeta(env) {
-  return _electron.launch({ executablePath: executable, args: launchArgs, cwd: extracted, env });
+  return _electron.launch({ executablePath: executable, args: launchArgs, cwd: appDirectory, env });
 }
 async function canonical(file) { return (await realpath(file)).toLocaleLowerCase('en-US'); }
 try {
@@ -33,7 +34,7 @@ try {
   await writeFile(path.join(stable, 'synthetic-workspace.json'), '{"synthetic":true}');
   const env = { ...process.env, APPDATA: appData, PUBLIC: path.join(synthetic, 'Public'), XRS_BETA_USER_DATA_DIR: beta, XRS_BETA_SMOKE_PID_FILE: pidFile };
   assert.equal(await stat(launcher).then(() => true, () => false), true, 'the exact Beta ZIP must contain its standard CMD launcher');
-  await promisify(execFile)('cmd.exe', ['/d', '/c', 'call', `"${launcher}"`], { cwd: extracted, env });
+  await promisify(execFile)('cmd.exe', ['/d', '/c', 'call', `"${launcher}"`], { cwd: appDirectory, env });
   for (let attempt = 0; attempt < 100 && !(await stat(pidFile).then(() => true, () => false)); attempt++) await new Promise(resolve => setTimeout(resolve, 100));
   assert.equal(await stat(pidFile).then(() => true, () => false), true, 'standard CMD launcher must start the packaged EXE');
   const firstPid = (await readFile(pidFile, 'utf8')).trim();
