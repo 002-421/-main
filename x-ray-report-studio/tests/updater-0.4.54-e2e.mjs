@@ -108,6 +108,18 @@ async function assertEditorData(expectedVersion, markers) {
   assert.ok((await fs.readFile(path.join(kitRoot, 'Shared Dictionary', 'dictionary.json'), 'utf8')).includes('xrs-shared-word'), 'shared dictionary survives the update and rollback');
 }
 
+async function waitForInstallCommit(stateFile, timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastState = null;
+  while (Date.now() < deadline) {
+    lastState = await fs.readFile(stateFile, 'utf8').then(JSON.parse, () => null);
+    if (lastState?.status === 'pending-first-start' && lastState.current?.version === '0.4.55'
+        && lastState.previous?.version === '0.4.54') return lastState;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  throw new Error(`Updater did not commit the side-by-side switch. Last install state: ${JSON.stringify(lastState)}`);
+}
+
 async function fillSyntheticPatient(marker) {
   const field = page.locator('[data-field-id$=".patient"]').first();
   await field.waitFor({ state: 'visible' });
@@ -257,12 +269,14 @@ try {
   });
   await page.locator('#install-update').click();
   phase = 'verify SHA-checked side-by-side installation and shortcut switch';
-  await page.waitForFunction(async () => await window.desktop.getApplicationVersion() === '0.4.55', null, { timeout: 120000 });
+  const stateFile = path.join(kitRoot, 'Profile', 'install-state.json');
+  await waitForInstallCommit(stateFile);
+  await page.waitForFunction(() => document.querySelector('#application-version')?.textContent?.includes('0.4.55'), null, { timeout: 15000 });
+  await page.waitForFunction(async () => await window.desktop.getApplicationVersion() === '0.4.55', null, { timeout: 15000 });
   assert.equal(installConfirmation?.type, 'confirm', 'the test accepts an explicit confirmation for unsaved report exports');
   assert.match(installConfirmation.message, /не экспортированы в Word или PDF/);
   await assertEditorData('0.4.55', syntheticMarkers);
 
-  const stateFile = path.join(kitRoot, 'Profile', 'install-state.json');
   const stateAfterInstall = JSON.parse(await fs.readFile(stateFile, 'utf8'));
   assert.equal(stateAfterInstall.current.version, '0.4.55');
   assert.equal(stateAfterInstall.previous.version, '0.4.54');
@@ -344,6 +358,12 @@ try {
       current: newExecutable ? await processIdsFor(newExecutable).catch(() => []) : [],
     },
   };
+  const updateLogDirectory = path.join(kitRoot, 'Profile', 'logs');
+  diagnostic.updateLogs = await fs.readdir(updateLogDirectory, { withFileTypes: true }).then(async entries => {
+    const files = entries.filter(entry => entry.isFile() && /^update-.*\.log$/.test(entry.name));
+    return Promise.all(files.map(async entry => ({ name: entry.name, tail: (await fs.readFile(path.join(updateLogDirectory, entry.name), 'utf8')).slice(-8000) })));
+  }).catch(() => []);
+  diagnostic.installState = await fs.readFile(path.join(kitRoot, 'Profile', 'install-state.json'), 'utf8').then(JSON.parse, () => null);
   if (page && !page.isClosed()) {
     diagnostic.renderer = await page.evaluate(() => ({
       title: document.title,
@@ -361,6 +381,13 @@ try {
   const annotationText = JSON.stringify({
     phase: diagnostic.phase,
     error: diagnostic.error,
+    installState: diagnostic.installState ? {
+      status: diagnostic.installState.status,
+      currentVersion: diagnostic.installState.current?.version,
+      previousVersion: diagnostic.installState.previous?.version,
+      launchAttempts: diagnostic.installState.launchAttempts,
+    } : null,
+    updateLogs: diagnostic.updateLogs.map(entry => ({ name: entry.name, tail: entry.tail.slice(-4000) })),
     renderer: diagnostic.renderer ? {
       title: diagnostic.renderer.title,
       saveState: diagnostic.renderer.saveState,
