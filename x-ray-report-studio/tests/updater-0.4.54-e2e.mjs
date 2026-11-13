@@ -105,6 +105,7 @@ async function assertEditorData(expectedVersion, markers) {
   assert.ok(persisted.templates?.includes('XRS_SYNTHETIC_TEMPLATE_SENTINEL'), 'custom template survives the update');
   assert.ok(persisted.settings?.includes('XRS Synthetic Doctor'), 'doctor settings survive the update');
   assert.ok(persisted.dictionary?.includes('xrs-synthetic-word'), 'personal dictionary survives the update');
+  assert.ok((await fs.readFile(path.join(kitRoot, 'Shared Dictionary', 'dictionary.json'), 'utf8')).includes('xrs-shared-word'), 'shared dictionary survives the update and rollback');
 }
 
 async function fillSyntheticPatient(marker) {
@@ -166,6 +167,9 @@ try {
   await fs.mkdir(oldRuntimeApp, { recursive: true });
   await fs.cp(oldApp, oldRuntimeApp, { recursive: true });
   await fs.writeFile(path.join(oldRuntimeApp, 'xrs-test-mode.json'), TEST_MARKER, 'utf8');
+  const dictionaryFile = path.join(kitRoot, 'Shared Dictionary', 'dictionary.json');
+  await fs.mkdir(path.dirname(dictionaryFile), { recursive: true });
+  await fs.writeFile(dictionaryFile, JSON.stringify(['xrs-shared-word'], null, 2) + '\n', 'utf8');
 
   const updates = path.join(kitRoot, 'Updates');
   await fs.mkdir(updates, { recursive: true });
@@ -226,13 +230,10 @@ try {
   await page.locator('#settings').click();
   await page.locator('#doctor-name').fill('XRS Synthetic Doctor');
   await page.locator('#save-settings').click();
-  await page.locator('#settings').click();
-  await page.locator('#dictionary-settings').click();
-  await page.locator('#personal-words').fill('xrs-synthetic-word');
-  await page.locator('#save-dictionary').click();
-  const dictionaryFile = path.join(kitRoot, 'Shared Dictionary', 'dictionary.json');
-  await page.waitForFunction(({ key, word }) => localStorage.getItem(key)?.includes(word), { key: storageKeys.dictionary, word: 'xrs-synthetic-word' });
-  assert.ok((await fs.readFile(dictionaryFile, 'utf8')).includes('xrs-synthetic-word'), 'the synthetic shared dictionary is written through the real application API');
+  // The exact 0.4.54 preload has no dictionary IPC bridge. Seed its existing
+  // personal localStorage value and shared dictionary file as preexisting user data.
+  await page.evaluate(({ key, word }) => localStorage.setItem(key, JSON.stringify([word])), { key: storageKeys.dictionary, word: 'xrs-synthetic-word' });
+  assert.ok((await fs.readFile(dictionaryFile, 'utf8')).includes('xrs-shared-word'), 'the isolated test kit contains a synthetic shared dictionary');
   const syntheticMarkers = ['XRS_SYNTHETIC_PATIENT_ALPHA', 'XRS_SYNTHETIC_PATIENT_BETA'];
   await assertEditorData('0.4.54', syntheticMarkers);
 
@@ -270,7 +271,12 @@ try {
   const shortcut = path.join(kitRoot, 'Shortcuts', 'X-ray Report Studio.lnk');
   assert.equal(path.resolve(await readShortcutTarget(shortcut)).toLowerCase(), path.resolve(newExecutable).toLowerCase(), 'the user shortcut points to 0.4.55');
   const backupRoot = path.join(kitRoot, 'AppData', 'X-ray Report Studio Backups');
-  assert.ok((await fs.readdir(backupRoot)).length > 0, 'the actual updater created a verified user-data backup');
+  const firstBackup = (await fs.readdir(backupRoot)).find(name => !name.startsWith('.staging-'));
+  assert.ok(firstBackup, 'the actual updater created a verified user-data backup');
+  const firstBackupRoot = path.join(backupRoot, firstBackup);
+  const firstBackupManifest = JSON.parse(await fs.readFile(path.join(firstBackupRoot, 'manifest.json'), 'utf8'));
+  assert.ok(firstBackupManifest.files.some(file => file.path === 'shared-dictionary.json'), 'the verified backup includes the shared dictionary');
+  assert.ok((await fs.readFile(path.join(firstBackupRoot, 'data', 'shared-dictionary.json'), 'utf8')).includes('xrs-shared-word'), 'the synthetic shared dictionary content is in the verified backup');
 
   phase = 'restart 0.4.55 and verify profile plus rollback availability';
   await application.close();
