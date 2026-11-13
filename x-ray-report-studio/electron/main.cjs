@@ -571,6 +571,7 @@ app.whenReady().then(async () => {
     const sendProgress = progress => { if (!event.sender.isDestroyed()) event.sender.send('updates:progress', progress); };
     let file = '';
     let archiveBytes = 0;
+    let updatePhase = 'manifest';
     try {
       const update=await getUpdateManifest();
       if (!update.available) return { available:false };
@@ -596,7 +597,10 @@ app.whenReady().then(async () => {
       file=path.join(os.tmpdir(),`X-ray_Report_Studio_${update.version}_${crypto.randomUUID()}.zip`);
       await fs.writeFile(file,archive,{flag:'wx'});
       sendProgress({stage:'installing',loaded:archive.length,total:archive.length,percent:100});
+      updatePhase = 'data-schema';
       currentDataState = await ensureDataSchema(dataSchemaFile, CURRENT_DATA_SCHEMA);
+      updatePhase = 'user-data-backup';
+      await log({ event: 'user-data-backup-start' });
       const userBackup=await createVerifiedUserDataBackup();
       await log({ event: 'user-data-backup-verified', bytes: userBackup.bytes, files: userBackup.files });
       const previousRoot=activeApplicationRoot,previousVersion=activeApplicationVersion;
@@ -605,18 +609,21 @@ app.whenReady().then(async () => {
         throw new Error('Текущая установка не подтверждена как стабильная. Обновление отменено.');
       const previousDataSchema = previousState?.current?.dataSchemaVersion ?? CURRENT_DATA_SCHEMA;
       const previousExecutable=path.join(previousRoot,'X-ray Report Studio.exe');
+      updatePhase = 'side-by-side-install';
       const installed = await installUpdateArchive({
         archive: file,
         currentRoot: previousRoot,
         version: update.version,
         log,
       });
+      updatePhase = 'new-version-smoke-test';
       const smoke=await smokeTestInstalledApp({executable:installed.executable});
       if(smoke.version!==update.version)throw new Error('Проверка первого запуска сообщила неожиданную версию.');
       await log({ event: 'new-version-smoke-test-passed', targetVersion: update.version });
       activeApplicationVersion = update.version;
       rendererReady = false;
       liveUpdateInProgress = true;
+      updatePhase = 'renderer-switch';
       const previousIndex = path.join(previousRoot, 'resources', 'app', 'dist', 'index.html');
       const installedIndex = path.join(installed.root, 'resources', 'app', 'dist', 'index.html');
       try {
@@ -651,7 +658,7 @@ app.whenReady().then(async () => {
       }
       await log({ event: 'update-switch-complete', targetVersion: update.version });
     } catch (error) {
-      await log({ event: 'update-error' });
+      await log({ event: 'update-error', errorCode: updatePhase });
       sendProgress({stage:'error',loaded:0,total:0,percent:0,message:error.message,logFile});
       throw new Error(logFile?`${error.message} Журнал обновления: ${logFile}`:error.message);
     } finally { if (file) await fs.unlink(file).catch(() => {}); updateInstalling=false; }
