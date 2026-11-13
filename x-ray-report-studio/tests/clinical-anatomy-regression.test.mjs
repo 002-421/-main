@@ -6,14 +6,14 @@ const clinical=new ClinicalLogicEngine();
 const consistency=new ClinicalConsistencyEngine();
 const warning=(description,conclusion)=>clinical.validate({description,conclusion});
 
-test('explicit anatomical inflections link the same organ in description and conclusion',t=>{
+test('explicit anatomical inflections link the same organ in description and conclusion',async t=>{
   const cases=[
     ['logic-tp04','КТ: В правом легком определяется узел.','КТ: Узел правого легкого отсутствует.'],
     ['logic-tp06','КТ: В селезенке определяется образование.','КТ: Образование селезенки не выявлено.'],
     ['logic-tp08','КТ: В плевре определяется узел.','КТ: Узел плевры отсутствует.'],
     ['logic-tp10','КТ: В почке определяется киста.','КТ: Киста почки не обнаружена.'],
   ];
-  for(const [id,description,conclusion] of cases)t.test(id,()=>assert.equal(warning(description,conclusion).length,1));
+  for(const [id,description,conclusion] of cases)await t.test(id,()=>assert.equal(warning(description,conclusion).length,1));
 });
 
 test('pleural terminology does not mask an explicitly stated side',()=>{
