@@ -27,7 +27,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = $env:GITHUB_REF_NAME
-          if ($tag -notmatch '^xrs-v(\d+\.\d+\.\d+)$') { throw "Expected stable tag xrs-vMAJOR.MINOR.PATCH, got $tag" }
+          if ($tag -notmatch '^xrs-v(\d+\.\d+\.\d+)(?:-r\d+)?$') { throw "Expected stable tag xrs-vMAJOR.MINOR.PATCH (optional -rN retry suffix), got $tag" }
           $tagVersion = $Matches[1]
           $sourceVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
           if ($sourceVersion -ne $tagVersion) { throw "Tag version $tagVersion does not match package.json $sourceVersion" }
@@ -94,7 +94,9 @@ jobs:
           python3 - <<'PY'
           import hashlib,io,json,os,pathlib,re,urllib.request,zipfile
           from urllib.parse import urlparse
-          version=os.environ['RELEASE_VERSION'].removeprefix('xrs-v')
+          tag_match=re.fullmatch(r'xrs-v(\d+\.\d+\.\d+)(?:-r\d+)?',os.environ['RELEASE_VERSION'])
+          assert tag_match, 'Release tag has an unsupported format'
+          version=tag_match.group(1)
           root=pathlib.Path(os.environ['CANDIDATE_DIR'])
           archives=list(root.rglob('X-ray_Report_Studio_Windows_Setup.zip')); sums=list(root.rglob('SHA256SUMS.txt'))
           assert len(archives)==1 and len(sums)==1, 'Expected one Setup ZIP and SHA256SUMS.txt'
@@ -204,8 +206,17 @@ jobs:
                   except Exception as e: print('Archive propagation pending:',type(e).__name__)
                   time.sleep(10)
               assert ok, f'Public archive failed SHA-256 verification: {name}'
-          with urllib.request.urlopen('https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json?verify=staged',timeout=60) as r:live=json.load(r)
-          assert live.get('version')==old and live.get('url','').endswith(f'X-ray_Report_Studio_Windows_Setup-{old}.zip'), 'Previous Stable manifest is not safely active'
+          manifest_url='https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json'
+          live=None
+          for i in range(12):
+              try:
+                  with urllib.request.urlopen(manifest_url+'?verify=staged-'+str(i),timeout=60) as r:current=json.load(r)
+                  if current.get('version')==old and current.get('sha256')==previous.get('sha256') and current.get('url','').endswith(f'X-ray_Report_Studio_Windows_Setup-{old}.zip'):
+                      live=current;break
+                  print('Waiting for public previous-version manifest propagation:',current.get('version'),current.get('url'))
+              except Exception as e: print('Previous manifest propagation pending:',type(e).__name__)
+              time.sleep(10)
+          assert live is not None, 'Previous Stable manifest is not safely active after bounded propagation checks'
           print(f'Verified public rollback {old} and candidate {version}; latest.json still selects {old}.')
           PY
       - name: Activate Stable manifest and canonical ZIP last
@@ -261,13 +272,13 @@ jobs:
         if: failure() && steps.official.conclusion == 'success'
         env:
           RUNNER_TEMP: ${{ runner.temp }}
-          RELEASE_VERSION: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ steps.baseline.outputs.new_version }}
           OLD_VERSION: ${{ steps.baseline.outputs.old_version }}
         run: |
           python3 - <<'PY'
           import json,os,pathlib
           downloads=pathlib.Path('official/x-ray-report-studio/downloads'); previous=os.environ.get('OLD_VERSION','')
-          backup=downloads/f'latest-{previous}-before-{os.environ["RELEASE_VERSION"].removeprefix("xrs-v")}.json'
+          backup=downloads/f'latest-{previous}-before-{os.environ["RELEASE_VERSION"]}.json'
           if not backup.is_file(): print('No verified rollback manifest was staged; no manifest change is attempted.'); raise SystemExit(0)
           value=json.loads(backup.read_text()); value['url']=f'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-{previous}.zip'
           (downloads/'latest.json').write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8')
