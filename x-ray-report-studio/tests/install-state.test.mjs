@@ -6,7 +6,10 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require=createRequire(import.meta.url);
-const {CURRENT_DATA_SCHEMA,ensureDataSchema,writeJsonAtomic,canRollback}=require('../electron/install-state.cjs');
+const {
+ CURRENT_DATA_SCHEMA,ensureDataSchema,writeJsonAtomic,canRollback,
+ canonicalPath,samePath,reconcileStableInstallState,getPendingFirstStartAction,isInstallConfirmed,recordFirstStartAttempt,confirmFirstStart,
+}=require('../electron/install-state.cjs');
 const {CURRENT_DATA_CONTRACT}=require('../electron/data-compatibility.cjs');
 const {applicationSupportsDataContract}=require('../electron/data-compatibility.cjs');
 
@@ -42,8 +45,94 @@ test('manual rollback is available only when the previous install supports the c
  assert.equal(canRollback({installState:{...installState,previous:{...installState.previous,version:'0.4.52'}},dataState:compatibleData,currentRoot}).available,false,'unknown application versions are not assumed compatible');
 });
 
+test('0.4.59 can safely roll back to the confirmed 0.4.58 Stable data contract',()=>{
+ const currentRoot=path.resolve('/safe/App_0.4.59');
+ const installState={status:'stable',current:{version:'0.4.59',root:currentRoot},previous:{version:'0.4.58',root:'/safe/App_0.4.58',executable:'/safe/App_0.4.58/X-ray Report Studio.exe',dataSchemaVersion:1}};
+ const compatibleData={schemaVersion:1,dataContract:CURRENT_DATA_CONTRACT};
+ assert.equal(applicationSupportsDataContract('0.4.57',CURRENT_DATA_CONTRACT,1),true);
+ assert.equal(applicationSupportsDataContract('0.4.58',CURRENT_DATA_CONTRACT,1),true);
+ assert.equal(applicationSupportsDataContract('0.4.59',CURRENT_DATA_CONTRACT,1),true);
+ assert.equal(canRollback({installState,dataState:compatibleData,currentRoot}).available,true);
+ assert.equal(canRollback({installState:{...installState,status:'pending-first-start'},dataState:compatibleData,currentRoot}).available,false);
+});
+
+test('stale Stable pointer is reconciled only when the live EXE, bundled app, shortcut and retained install agree',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-stable-state-recovery-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const appRoot=version=>path.join(root,`App_${version}`);
+ const oldRoot=appRoot('0.4.57'),runtimeRoot=appRoot('0.4.58');
+ const oldExe=path.join(oldRoot,'X-ray Report Studio.exe'),runtimeExe=path.join(runtimeRoot,'X-ray Report Studio.exe');
+ const runtimeAppPath=path.join(runtimeRoot,'resources','app');
+ await fs.mkdir(oldRoot,{recursive:true});await fs.writeFile(oldExe,'synthetic retained executable');
+ await fs.mkdir(path.join(runtimeAppPath,'electron'),{recursive:true});
+ await fs.writeFile(runtimeExe,'synthetic live executable');
+ await fs.writeFile(path.join(runtimeAppPath,'package.json'),JSON.stringify({version:'0.4.58',main:'electron/main.cjs'}));
+ await fs.writeFile(path.join(runtimeAppPath,'electron','main.cjs'),'synthetic app entry');
+ const dataState={schemaVersion:1,dataContract:CURRENT_DATA_CONTRACT};
+ const stale={status:'stable',launchAttempts:0,current:{version:'0.4.57',root:oldRoot,executable:oldExe,dataSchemaVersion:1},previous:{version:'0.4.56',root:path.join(root,'App_0.4.56'),executable:path.join(root,'App_0.4.56','X-ray Report Studio.exe'),dataSchemaVersion:1}};
+ const valid={installState:stale,dataState,runtimeVersion:'0.4.58',runtimeRoot,runtimeExecutable:runtimeExe,runtimeAppPath,shortcutTarget:runtimeExe};
+ const repaired=reconcileStableInstallState(valid);
+ assert.ok(repaired,'the contradictory but independently verified Stable state is recoverable');
+ assert.equal(repaired.status,'stable');
+ assert.equal(repaired.launchAttempts,0);
+ assert.equal(repaired.current.version,'0.4.58');
+ assert.equal(repaired.previous.version,'0.4.57');
+ assert.equal(isInstallConfirmed(repaired,runtimeRoot,runtimeExe,'0.4.58'),true);
+ assert.equal(canRollback({installState:repaired,dataState,currentRoot:runtimeRoot}).available,true);
+ assert.equal(stale.current.version,'0.4.57','reconciliation does not mutate the source record');
+
+ assert.equal(reconcileStableInstallState({...valid,shortcutTarget:oldExe}),null,'a shortcut pointing at another runtime is not repaired');
+ assert.equal(reconcileStableInstallState({...valid,runtimeVersion:'0.4.57'}),null,'runtime/version mismatch is not promoted');
+ assert.equal(reconcileStableInstallState({...valid,dataState:{...dataState,dataContract:'unknown-contract'}}),null,'unknown profile contracts are not accepted');
+ await fs.writeFile(path.join(runtimeAppPath,'package.json'),JSON.stringify({version:'0.4.57',main:'electron/main.cjs'}));
+ assert.equal(reconcileStableInstallState(valid),null,'corrupt or mismatched embedded version metadata is not trusted');
+});
+
 test('corrupt data compatibility metadata blocks rollback',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-schema-corrupt-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const file=path.join(root,'data-schema.json');await fs.writeFile(file,'{');
  await assert.rejects(ensureDataSchema(file),/повреждён/);
+});
+
+test('path equivalence resolves canonical filesystem paths and never equates distinct directories',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-path-equivalence-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const canonical=await fs.realpath(root);
+ assert.equal(samePath(root,canonical),true);
+ assert.equal(canonicalPath(root),path.resolve(canonical));
+ assert.equal(samePath(root,path.join(root,'different-directory')),false);
+});
+
+test('sequential 0.4.56 → 0.4.57 → 0.4.58 requires the actual candidate runtime before Stable confirmation',()=>{
+ const root=path.resolve('/synthetic/X-ray Report Studio');
+ const app=(version)=>path.join(root,version==='0.4.57'?'App_0.4.57-366a1757':`App_${version}`);
+ const executable=(version)=>path.join(app(version),'X-ray Report Studio.exe');
+ let state={status:'stable',current:{version:'0.4.56',root:app('0.4.56'),executable:executable('0.4.56'),dataSchemaVersion:1}};
+
+ state={status:'pending-first-start',launchAttempts:0,current:{version:'0.4.57',root:app('0.4.57'),executable:executable('0.4.57'),dataSchemaVersion:1},previous:state.current};
+ assert.equal(getPendingFirstStartAction(state,app('0.4.56'),executable('0.4.56'),'0.4.56'),'handoff-to-candidate');
+ assert.equal(isInstallConfirmed(state,app('0.4.56'),executable('0.4.56'),'0.4.56'),false);
+ assert.equal(state.launchAttempts,0,'the previous Electron runtime cannot consume the candidate launch attempt');
+ assert.equal(getPendingFirstStartAction(state,app('0.4.57'),executable('0.4.57'),'0.4.57'),'candidate');
+ state=recordFirstStartAttempt(state,app('0.4.57'),executable('0.4.57'),'0.4.57','2026-01-01T00:00:00.000Z');
+ assert.equal(state.launchAttempts,1);
+ state=confirmFirstStart(state,app('0.4.57'),executable('0.4.57'),'0.4.57','2026-01-01T00:00:01.000Z');
+ assert.equal(state.status,'stable');
+ assert.equal(isInstallConfirmed(state,app('0.4.57'),executable('0.4.57'),'0.4.57'),true);
+
+ state={status:'pending-first-start',launchAttempts:0,current:{version:'0.4.58',root:app('0.4.58'),executable:executable('0.4.58'),dataSchemaVersion:1},previous:state.current};
+ assert.equal(getPendingFirstStartAction(state,app('0.4.57'),executable('0.4.57'),'0.4.57'),'handoff-to-candidate');
+ assert.equal(isInstallConfirmed(state,app('0.4.57'),executable('0.4.57'),'0.4.57'),false,'the old runtime cannot install a subsequent release');
+ state=recordFirstStartAttempt(state,app('0.4.58'),executable('0.4.58'),'0.4.58','2026-01-01T00:00:02.000Z');
+ state=confirmFirstStart(state,app('0.4.58'),executable('0.4.58'),'0.4.58','2026-01-01T00:00:03.000Z');
+ assert.equal(isInstallConfirmed(state,app('0.4.58'),executable('0.4.58'),'0.4.58'),true);
+});
+
+test('pending first-start cannot be confirmed from an unrelated executable or malformed install path',()=>{
+ const root=path.resolve('/synthetic');
+ const state={status:'pending-first-start',launchAttempts:0,current:{version:'0.4.57',root:path.join(root,'App_0.4.57'),executable:path.join(root,'App_0.4.57','X-ray Report Studio.exe')},previous:{root:path.join(root,'App_0.4.56')}};
+ assert.equal(getPendingFirstStartAction(state,path.join(root,'App_0.4.55')),'blocked');
+ assert.throws(()=>recordFirstStartAttempt(state,path.join(root,'App_0.4.55')),/фактическим запуском|Первый запуск/);
+ assert.throws(()=>confirmFirstStart(state,path.join(root,'App_0.4.56')),/подтвердить/);
+ assert.equal(isInstallConfirmed(state,path.join(root,'App_0.4.55')),false);
+ assert.equal(getPendingFirstStartAction(state,state.current.root,path.join(state.current.root,'X-ray Report Studio.exe'),'0.4.56'),'blocked','the path alone cannot confirm a different executable version');
+ assert.equal(getPendingFirstStartAction(state,state.current.root,path.join(state.current.root,'different.exe'),'0.4.57'),'blocked','the folder alone cannot confirm a different executable');
 });

@@ -14,7 +14,10 @@ const require = createRequire(import.meta.url);
 const { installUpdateArchive, writeShortcutAtomically } = require('../electron/update-install.cjs');
 const { createUserDataBackup, verifyUserDataBackup } = require('../electron/user-data-backup.cjs');
 const { CURRENT_DATA_CONTRACT } = require('../electron/data-compatibility.cjs');
-const { canRollback } = require('../electron/install-state.cjs');
+const {
+  canRollback, samePath, isInstallConfirmed,
+  getPendingFirstStartAction, reconcileStableInstallState, recordFirstStartAttempt, confirmFirstStart,
+} = require('../electron/install-state.cjs');
 
 async function createWindowsShortcut(filename, { target, cwd, icon }) {
   const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -91,4 +94,95 @@ test('Windows paths with spaces and Cyrillic keep old installs, atomically repla
   const state = { status: 'stable', current: { version: '0.4.54', root: installed.root }, previous: { version: '0.4.53', root: currentRoot, executable: oldTarget, dataSchemaVersion: 1 } };
   assert.equal(canRollback({ installState: state, dataState: { schemaVersion: 1, dataContract: CURRENT_DATA_CONTRACT }, currentRoot: installed.root }).available, true);
   assert.equal(canRollback({ installState: state, dataState: { schemaVersion: 1, dataContract: 'future-unknown-contract' }, currentRoot: installed.root }).available, false);
+});
+
+test('Windows .56 → .57 → .58 handoff and stale Stable-state recovery validate the real shortcut and runtime', { skip: process.platform !== 'win32' }, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'XRS обновление Stable '));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const installParent = path.join(root, 'Установка X-ray Report Studio');
+  const shortcut = path.join(root, 'Ярлыки', 'X-ray Report Studio.lnk');
+  const roots = Object.fromEntries(['0.4.56', '0.4.57', '0.4.58'].map(version => [version, path.join(installParent, version === '0.4.57' ? 'App_0.4.57-366a1757' : `App_${version}`)]));
+  const executables = Object.fromEntries(Object.entries(roots).map(([version, appRoot]) => [version, path.join(appRoot, 'X-ray Report Studio.exe')]));
+  for (const [version, executable] of Object.entries(executables)) {
+    await fs.mkdir(path.dirname(executable), { recursive: true });
+    await fs.writeFile(executable, `synthetic Electron runtime ${version}`);
+  }
+  await fs.mkdir(path.dirname(shortcut), { recursive: true });
+  const setShortcut = target => writeShortcutAtomically({ shortcutPath: shortcut, target, cwd: path.dirname(target), icon: '', writeShortcutLink: createWindowsShortcut });
+  const getShortcutTarget = async () => {
+    const testDir = path.dirname(fileURLToPath(import.meta.url));
+    const electronExe = path.join(testDir, '..', 'node_modules', 'electron', 'dist', 'electron.exe');
+    const worker = path.join(testDir, 'windows-shortcut-worker.cjs');
+    const { stdout } = await execFileAsync(electronExe, [worker], { env: { ...process.env, XRS_SHORTCUT_PATH: shortcut }, windowsHide: true });
+    return JSON.parse(stdout).target;
+  };
+  const canonicalTargetIs = async expected => {
+    const actual = await getShortcutTarget();
+    const [realActual, realExpected] = await Promise.all([fs.realpath(actual), fs.realpath(expected)]);
+    return realActual.toLocaleLowerCase('en-US') === realExpected.toLocaleLowerCase('en-US');
+  };
+  await setShortcut(executables['0.4.56']);
+  let state = {
+    status: 'pending-first-start', launchAttempts: 0,
+    current: { version: '0.4.57', root: roots['0.4.57'], executable: executables['0.4.57'] },
+    previous: { version: '0.4.56', root: roots['0.4.56'], executable: executables['0.4.56'] },
+  };
+  assert.equal(getPendingFirstStartAction(state, roots['0.4.56'], executables['0.4.56'], '0.4.56'), 'handoff-to-candidate');
+  assert.equal(state.launchAttempts, 0, 'the old runtime must not consume the first-start confirmation');
+  await setShortcut(state.current.executable);
+  assert.equal(await canonicalTargetIs(executables['0.4.57']), true, 'Windows .lnk resolves to the actual 0.4.57 executable');
+  assert.equal(getPendingFirstStartAction(state, roots['0.4.57'], executables['0.4.57'], '0.4.57'), 'candidate');
+  state = recordFirstStartAttempt(state, roots['0.4.57'], executables['0.4.57'], '0.4.57', '2026-01-01T00:00:00.000Z');
+  state = confirmFirstStart(state, roots['0.4.57'], executables['0.4.57'], '0.4.57', '2026-01-01T00:00:01.000Z');
+  assert.equal(state.status, 'stable');
+
+  state = {
+    status: 'pending-first-start', launchAttempts: 0,
+    current: { version: '0.4.58', root: roots['0.4.58'], executable: executables['0.4.58'] },
+    previous: { version: state.current.version, root: state.current.root, executable: state.current.executable },
+  };
+  assert.equal(getPendingFirstStartAction(state, roots['0.4.57'], executables['0.4.57'], '0.4.57'), 'handoff-to-candidate');
+  await setShortcut(state.current.executable);
+  assert.equal(await canonicalTargetIs(executables['0.4.58']), true, 'Windows .lnk resolves to the actual 0.4.58 executable');
+  const actualExecutable = await fs.realpath(executables['0.4.58']);
+  const actualRoot = path.dirname(actualExecutable);
+  assert.equal(samePath(state.current.root, actualRoot), true, '8.3 and long Windows paths identify the same installed directory');
+  assert.equal(getPendingFirstStartAction(state, actualRoot, actualExecutable, '0.4.58'), 'candidate');
+  state = recordFirstStartAttempt(state, actualRoot, actualExecutable, '0.4.58', '2026-01-01T00:00:02.000Z');
+  state = confirmFirstStart(state, actualRoot, actualExecutable, '0.4.58', '2026-01-01T00:00:03.000Z');
+  assert.equal(state.status, 'stable');
+  assert.equal(state.current.version, '0.4.58');
+  assert.equal(isInstallConfirmed(state, actualRoot, actualExecutable, '0.4.58'), true);
+
+  const actualAppPath = path.join(roots['0.4.58'], 'resources', 'app');
+  await fs.mkdir(path.join(actualAppPath, 'electron'), { recursive: true });
+  await fs.writeFile(path.join(actualAppPath, 'package.json'), JSON.stringify({ version: '0.4.58', main: 'electron/main.cjs' }));
+  await fs.writeFile(path.join(actualAppPath, 'electron', 'main.cjs'), 'synthetic app entry');
+  const staleStableState = {
+    status: 'stable', launchAttempts: 0,
+    current: { version: '0.4.57', root: roots['0.4.57'], executable: executables['0.4.57'], dataSchemaVersion: 1 },
+    previous: { version: '0.4.56', root: roots['0.4.56'], executable: executables['0.4.56'], dataSchemaVersion: 1 },
+  };
+  await setShortcut(executables['0.4.58']);
+  const actualShortcutTarget = await getShortcutTarget();
+  const recovered = reconcileStableInstallState({
+    installState: staleStableState,
+    dataState: { schemaVersion: 1, dataContract: CURRENT_DATA_CONTRACT },
+    runtimeVersion: '0.4.58', runtimeRoot: roots['0.4.58'],
+    runtimeExecutable: executables['0.4.58'], runtimeAppPath: actualAppPath,
+    shortcutTarget: actualShortcutTarget,
+  });
+  assert.ok(recovered, 'real Windows shortcut and matching packaged runtime allow conservative state repair');
+  assert.equal(recovered.status, 'stable');
+  assert.equal(recovered.current.version, '0.4.58');
+  assert.equal(recovered.previous.version, '0.4.57');
+  assert.equal(isInstallConfirmed(recovered, roots['0.4.58'], executables['0.4.58'], '0.4.58'), true);
+  assert.equal(canRollback({ installState: recovered, dataState: { schemaVersion: 1, dataContract: CURRENT_DATA_CONTRACT }, currentRoot: roots['0.4.58'] }).available, true);
+  assert.equal(reconcileStableInstallState({
+    installState: staleStableState,
+    dataState: { schemaVersion: 1, dataContract: CURRENT_DATA_CONTRACT },
+    runtimeVersion: '0.4.58', runtimeRoot: roots['0.4.58'],
+    runtimeExecutable: executables['0.4.58'], runtimeAppPath: actualAppPath,
+    shortcutTarget: executables['0.4.57'],
+  }), null, 'mismatched shortcut prevents recovery from confirming Stable');
 });
