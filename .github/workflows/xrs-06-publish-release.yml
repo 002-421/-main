@@ -42,6 +42,15 @@ jobs:
         with:
           python-version: '3.12'
       - run: npm ci
+      - name: Install Electron runtime for desktop integration tests
+        run: npm run desktop:install
+      - name: Verify Electron runtime is present
+        shell: pwsh
+        run: |
+          $electronExe = Join-Path $env:GITHUB_WORKSPACE 'x-ray-report-studio/node_modules/electron/dist/electron.exe'
+          if (-not (Test-Path -LiteralPath $electronExe -PathType Leaf)) {
+            throw "Electron runtime executable is missing after desktop:install: $electronExe"
+          }
       - run: npm run build
       - name: Targeted Stable updater tests
         run: node --test tests/update-channel.test.mjs tests/update-version.test.mjs tests/update-install.test.mjs tests/update-settings.test.mjs tests/user-data-backup.test.mjs tests/log-safety.test.mjs tests/windows-integration.test.mjs
