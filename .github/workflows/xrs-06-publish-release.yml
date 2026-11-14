@@ -114,8 +114,10 @@ jobs:
                   for req in re.findall(r"\brequire\s*\(\s*['\"](\./[^'\"]+)['\"]\s*\)",source):
                       target=req[2:]; options=[target] if target.endswith('.cjs') else [target+'.cjs',target+'/index.cjs']
                       assert any(x in modules for x in options), f'{name} requires missing local module {req}'
+          run_id=os.environ['GITHUB_RUN_ID']
           def get(url):
-              with urllib.request.urlopen(urllib.request.Request(url+'?xrs-verify='+digest,headers={'User-Agent':'xrs-stable-release'}),timeout=120) as r:return r.read()
+              separator='&' if '?' in url else '?'
+              with urllib.request.urlopen(urllib.request.Request(url+separator+'xrs-verify='+digest+'-'+run_id,headers={'User-Agent':'xrs-stable-release','Cache-Control':'no-cache'}),timeout=120) as r:return r.read()
           manifest_url='https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json'
           old=json.loads(get(manifest_url)); old_version=old.get('version')
           assert re.fullmatch(r'\d+\.\d+\.\d+',str(old_version)), 'Current Stable version is invalid'
@@ -187,6 +189,7 @@ jobs:
       - name: Verify public versioned archives before Stable activation
         env:
           RUNNER_TEMP: ${{ runner.temp }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
           RELEASE_VERSION: ${{ steps.baseline.outputs.new_version }}
           OLD_VERSION: ${{ steps.baseline.outputs.old_version }}
         run: |
@@ -201,7 +204,7 @@ jobs:
               ok=False
               for i in range(12):
                   try:
-                      with urllib.request.urlopen(base+name+'?verify='+str(i),timeout=120) as r:data=r.read()
+                      with urllib.request.urlopen(base+name+'?verify='+os.environ['GITHUB_RUN_ID']+'-'+str(i),timeout=120) as r:data=r.read()
                       if hashlib.sha256(data).hexdigest()==digest:ok=True;break
                   except Exception as e: print('Archive propagation pending:',type(e).__name__)
                   time.sleep(10)
@@ -210,7 +213,7 @@ jobs:
           live=None
           for i in range(12):
               try:
-                  with urllib.request.urlopen(manifest_url+'?verify=staged-'+str(i),timeout=60) as r:current=json.load(r)
+                  with urllib.request.urlopen(manifest_url+'?verify=staged-'+os.environ['GITHUB_RUN_ID']+'-'+str(i),timeout=60) as r:current=json.load(r)
                   if current.get('version')==old and current.get('sha256')==previous.get('sha256') and current.get('url','').endswith(f'X-ray_Report_Studio_Windows_Setup-{old}.zip'):
                       live=current;break
                   print('Waiting for public previous-version manifest propagation:',current.get('version'),current.get('url'))
@@ -244,6 +247,7 @@ jobs:
         env:
           RUNNER_TEMP: ${{ runner.temp }}
           RELEASE_VERSION: ${{ steps.baseline.outputs.new_version }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           python3 - <<'PY'
           import hashlib,json,os,pathlib,time,urllib.request
@@ -253,7 +257,7 @@ jobs:
               ok=False
               for i in range(12):
                   try:
-                      with urllib.request.urlopen(base+name+'?final='+str(i),timeout=120) as r:data=r.read()
+                      with urllib.request.urlopen(base+name+'?final='+os.environ['GITHUB_RUN_ID']+'-'+str(i),timeout=120) as r:data=r.read()
                       if hashlib.sha256(data).hexdigest()==expected:ok=True;break
                   except Exception as e: print('Final archive propagation pending:',type(e).__name__)
                   time.sleep(10)
@@ -261,7 +265,7 @@ jobs:
           url='https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json'; ok=False
           for i in range(12):
               try:
-                  with urllib.request.urlopen(url+'?final='+str(i),timeout=60) as r:m=json.load(r)
+                  with urllib.request.urlopen(url+'?final='+os.environ['GITHUB_RUN_ID']+'-'+str(i),timeout=60) as r:m=json.load(r)
                   if m.get('version')==version and m.get('sha256')==expected and m.get('url','').endswith(f'X-ray_Report_Studio_Windows_Setup-{version}.zip'):ok=True;break
               except Exception as e: print('Manifest propagation pending:',type(e).__name__)
               time.sleep(10)
