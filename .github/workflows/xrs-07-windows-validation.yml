@@ -2,7 +2,7 @@ name: XRS-07/XRS-08 Windows validation
 
 on:
   push:
-    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean]
+    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation]
   pull_request:
     paths:
       - 'x-ray-report-studio/**'
@@ -35,16 +35,27 @@ jobs:
           $isBeta = $version -match '-beta\.'
           $sourceRef = if ($env:GITHUB_HEAD_REF) { $env:GITHUB_HEAD_REF } else { $env:GITHUB_REF_NAME }
           $isStable056 = $version -eq '0.4.56' -and $sourceRef -eq 'codex/xrs-056-stable-clean'
+          $isUpdateHotfix = $sourceRef -eq 'codex/xrs-first-start-confirmation'
           Add-Content -Path $env:GITHUB_OUTPUT -Value "beta=$($isBeta.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "stable056=$($isStable056.ToString().ToLowerInvariant())" -Encoding utf8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "updateHotfix=$($isUpdateHotfix.ToString().ToLowerInvariant())" -Encoding utf8
       - run: npm ci
       - name: Install pinned Electron runtime
         if: steps.release-channel.outputs.stable056 != 'true'
         run: npm run desktop:install
       - name: Install Chromium for tab lifecycle scenario
-        if: steps.release-channel.outputs.stable056 != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
         run: npx playwright-core install chromium
       - run: npm run build
+      - name: Verify Electron runtime for Windows shortcut test
+        if: steps.release-channel.outputs.updateHotfix == 'true'
+        shell: pwsh
+        run: |
+          $electronExe = Join-Path $env:GITHUB_WORKSPACE 'x-ray-report-studio/node_modules/electron/dist/electron.exe'
+          if (-not (Test-Path -LiteralPath $electronExe -PathType Leaf)) { throw "Electron runtime executable is missing: $electronExe" }
+      - name: First-start confirmation and Windows shortcut handoff tests
+        if: steps.release-channel.outputs.updateHotfix == 'true'
+        run: node --test tests/install-state.test.mjs tests/windows-integration.test.mjs
       - name: Package and verify Stable 0.4.56 updater candidate
         if: steps.release-channel.outputs.stable056 == 'true'
         shell: pwsh
@@ -58,13 +69,13 @@ jobs:
           Set-Content -Path 'test-output/xrs-0.4.56/SHA256SUMS.txt' -Value "$hash  X-ray_Report_Studio_Windows_Setup.zip" -NoNewline
           Write-Host "Stable setup ZIP SHA-256: $hash"
       - name: Full unit suite
-        if: steps.release-channel.outputs.stable056 != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
         run: npm test
       - name: Targeted Stable updater tests
         if: steps.release-channel.outputs.stable056 == 'true'
         run: node --test tests/update-channel.test.mjs tests/update-version.test.mjs tests/update-install.test.mjs tests/update-settings.test.mjs
       - name: Workspace recovery and tab isolation
-        if: steps.release-channel.outputs.stable056 != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
         shell: pwsh
         run: |
           npm run test:tab-isolation
@@ -72,19 +83,19 @@ jobs:
           npm run test:workspace-recovery
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: DOCX, PDF and Electron editor integration
-        if: steps.release-channel.outputs.stable056 != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
         run: npm run test:browser
       - name: Per-document Undo and Redo history across tabs and restart
-        if: steps.release-channel.outputs.stable056 != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
         run: npm run test:history-browser
       - name: Word-oriented preview pagination with synthetic reports
-        if: steps.release-channel.outputs.stable056 != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
         run: node tests/preview-pagination-browser.mjs
       - name: Export and preserve patient tab lifecycle (1, 2, 5, 12 tabs)
-        if: steps.release-channel.outputs.stable056 != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
         run: npm run test:tab-lifecycle
       - name: Verified profile backup tests
-        if: steps.release-channel.outputs.stable056 != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
         run: npm run test:preupdate-backup
       - name: Parse Beta PowerShell scripts with Windows PowerShell 5.1
         if: steps.release-channel.outputs.beta == 'true'
