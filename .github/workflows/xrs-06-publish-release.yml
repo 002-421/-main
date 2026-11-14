@@ -185,15 +185,11 @@ jobs:
           fallback=dict(old_manifest)
           fallback['url']='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip'
           (downloads/'latest.json').write_text(json.dumps(fallback,indent=2)+'\n',encoding='utf-8')
-          release_workflow=pathlib.Path('.github/workflows/xrs-06-publish-release.yml')
-          assert release_workflow.is_file(), 'Tag commit does not contain the release workflow'
-          target_workflow=pathlib.Path('official/.github/workflows/xrs-06-publish-release.yml'); target_workflow.parent.mkdir(parents=True,exist_ok=True)
-          shutil.copyfile(release_workflow,target_workflow)
           print('Prepared rollback and candidate archives; Stable remains on its previous version until final activation.')
           PY
           git -C official config user.name 'github-actions[bot]'
           git -C official config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -C official add -f -- .github/workflows/xrs-06-publish-release.yml x-ray-report-studio/downloads/latest.json x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-${{ steps.baseline.outputs.old_version }}.zip x-ray-report-studio/downloads/latest-${{ steps.baseline.outputs.old_version }}-before-${{ steps.baseline.outputs.new_version }}.json x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-${{ steps.baseline.outputs.new_version }}.zip
+          git -C official add -f -- x-ray-report-studio/downloads/latest.json x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-${{ steps.baseline.outputs.old_version }}.zip x-ray-report-studio/downloads/latest-${{ steps.baseline.outputs.old_version }}-before-${{ steps.baseline.outputs.new_version }}.json x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-${{ steps.baseline.outputs.new_version }}.zip
           if git -C official diff --cached --quiet; then echo 'Release staging is already present.'; else git -C official commit -m "release(xrs): stage ${{ steps.baseline.outputs.new_version }} and preserve ${{ steps.baseline.outputs.old_version }}"; git -C official push origin HEAD:refs/heads/codex/mri-report-studio; fi
       - name: Verify public versioned archives before Stable activation
         env:
