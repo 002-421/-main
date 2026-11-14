@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises');
+const fsSync = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { CURRENT_DATA_CONTRACT, DATA_SCHEMA_VERSION, applicationSupportsDataContract } = require('./data-compatibility.cjs');
@@ -41,7 +42,7 @@ function canRollback({ installState, dataState, currentRoot }) {
   const previous = installState?.previous;
   const current = installState?.current;
   if (!previous || !current || typeof current.root !== 'string' || typeof currentRoot !== 'string'
-      || !path.isAbsolute(current.root) || !path.isAbsolute(currentRoot) || path.resolve(current.root) !== path.resolve(currentRoot))
+      || !samePath(current.root, currentRoot))
     return { available: false, reason: 'Предыдущая установленная версия не зарегистрирована.' };
   if (!parseVersion(current.version) || !parseVersion(previous.version)
       || typeof previous.root !== 'string' || typeof previous.executable !== 'string' || !path.isAbsolute(previous.root) || !path.isAbsolute(previous.executable))
@@ -53,9 +54,24 @@ function canRollback({ installState, dataState, currentRoot }) {
   return { available: true, currentVersion: current.version, previousVersion: previous.version, previousRoot: previous.root, previousExecutable: previous.executable, dataSchemaVersion: dataState.schemaVersion, dataContract: dataState.dataContract };
 }
 
+function canonicalPath(value) {
+  if (typeof value !== 'string' || !path.isAbsolute(value)) return null;
+  const resolved = path.resolve(value);
+  try {
+    const real = fsSync.realpathSync.native(resolved);
+    const withoutWindowsNamespace = process.platform === 'win32'
+      ? real.replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\/, '')
+      : real;
+    return path.resolve(withoutWindowsNamespace);
+  } catch {
+    return resolved;
+  }
+}
+
 function samePath(left, right) {
   if (typeof left !== 'string' || typeof right !== 'string' || !path.isAbsolute(left) || !path.isAbsolute(right)) return false;
-  const a = path.resolve(left), b = path.resolve(right);
+  const a = canonicalPath(left), b = canonicalPath(right);
+  if (a === null || b === null) return false;
   return process.platform === 'win32' ? a.toLocaleLowerCase('en-US') === b.toLocaleLowerCase('en-US') : a === b;
 }
 
@@ -100,5 +116,5 @@ function confirmFirstStart(installState, runtimeRoot, runtimeExecutable = path.j
 
 module.exports = {
   CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema, canRollback,
-  getPendingFirstStartAction, isInstallConfirmed, recordFirstStartAttempt, confirmFirstStart,
+  canonicalPath, samePath, getPendingFirstStartAction, isInstallConfirmed, recordFirstStartAttempt, confirmFirstStart,
 };

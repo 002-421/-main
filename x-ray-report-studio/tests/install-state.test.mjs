@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
 const {
  CURRENT_DATA_SCHEMA,ensureDataSchema,writeJsonAtomic,canRollback,
- getPendingFirstStartAction,isInstallConfirmed,recordFirstStartAttempt,confirmFirstStart,
+ canonicalPath,samePath,getPendingFirstStartAction,isInstallConfirmed,recordFirstStartAttempt,confirmFirstStart,
 }=require('../electron/install-state.cjs');
 const {CURRENT_DATA_CONTRACT}=require('../electron/data-compatibility.cjs');
 const {applicationSupportsDataContract}=require('../electron/data-compatibility.cjs');
@@ -49,6 +49,14 @@ test('corrupt data compatibility metadata blocks rollback',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-schema-corrupt-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const file=path.join(root,'data-schema.json');await fs.writeFile(file,'{');
  await assert.rejects(ensureDataSchema(file),/повреждён/);
+});
+
+test('path equivalence resolves canonical filesystem paths and never equates distinct directories',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-path-equivalence-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const canonical=await fs.realpath(root);
+ assert.equal(samePath(root,canonical),true);
+ assert.equal(canonicalPath(root),path.resolve(canonical));
+ assert.equal(samePath(root,path.join(root,'different-directory')),false);
 });
 
 test('sequential 0.4.56 → 0.4.57 → 0.4.58 requires the actual candidate runtime before Stable confirmation',()=>{

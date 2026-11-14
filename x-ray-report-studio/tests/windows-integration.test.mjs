@@ -15,7 +15,8 @@ const { installUpdateArchive, writeShortcutAtomically } = require('../electron/u
 const { createUserDataBackup, verifyUserDataBackup } = require('../electron/user-data-backup.cjs');
 const { CURRENT_DATA_CONTRACT } = require('../electron/data-compatibility.cjs');
 const {
-  canRollback, getPendingFirstStartAction, recordFirstStartAttempt, confirmFirstStart,
+  canRollback, samePath, isInstallConfirmed,
+  getPendingFirstStartAction, recordFirstStartAttempt, confirmFirstStart,
 } = require('../electron/install-state.cjs');
 
 async function createWindowsShortcut(filename, { target, cwd, icon }) {
@@ -143,10 +144,13 @@ test('Windows .56 → .57 → .58 startup handoff points the real shortcut at th
   assert.equal(getPendingFirstStartAction(state, roots['0.4.57'], executables['0.4.57'], '0.4.57'), 'handoff-to-candidate');
   await setShortcut(state.current.executable);
   assert.equal(await canonicalTargetIs(executables['0.4.58']), true, 'Windows .lnk resolves to the actual 0.4.58 executable');
-  assert.equal(getPendingFirstStartAction(state, roots['0.4.58'], executables['0.4.58'], '0.4.58'), 'candidate');
-  state = recordFirstStartAttempt(state, roots['0.4.58'], executables['0.4.58'], '0.4.58', '2026-01-01T00:00:02.000Z');
-  state = confirmFirstStart(state, roots['0.4.58'], executables['0.4.58'], '0.4.58', '2026-01-01T00:00:03.000Z');
+  const actualExecutable = await fs.realpath(executables['0.4.58']);
+  const actualRoot = path.dirname(actualExecutable);
+  assert.equal(samePath(state.current.root, actualRoot), true, '8.3 and long Windows paths identify the same installed directory');
+  assert.equal(getPendingFirstStartAction(state, actualRoot, actualExecutable, '0.4.58'), 'candidate');
+  state = recordFirstStartAttempt(state, actualRoot, actualExecutable, '0.4.58', '2026-01-01T00:00:02.000Z');
+  state = confirmFirstStart(state, actualRoot, actualExecutable, '0.4.58', '2026-01-01T00:00:03.000Z');
   assert.equal(state.status, 'stable');
   assert.equal(state.current.version, '0.4.58');
-  assert.equal(path.resolve(state.current.root), path.resolve(path.dirname(await fs.realpath(executables['0.4.58']))));
+  assert.equal(isInstallConfirmed(state, actualRoot, actualExecutable, '0.4.58'), true);
 });
