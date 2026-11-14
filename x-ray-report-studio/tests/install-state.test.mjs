@@ -45,6 +45,17 @@ test('manual rollback is available only when the previous install supports the c
  assert.equal(canRollback({installState:{...installState,previous:{...installState.previous,version:'0.4.52'}},dataState:compatibleData,currentRoot}).available,false,'unknown application versions are not assumed compatible');
 });
 
+test('0.4.59 can safely roll back to the confirmed 0.4.58 Stable data contract',()=>{
+ const currentRoot=path.resolve('/safe/App_0.4.59');
+ const installState={status:'stable',current:{version:'0.4.59',root:currentRoot},previous:{version:'0.4.58',root:'/safe/App_0.4.58',executable:'/safe/App_0.4.58/X-ray Report Studio.exe',dataSchemaVersion:1}};
+ const compatibleData={schemaVersion:1,dataContract:CURRENT_DATA_CONTRACT};
+ assert.equal(applicationSupportsDataContract('0.4.57',CURRENT_DATA_CONTRACT,1),true);
+ assert.equal(applicationSupportsDataContract('0.4.58',CURRENT_DATA_CONTRACT,1),true);
+ assert.equal(applicationSupportsDataContract('0.4.59',CURRENT_DATA_CONTRACT,1),true);
+ assert.equal(canRollback({installState,dataState:compatibleData,currentRoot}).available,true);
+ assert.equal(canRollback({installState:{...installState,status:'pending-first-start'},dataState:compatibleData,currentRoot}).available,false);
+});
+
 test('corrupt data compatibility metadata blocks rollback',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-schema-corrupt-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const file=path.join(root,'data-schema.json');await fs.writeFile(file,'{');
