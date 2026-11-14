@@ -1,9 +1,10 @@
-name: XRS 0.4.57 Offline AI Review integration
+name: XRS Offline AI Review integration validation
 
 on:
   push:
     branches:
       - codex/xrs-ai-057-integration
+      - codex/xrs-058-ai-review-release
 
 permissions:
   contents: read
@@ -73,7 +74,7 @@ jobs:
           "Windows integration ZIP bytes: $((Get-Item $archive).Length)" | Add-Content $env:GITHUB_STEP_SUMMARY
       - uses: actions/upload-artifact@v4
         with:
-          name: XRS-0.4.57-AI-Review-Windows-Integration
+          name: XRS-0.4.58-AI-Review-Windows-Integration
           if-no-files-found: error
           path: |
             x-ray-report-studio/release/X-ray_Report_Studio_Windows_x64.zip
