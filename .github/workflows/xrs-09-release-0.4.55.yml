@@ -242,7 +242,8 @@ jobs:
           else: shutil.copyfile(candidate,destination)
           print('Staged versioned 0.4.55 ZIP with SHA256 '+sha)
           PY
-          git add x-ray-report-studio/releases/0.4.55/downloads/X-ray_Report_Studio_Windows_Setup.zip x-ray-report-studio/downloads/latest-0.4.54-before-0.4.55.json
+          git add -f -- x-ray-report-studio/releases/0.4.55/downloads/X-ray_Report_Studio_Windows_Setup.zip
+          git add -- x-ray-report-studio/downloads/latest-0.4.54-before-0.4.55.json
           if git diff --cached --quiet; then echo 'Verified immutable files already exist'; else
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
