@@ -16,7 +16,7 @@ const { createUserDataBackup, verifyUserDataBackup } = require('../electron/user
 const { CURRENT_DATA_CONTRACT } = require('../electron/data-compatibility.cjs');
 const {
   canRollback, samePath, isInstallConfirmed,
-  getPendingFirstStartAction, recordFirstStartAttempt, confirmFirstStart,
+  getPendingFirstStartAction, reconcileStableInstallState, recordFirstStartAttempt, confirmFirstStart,
 } = require('../electron/install-state.cjs');
 
 async function createWindowsShortcut(filename, { target, cwd, icon }) {
@@ -96,7 +96,7 @@ test('Windows paths with spaces and Cyrillic keep old installs, atomically repla
   assert.equal(canRollback({ installState: state, dataState: { schemaVersion: 1, dataContract: 'future-unknown-contract' }, currentRoot: installed.root }).available, false);
 });
 
-test('Windows .56 → .57 → .58 startup handoff points the real shortcut at the candidate and confirms only that runtime', { skip: process.platform !== 'win32' }, async t => {
+test('Windows .56 → .57 → .58 handoff and stale Stable-state recovery validate the real shortcut and runtime', { skip: process.platform !== 'win32' }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'XRS обновление Stable '));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const installParent = path.join(root, 'Установка X-ray Report Studio');
@@ -153,4 +153,36 @@ test('Windows .56 → .57 → .58 startup handoff points the real shortcut at th
   assert.equal(state.status, 'stable');
   assert.equal(state.current.version, '0.4.58');
   assert.equal(isInstallConfirmed(state, actualRoot, actualExecutable, '0.4.58'), true);
+
+  const actualAppPath = path.join(roots['0.4.58'], 'resources', 'app');
+  await fs.mkdir(path.join(actualAppPath, 'electron'), { recursive: true });
+  await fs.writeFile(path.join(actualAppPath, 'package.json'), JSON.stringify({ version: '0.4.58', main: 'electron/main.cjs' }));
+  await fs.writeFile(path.join(actualAppPath, 'electron', 'main.cjs'), 'synthetic app entry');
+  const staleStableState = {
+    status: 'stable', launchAttempts: 0,
+    current: { version: '0.4.57', root: roots['0.4.57'], executable: executables['0.4.57'], dataSchemaVersion: 1 },
+    previous: { version: '0.4.56', root: roots['0.4.56'], executable: executables['0.4.56'], dataSchemaVersion: 1 },
+  };
+  await setShortcut(executables['0.4.58']);
+  const actualShortcutTarget = await getShortcutTarget();
+  const recovered = reconcileStableInstallState({
+    installState: staleStableState,
+    dataState: { schemaVersion: 1, dataContract: CURRENT_DATA_CONTRACT },
+    runtimeVersion: '0.4.58', runtimeRoot: roots['0.4.58'],
+    runtimeExecutable: executables['0.4.58'], runtimeAppPath: actualAppPath,
+    shortcutTarget: actualShortcutTarget,
+  });
+  assert.ok(recovered, 'real Windows shortcut and matching packaged runtime allow conservative state repair');
+  assert.equal(recovered.status, 'stable');
+  assert.equal(recovered.current.version, '0.4.58');
+  assert.equal(recovered.previous.version, '0.4.57');
+  assert.equal(isInstallConfirmed(recovered, roots['0.4.58'], executables['0.4.58'], '0.4.58'), true);
+  assert.equal(canRollback({ installState: recovered, dataState: { schemaVersion: 1, dataContract: CURRENT_DATA_CONTRACT }, currentRoot: roots['0.4.58'] }).available, true);
+  assert.equal(reconcileStableInstallState({
+    installState: staleStableState,
+    dataState: { schemaVersion: 1, dataContract: CURRENT_DATA_CONTRACT },
+    runtimeVersion: '0.4.58', runtimeRoot: roots['0.4.58'],
+    runtimeExecutable: executables['0.4.58'], runtimeAppPath: actualAppPath,
+    shortcutTarget: executables['0.4.57'],
+  }), null, 'mismatched shortcut prevents recovery from confirming Stable');
 });

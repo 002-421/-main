@@ -10,7 +10,8 @@ const { isUsableRenderer, smokeTestInstalledApp } = require('./live-update.cjs')
 const { createUserDataBackup } = require('./user-data-backup.cjs');
 const {
   CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema,
-  getPendingFirstStartAction, isInstallConfirmed, recordFirstStartAttempt, confirmFirstStart,
+  getPendingFirstStartAction, isInstallConfirmed, reconcileStableInstallState,
+  recordFirstStartAttempt, confirmFirstStart,
 } = require('./install-state.cjs');
 const { STABLE_MANIFEST, validateManifest, chooseUpdate } = require('./update-channel.cjs');
 const { downloadHttps } = require('./update-download.cjs');
@@ -225,6 +226,32 @@ async function initializeInstallState() {
   currentDataState = await ensureDataSchema(dataSchemaFile, CURRENT_DATA_SCHEMA);
   startupInstallState = await readJson(installStateFile, null);
   activeApplicationRoot = path.dirname(process.execPath);
+  if (process.platform === 'win32' && startupInstallState?.status === 'stable'
+      && !isInstallConfirmed(startupInstallState, activeApplicationRoot, process.execPath, app.getVersion())) {
+    try {
+      const shortcutTarget = shell.readShortcutLink(shortcutLocation()).target;
+      const repairedState = reconcileStableInstallState({
+        installState: startupInstallState,
+        dataState: currentDataState,
+        runtimeVersion: app.getVersion(),
+        runtimeRoot: activeApplicationRoot,
+        runtimeExecutable: process.execPath,
+        runtimeAppPath: app.getAppPath(),
+        shortcutTarget,
+      });
+      if (repairedState) {
+        const staleVersion = startupInstallState.current.version;
+        await writeJsonAtomic(installStateFile, repairedState);
+        startupInstallState = repairedState;
+        await logStartup({ event: 'stable-install-state-reconciled', previousRecordedVersion: staleVersion, runtimeVersion: app.getVersion() });
+      } else {
+        await logStartup({ event: 'stable-install-state-mismatch-unrepaired', runtimeVersion: app.getVersion() });
+      }
+    } catch (error) {
+      const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'STATE_RECONCILE_FAILED';
+      await logStartup({ event: 'stable-install-state-mismatch-unrepaired', errorCode, runtimeVersion: app.getVersion() });
+    }
+  }
   const current = startupInstallState?.current;
   const startupAction = getPendingFirstStartAction(startupInstallState, activeApplicationRoot, process.execPath, app.getVersion());
   if (startupAction === 'handoff-to-candidate') {

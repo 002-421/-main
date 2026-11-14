@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
 const {
  CURRENT_DATA_SCHEMA,ensureDataSchema,writeJsonAtomic,canRollback,
- canonicalPath,samePath,getPendingFirstStartAction,isInstallConfirmed,recordFirstStartAttempt,confirmFirstStart,
+ canonicalPath,samePath,reconcileStableInstallState,getPendingFirstStartAction,isInstallConfirmed,recordFirstStartAttempt,confirmFirstStart,
 }=require('../electron/install-state.cjs');
 const {CURRENT_DATA_CONTRACT}=require('../electron/data-compatibility.cjs');
 const {applicationSupportsDataContract}=require('../electron/data-compatibility.cjs');
@@ -54,6 +54,37 @@ test('0.4.59 can safely roll back to the confirmed 0.4.58 Stable data contract',
  assert.equal(applicationSupportsDataContract('0.4.59',CURRENT_DATA_CONTRACT,1),true);
  assert.equal(canRollback({installState,dataState:compatibleData,currentRoot}).available,true);
  assert.equal(canRollback({installState:{...installState,status:'pending-first-start'},dataState:compatibleData,currentRoot}).available,false);
+});
+
+test('stale Stable pointer is reconciled only when the live EXE, bundled app, shortcut and retained install agree',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-stable-state-recovery-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const appRoot=version=>path.join(root,`App_${version}`);
+ const oldRoot=appRoot('0.4.57'),runtimeRoot=appRoot('0.4.58');
+ const oldExe=path.join(oldRoot,'X-ray Report Studio.exe'),runtimeExe=path.join(runtimeRoot,'X-ray Report Studio.exe');
+ const runtimeAppPath=path.join(runtimeRoot,'resources','app');
+ await fs.mkdir(oldRoot,{recursive:true});await fs.writeFile(oldExe,'synthetic retained executable');
+ await fs.mkdir(path.join(runtimeAppPath,'electron'),{recursive:true});
+ await fs.writeFile(runtimeExe,'synthetic live executable');
+ await fs.writeFile(path.join(runtimeAppPath,'package.json'),JSON.stringify({version:'0.4.58',main:'electron/main.cjs'}));
+ await fs.writeFile(path.join(runtimeAppPath,'electron','main.cjs'),'synthetic app entry');
+ const dataState={schemaVersion:1,dataContract:CURRENT_DATA_CONTRACT};
+ const stale={status:'stable',launchAttempts:0,current:{version:'0.4.57',root:oldRoot,executable:oldExe,dataSchemaVersion:1},previous:{version:'0.4.56',root:path.join(root,'App_0.4.56'),executable:path.join(root,'App_0.4.56','X-ray Report Studio.exe'),dataSchemaVersion:1}};
+ const valid={installState:stale,dataState,runtimeVersion:'0.4.58',runtimeRoot,runtimeExecutable:runtimeExe,runtimeAppPath,shortcutTarget:runtimeExe};
+ const repaired=reconcileStableInstallState(valid);
+ assert.ok(repaired,'the contradictory but independently verified Stable state is recoverable');
+ assert.equal(repaired.status,'stable');
+ assert.equal(repaired.launchAttempts,0);
+ assert.equal(repaired.current.version,'0.4.58');
+ assert.equal(repaired.previous.version,'0.4.57');
+ assert.equal(isInstallConfirmed(repaired,runtimeRoot,runtimeExe,'0.4.58'),true);
+ assert.equal(canRollback({installState:repaired,dataState,currentRoot:runtimeRoot}).available,true);
+ assert.equal(stale.current.version,'0.4.57','reconciliation does not mutate the source record');
+
+ assert.equal(reconcileStableInstallState({...valid,shortcutTarget:oldExe}),null,'a shortcut pointing at another runtime is not repaired');
+ assert.equal(reconcileStableInstallState({...valid,runtimeVersion:'0.4.57'}),null,'runtime/version mismatch is not promoted');
+ assert.equal(reconcileStableInstallState({...valid,dataState:{...dataState,dataContract:'unknown-contract'}}),null,'unknown profile contracts are not accepted');
+ await fs.writeFile(path.join(runtimeAppPath,'package.json'),JSON.stringify({version:'0.4.57',main:'electron/main.cjs'}));
+ assert.equal(reconcileStableInstallState(valid),null,'corrupt or mismatched embedded version metadata is not trusted');
 });
 
 test('corrupt data compatibility metadata blocks rollback',async t=>{
