@@ -174,7 +174,7 @@ jobs:
           if target.exists(): assert hashlib.sha256(target.read_bytes()).hexdigest()==digest, 'Existing versioned release ZIP differs'
           else: shutil.copyfile(candidate,target)
           fallback=dict(old_manifest)
-          fallback['url']=f'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-{previous}.zip'
+          fallback['url']='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip'
           (downloads/'latest.json').write_text(json.dumps(fallback,indent=2)+'\n',encoding='utf-8')
           release_workflow=pathlib.Path('.github/workflows/xrs-06-publish-release.yml')
           assert release_workflow.is_file(), 'Tag commit does not contain the release workflow'
@@ -234,7 +234,7 @@ jobs:
           candidate=next(pathlib.Path(os.environ['CANDIDATE_DIR']).rglob('X-ray_Report_Studio_Windows_Setup.zip')) if os.environ.get('CANDIDATE_DIR') else None
           if candidate is None: candidate=next(temp.glob('xrs-candidate/**/*.zip'))
           sha=hashlib.sha256(candidate.read_bytes()).hexdigest()
-          url=f'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-{version}.zip'
+          url='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip'
           manifest={'version':version,'url':url,'sha256':sha}
           downloads=pathlib.Path('official/x-ray-report-studio/downloads')
           shutil.copyfile(candidate,downloads/'X-ray_Report_Studio_Windows_Setup.zip')
@@ -265,7 +265,7 @@ jobs:
                       with urllib.request.urlopen(base+name+'?release-check='+run_id+'-'+str(attempt),timeout=120) as r:data=r.read()
                       archive_hashes.append(hashlib.sha256(data).hexdigest())
                   with urllib.request.urlopen(url+'?release-check='+run_id+'-'+str(attempt),timeout=60) as r:manifest=json.load(r)
-                  verified=(archive_hashes==[expected,expected] and manifest.get('version')==version and manifest.get('sha256')==expected and manifest.get('url','').endswith(f'X-ray_Report_Studio_Windows_Setup-{version}.zip'))
+                  verified=(archive_hashes==[expected,expected] and manifest.get('version')==version and manifest.get('sha256')==expected and manifest.get('url')=='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip')
                   if verified:break
                   print('Waiting for Raw CDN cache expiry; public manifest version:',manifest.get('version'),'canonical ZIP hash matches:',archive_hashes[0]==expected,flush=True)
               except Exception as e:print('Final public verification pending:',type(e).__name__,flush=True)
@@ -285,7 +285,7 @@ jobs:
           downloads=pathlib.Path('official/x-ray-report-studio/downloads'); previous=os.environ.get('OLD_VERSION','')
           backup=downloads/f'latest-{previous}-before-{os.environ["RELEASE_VERSION"]}.json'
           if not backup.is_file(): print('No verified rollback manifest was staged; no manifest change is attempted.'); raise SystemExit(0)
-          value=json.loads(backup.read_text()); value['url']=f'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-{previous}.zip'
+          value=json.loads(backup.read_text()); value['url']='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip'
           (downloads/'latest.json').write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8')
           PY
           git -C official add -f -- x-ray-report-studio/downloads/latest.json
