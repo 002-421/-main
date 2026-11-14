@@ -595,6 +595,8 @@ app.whenReady().then(async () => {
       if(!verifySha256(archive,update.sha256)) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
       await log({ event: 'checksum-verified' });
       file=path.join(os.tmpdir(),`X-ray_Report_Studio_${update.version}_${crypto.randomUUID()}.zip`);
+      updatePhase = 'verified-archive-write';
+      await log({ event: 'update-phase', phase:updatePhase });
       await fs.writeFile(file,archive,{flag:'wx'});
       sendProgress({stage:'installing',loaded:archive.length,total:archive.length,percent:100});
       updatePhase = 'data-schema';
@@ -658,9 +660,10 @@ app.whenReady().then(async () => {
       }
       await log({ event: 'update-switch-complete', targetVersion: update.version });
     } catch (error) {
-      await log({ event: 'update-error', errorCode: updatePhase });
-      sendProgress({stage:'error',loaded:0,total:0,percent:0,message:error.message,logFile});
-      throw new Error(logFile?`${error.message} Журнал обновления: ${logFile}`:error.message);
+      const diagnostic = { event:'update-error', phase:updatePhase, message:error?.message ?? String(error), code:error?.code, syscall:error?.syscall };
+      await log(diagnostic).catch(() => {});
+      sendProgress({stage:'error',loaded:0,total:0,percent:0,message:diagnostic.message,phase:updatePhase,code:diagnostic.code,logFile});
+      throw new Error(logFile?`${diagnostic.message} Журнал обновления: ${logFile}`:diagnostic.message);
     } finally { if (file) await fs.unlink(file).catch(() => {}); updateInstalling=false; }
     sendProgress({stage:'installed',loaded:archiveBytes,total:archiveBytes,percent:100});
     return { available:true, installing:false, version:activeApplicationVersion };

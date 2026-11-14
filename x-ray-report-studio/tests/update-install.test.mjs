@@ -60,6 +60,44 @@ test('update stages a side-by-side app but leaves shortcut commit to the caller'
   assert.ok(await fs.stat(result.executable));
 });
 
+test('temporary extraction directory failure is logged before extract-start and leaves the current install intact', async t => {
+  const f = await fixture();
+  t.after(() => fs.rm(f.directory, { recursive: true, force: true }));
+  const log = [];
+  const failure = Object.assign(new Error('synthetic temporary directory access denied'), { code: 'EACCES', syscall: 'mkdtemp' });
+  await assert.rejects(installUpdateArchive({
+    archive: f.archive,
+    currentRoot: f.currentRoot,
+    version: '0.4.14',
+    createTemporaryDirectory: async () => { throw failure; },
+    extractArchive: fakeExtractor(f.packageRoot),
+    log: async entry => log.push(entry),
+  }), /synthetic temporary directory access denied/);
+  assert.equal(log.some(entry => entry.event === 'extract-start'), false);
+  assert.deepEqual(log.find(entry => entry.event === 'install-error'), {
+    event: 'install-error', phase: 'create-extraction-temp', message: failure.message, code: 'EACCES', syscall: 'mkdtemp',
+  });
+  assert.equal(await fs.readFile(path.join(f.currentRoot, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'old app');
+});
+
+test('archive extraction failure is tagged with the extraction phase', async t => {
+  const f = await fixture();
+  t.after(() => fs.rm(f.directory, { recursive: true, force: true }));
+  const log = [];
+  const failure = Object.assign(new Error('synthetic invalid ZIP'), { code: 'EINVAL', syscall: 'tar' });
+  await assert.rejects(installUpdateArchive({
+    archive: f.archive,
+    currentRoot: f.currentRoot,
+    version: '0.4.14',
+    extractArchive: async () => { throw failure; },
+    log: async entry => log.push(entry),
+  }), /synthetic invalid ZIP/);
+  assert.equal(log.some(entry => entry.event === 'extract-start'), true);
+  assert.deepEqual(log.find(entry => entry.event === 'install-error'), {
+    event: 'install-error', phase: 'extract-archive', message: failure.message, code: 'EINVAL', syscall: 'tar',
+  });
+});
+
 test('0.4.54 to 0.4.55 local candidate keeps the previous app and synthetic user profile intact', async t => {
   const f=await fixture(); t.after(()=>fs.rm(f.directory,{recursive:true,force:true}));
   const profile=path.join(f.directory,'MRI Report Studio');

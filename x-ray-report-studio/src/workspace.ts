@@ -45,7 +45,7 @@ declare global { interface Window { desktop?: {
   rollbackToPreviousVersion:()=>Promise<{starting:boolean;backupFiles:number}>;
   openUpdateBackups:()=>Promise<void>;
   openUpdateLog:()=>Promise<void>;
-  onUpdateProgress:(callback:(progress:{stage:string;loaded:number;total:number;percent:number|null;message?:string;logFile?:string})=>void)=>void;
+  onUpdateProgress:(callback:(progress:{stage:string;loaded:number;total:number;percent:number|null;message?:string;phase?:string;code?:string;logFile?:string})=>void)=>void;
   clearUpdateProgress:()=>void;
   copyReport:(html:string,text:string)=>Promise<void>;
   dictionaryLoad:()=>Promise<{words:string[];shared:boolean}>;
@@ -420,12 +420,12 @@ async function checkForAppUpdates(automatic:boolean){
    window.desktop!.onUpdateProgress(value=>{
     const label=d.querySelector<HTMLElement>('#update-progress-label')!,percent=d.querySelector<HTMLElement>('#update-progress-percent')!,detail=d.querySelector<HTMLElement>('#update-progress-detail')!,fill=d.querySelector<HTMLElement>('#update-progress-fill')!;
     const mb=(bytes:number)=>(bytes/1048576).toFixed(1)+' МБ';
-    if(value.stage==='error'){label.textContent='Не удалось установить обновление';percent.textContent='';detail.textContent='Проверьте журнал обновлений';d.querySelector<HTMLElement>('#update-error-details')!.hidden=false;d.querySelector<HTMLElement>('#update-error-text')!.textContent='Установка остановлена. Подробности доступны в журнале обновлений.';fill.classList.remove('indeterminate');fill.style.width='0';return;}
+    if(value.stage==='error'){label.textContent='Не удалось установить обновление';percent.textContent='';detail.textContent=value.phase?`Этап: ${value.phase}${value.code?` (${value.code})`:''}`:'Проверьте журнал обновлений';d.querySelector<HTMLElement>('#update-error-details')!.hidden=false;d.querySelector<HTMLElement>('#update-error-text')!.textContent=[value.message||'Причина не передана приложением.',value.logFile?`Журнал: ${value.logFile}`:''].filter(Boolean).join('\n');fill.classList.remove('indeterminate');fill.style.width='0';return;}
     if(value.stage==='downloading'){label.textContent='Загрузка пакета обновления';percent.textContent=value.percent===null?'':value.percent+'%';detail.textContent=value.total?`${mb(value.loaded)} из ${mb(value.total)}`:`Загружено ${mb(value.loaded)}`;fill.style.width=value.percent===null?'30%':value.percent+'%';fill.classList.toggle('indeterminate',value.percent===null);}
     else{fill.classList.remove('indeterminate');fill.style.width='100%';percent.textContent='100%';label.textContent=value.stage==='verifying'?'Проверка файла':value.stage==='installing'?'Установка обновления':'Установка завершена';detail.textContent=value.stage==='verifying'?'Проверяется контрольная сумма':value.stage==='installing'?'Проверяется приложение и резервная копия':'Готово';}
    });
    try{await window.desktop!.installUpdate();const version=await window.desktop!.getApplicationVersion();const label=document.querySelector('#application-version');if(label)label.textContent=version;toast(`Приложение обновлено до версии ${version}.`);closeDialog();}
-   catch(error){editor.setEditable(true);button.disabled=false;button.textContent='Установить обновление';d.querySelector<HTMLElement>('#update-progress-label')!.textContent='Не удалось установить обновление';d.querySelector<HTMLElement>('#update-progress-detail')!.textContent='Подробности доступны в журнале обновлений';d.querySelector<HTMLElement>('#update-error-details')!.hidden=false;d.querySelector<HTMLElement>('#update-error-text')!.textContent='Установка остановлена. Откройте журнал обновлений для безопасной диагностики.';toast('Не удалось установить обновление. Текущая версия оставлена без изменений.',true);}
+   catch(error){editor.setEditable(true);button.disabled=false;button.textContent='Установить обновление';d.querySelector<HTMLElement>('#update-progress-label')!.textContent='Не удалось установить обновление';d.querySelector<HTMLElement>('#update-progress-detail')!.textContent='Текущая версия оставлена без изменений';d.querySelector<HTMLElement>('#update-error-details')!.hidden=false;d.querySelector<HTMLElement>('#update-error-text')!.textContent=(error as Error).message||'Установка остановлена по неизвестной причине.';toast('Не удалось установить обновление. Текущая версия оставлена без изменений.',true);}
    finally{window.desktop!.clearUpdateProgress();}
   });
  }catch(error){if(!automatic)toast(`Не удалось проверить обновления: ${(error as Error).message}`,true);}
