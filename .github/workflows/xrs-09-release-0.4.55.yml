@@ -208,6 +208,9 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'portable' }}
     runs-on: windows-2022
     timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
     defaults:
       run:
         working-directory: x-ray-report-studio
@@ -234,8 +237,37 @@ jobs:
         with:
           python-version: '3.12'
       - run: npm ci
-      - name: Build the existing 0.4.55 application bundle
-        run: npm run build
+      - name: Download the existing verified 0.4.55 Windows package
+        uses: actions/download-artifact@v4
+        with:
+          name: xrs-09-stable-0.4.55-release-candidate
+          run-id: 43528607562
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/xrs-055-candidate
+      - name: Prepare the existing stable application payload for portable packaging
+        shell: powershell
+        run: |
+          $candidate = Join-Path $env:RUNNER_TEMP 'xrs-055-candidate\X-ray_Report_Studio_Windows_Setup.zip'
+          $expected = 'e7d20497b12e336492ab14773eeb3aaf12ecbbf71cb492d1027de6830918bf9f'
+          $actual = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Existing 0.4.55 package SHA256 mismatch: $actual" }
+          $unpacked = Join-Path $env:RUNNER_TEMP 'xrs-055-setup-payload'
+          Expand-Archive -LiteralPath $candidate -DestinationPath $unpacked
+          $package = Join-Path $unpacked 'X-ray Report Studio Setup\app'
+          $appMetadata = Get-Content -LiteralPath (Join-Path $package 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($appMetadata.version -ne '0.4.55') { throw "Existing app payload is version $($appMetadata.version), expected 0.4.55." }
+          if (!(Test-Path -LiteralPath (Join-Path $package 'electron\main.cjs')) -or !(Test-Path -LiteralPath (Join-Path $package 'dist\index.html'))) { throw 'Existing stable app payload is incomplete.' }
+          Get-ChildItem -LiteralPath electron -Filter '*.cjs' | Remove-Item -Force
+          Copy-Item -Path (Join-Path $package 'electron\*.cjs') -Destination electron -Force
+          New-Item -ItemType Directory -Force -Path dist, public | Out-Null
+          Copy-Item -LiteralPath (Join-Path $package 'dist\index.html') -Destination dist\index.html -Force
+          Copy-Item -LiteralPath (Join-Path $package 'dist\x-ray-report-studio.ico') -Destination public\x-ray-report-studio.ico -Force
+          Copy-Item -LiteralPath (Join-Path $unpacked 'X-ray Report Studio Setup\README_RU.txt') -Destination README_RU.txt -Force
+          $metadata = Get-Content -LiteralPath package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $metadata.version = '0.4.55'
+          $json = $metadata | ConvertTo-Json -Depth 100
+          [System.IO.File]::WriteAllText((Join-Path $PWD 'package.json'), $json + "`n", [System.Text.UTF8Encoding]::new($false))
+          Write-Host 'Existing verified 0.4.55 application payload prepared; application build was not repeated.'
       - name: Package the full Windows Electron application
         shell: powershell
         run: |
