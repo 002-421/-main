@@ -53,4 +53,52 @@ function canRollback({ installState, dataState, currentRoot }) {
   return { available: true, currentVersion: current.version, previousVersion: previous.version, previousRoot: previous.root, previousExecutable: previous.executable, dataSchemaVersion: dataState.schemaVersion, dataContract: dataState.dataContract };
 }
 
-module.exports = { CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema, canRollback };
+function samePath(left, right) {
+  if (typeof left !== 'string' || typeof right !== 'string' || !path.isAbsolute(left) || !path.isAbsolute(right)) return false;
+  const a = path.resolve(left), b = path.resolve(right);
+  return process.platform === 'win32' ? a.toLocaleLowerCase('en-US') === b.toLocaleLowerCase('en-US') : a === b;
+}
+
+function getPendingFirstStartAction(installState, runtimeRoot, runtimeExecutable = path.join(runtimeRoot, 'X-ray Report Studio.exe'), runtimeVersion = installState?.current?.version) {
+  if (installState?.status !== 'pending-first-start') return 'normal';
+  const currentRoot = installState.current?.root;
+  const currentExecutable = installState.current?.executable;
+  const version = String(installState.current?.version ?? '');
+  const rootName = path.basename(currentRoot ?? '');
+  const expectedRootName = `App_${version}`;
+  const versionPattern = parseVersion(version) ? new RegExp(`^App_${version.replaceAll('.', '\\.')}[-_][a-f0-9]{8}$`, 'i') : null;
+  const validVersionRoot = rootName === expectedRootName || Boolean(versionPattern?.test(rootName));
+  if (!parseVersion(version) || !validVersionRoot || !samePath(path.dirname(currentExecutable ?? ''), currentRoot)
+      || !samePath(currentExecutable, path.join(currentRoot, 'X-ray Report Studio.exe'))) return 'blocked';
+  if (runtimeVersion === version && samePath(currentRoot, runtimeRoot) && samePath(currentExecutable, runtimeExecutable)) return 'candidate';
+  if (installState.previous?.version === runtimeVersion
+      && samePath(installState.previous?.root, runtimeRoot)
+      && samePath(installState.previous?.executable, runtimeExecutable)) return 'handoff-to-candidate';
+  return 'blocked';
+}
+
+function isInstallConfirmed(installState, runtimeRoot, runtimeExecutable = path.join(runtimeRoot, 'X-ray Report Studio.exe'), runtimeVersion = installState?.current?.version) {
+  if (installState == null) return true;
+  return installState.status === 'stable'
+    && typeof installState.current?.root === 'string'
+    && runtimeVersion === installState.current.version
+    && samePath(installState.current.root, runtimeRoot)
+    && samePath(installState.current.executable, runtimeExecutable);
+}
+
+function recordFirstStartAttempt(installState, runtimeRoot, runtimeExecutable = path.join(runtimeRoot, 'X-ray Report Studio.exe'), runtimeVersion = installState?.current?.version, timestamp = new Date().toISOString()) {
+  if (getPendingFirstStartAction(installState, runtimeRoot, runtimeExecutable, runtimeVersion) !== 'candidate'
+      || Number(installState.launchAttempts) !== 0) throw new Error('Первый запуск должен выполняться из установленной версии.');
+  return { ...installState, launchAttempts: 1, lastLaunchAt: timestamp };
+}
+
+function confirmFirstStart(installState, runtimeRoot, runtimeExecutable = path.join(runtimeRoot, 'X-ray Report Studio.exe'), runtimeVersion = installState?.current?.version, timestamp = new Date().toISOString()) {
+  if (getPendingFirstStartAction(installState, runtimeRoot, runtimeExecutable, runtimeVersion) !== 'candidate'
+      || Number(installState.launchAttempts) !== 1) throw new Error('Нельзя подтвердить запуск неподтверждённой версии.');
+  return { ...installState, status: 'stable', launchAttempts: 0, healthyAt: timestamp };
+}
+
+module.exports = {
+  CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema, canRollback,
+  getPendingFirstStartAction, isInstallConfirmed, recordFirstStartAttempt, confirmFirstStart,
+};

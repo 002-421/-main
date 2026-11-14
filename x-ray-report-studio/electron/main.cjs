@@ -6,9 +6,12 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const { pathToFileURL, fileURLToPath } = require('node:url');
 const { installUpdateArchive, verifySha256, writeShortcutAtomically } = require('./update-install.cjs');
-const { activateRendererUpdate, isUsableRenderer, smokeTestInstalledApp } = require('./live-update.cjs');
+const { isUsableRenderer, smokeTestInstalledApp } = require('./live-update.cjs');
 const { createUserDataBackup } = require('./user-data-backup.cjs');
-const { CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema } = require('./install-state.cjs');
+const {
+  CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema,
+  getPendingFirstStartAction, isInstallConfirmed, recordFirstStartAttempt, confirmFirstStart,
+} = require('./install-state.cjs');
 const { STABLE_MANIFEST, validateManifest, chooseUpdate } = require('./update-channel.cjs');
 const { downloadHttps } = require('./update-download.cjs');
 const { sanitizeUpdateLogEvent, sanitizeStartupLogEvent } = require('./log-safety.cjs');
@@ -210,7 +213,7 @@ async function restoreShortcutAfterFailedFirstLaunch() {
 
 async function markCurrentInstallHealthy() {
   if (!pendingFirstLaunch || !startupInstallState) return;
-  startupInstallState = { ...startupInstallState, status: 'stable', launchAttempts: 0, healthyAt: new Date().toISOString() };
+  startupInstallState = confirmFirstStart(startupInstallState, activeApplicationRoot, process.execPath, app.getVersion());
   await writeJsonAtomic(installStateFile, startupInstallState);
   pendingFirstLaunch = false;
   await logStartup({ event: 'update-first-start-confirmed', version: startupInstallState.current.version });
@@ -223,7 +226,27 @@ async function initializeInstallState() {
   startupInstallState = await readJson(installStateFile, null);
   activeApplicationRoot = path.dirname(process.execPath);
   const current = startupInstallState?.current;
-  if (startupInstallState?.status !== 'pending-first-start' || !current || path.resolve(current.root) !== path.resolve(activeApplicationRoot)) return;
+  const startupAction = getPendingFirstStartAction(startupInstallState, activeApplicationRoot, process.execPath, app.getVersion());
+  if (startupAction === 'handoff-to-candidate') {
+    try {
+      const executable = await fs.stat(current.executable);
+      if (!executable.isFile()) throw new Error('candidate-not-file');
+      await pointShortcutTo(current.executable, current.root);
+      await logStartup({ event: 'update-old-runtime-handoff', version: current.version });
+      app.relaunch({ execPath: current.executable, args: [`--user-data-dir=${app.getPath('userData')}`] });
+      app.exit(0);
+      return 'relaunch';
+    } catch (error) {
+      const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'HANDOFF_FAILED';
+      await logStartup({ event: 'update-old-runtime-handoff-failed', errorCode });
+      return 'blocked';
+    }
+  }
+  if (startupAction === 'blocked') {
+    await logStartup({ event: 'update-pending-runtime-mismatch' });
+    return 'blocked';
+  }
+  if (startupAction !== 'candidate' || !current) return 'normal';
   pendingFirstLaunch = true;
   if (Number(startupInstallState.launchAttempts) >= 1) {
     const restored = await restoreShortcutAfterFailedFirstLaunch();
@@ -239,9 +262,10 @@ async function initializeInstallState() {
     pendingFirstLaunch = false;
     return;
   }
-  startupInstallState = { ...startupInstallState, launchAttempts: 1, lastLaunchAt: new Date().toISOString() };
+  startupInstallState = recordFirstStartAttempt(startupInstallState, activeApplicationRoot, process.execPath, app.getVersion());
   pendingFirstLaunch = true;
   await writeJsonAtomic(installStateFile, startupInstallState);
+  return 'candidate';
 }
 
 async function renderPdf() {
@@ -299,8 +323,15 @@ app.whenReady().then(async () => {
   try { const saved = JSON.parse(await fs.readFile(exportSettingsFile, 'utf8')); if (typeof saved.word === 'string' && path.isAbsolute(saved.word)) lastWordDirectory = saved.word; } catch {}
 
   startupLogFile = path.join(app.getPath('userData'), 'logs', `startup-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
-  try { await initializeInstallState(); }
+  let installStartup = 'normal';
+  try { installStartup = await initializeInstallState(); }
   catch { currentDataState = { schemaVersion: 0 }; startupInstallState = null; await logStartup({ event: 'install-metadata-unavailable' }); }
+  if (installStartup === 'relaunch') return;
+  if (installStartup === 'blocked') {
+    dialog.showErrorBox('X-ray Report Studio', 'Обновлённая версия установлена, но не удалось безопасно запустить её. Следующее обновление заблокировано; предыдущая версия и данные сохранены. Запустите X-ray Report Studio через ярлык и обратитесь в поддержку, если сообщение повторится.');
+    app.quit();
+    return;
+  }
   if (currentDataState?.schemaVersion !== CURRENT_DATA_SCHEMA) {
     await dialog.showMessageBox({ type: 'error', title: 'X-ray Report Studio', message: 'Эта версия приложения несовместима с форматом сохранённых данных.', detail: 'Данные оставлены без изменений. Запустите приложение через ярлык последней рабочей версии.' });
     app.quit();
@@ -450,6 +481,8 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('updates:check', async event => {
     requireMain(event);
+    if (!isInstallConfirmed(startupInstallState, activeApplicationRoot, process.execPath, app.getVersion()))
+      throw new Error('Обновление пока недоступно: сначала запустите и подтвердите установленную версию через её ярлык.');
     return getUpdateManifest();
   });
   ipcMain.handle('app:version', async event => {
@@ -460,6 +493,8 @@ app.whenReady().then(async () => {
     requireMain(event);
     if (updateInstalling) throw new Error('Установка обновления уже запущена.');
     if (process.platform !== 'win32') throw new Error('Автообновление установщика поддерживается в Windows-версии приложения.');
+    if (!isInstallConfirmed(startupInstallState, activeApplicationRoot, process.execPath, app.getVersion()))
+      throw new Error('Следующее обновление заблокировано до фактического запуска и подтверждения текущей версии.');
     updateInstalling = true;
     let logFile = '', log = async () => {};
     const sendProgress = progress => { if (!event.sender.isDestroyed()) event.sender.send('updates:progress', progress); };
@@ -471,6 +506,13 @@ app.whenReady().then(async () => {
       if (!update.available) return { available:false };
       ({ filename: logFile, log } = await createUpdateLogger());
       await log({ event: 'update-requested', currentVersion: activeApplicationVersion, targetVersion: update.version });
+      updatePhase = 'install-state-validation';
+      const verifiedInstallState = await readJson(installStateFile, null);
+      if (!isInstallConfirmed(verifiedInstallState, activeApplicationRoot, process.execPath, app.getVersion())) {
+        const error = new Error('Текущая версия ещё не подтверждена фактическим запуском. Запустите установленную версию через ярлык перед обновлением.');
+        error.code = 'INSTALL_NOT_CONFIRMED';
+        throw error;
+      }
       sendProgress({stage:'downloading',loaded:0,total:0,percent:0});
       await log({ event: 'download-start' });
       let lastLoggedPercent = -10;
@@ -498,8 +540,8 @@ app.whenReady().then(async () => {
       updatePhase = 'data-schema';
       currentDataState = await ensureDataSchema(dataSchemaFile, CURRENT_DATA_SCHEMA);
       const previousRoot=activeApplicationRoot,previousVersion=activeApplicationVersion;
-      const previousState=await readJson(installStateFile,null);
-      if (previousState && (previousState.status !== 'stable' || !previousState.current || path.resolve(previousState.current.root) !== path.resolve(previousRoot)))
+      const previousState=verifiedInstallState;
+      if (!isInstallConfirmed(previousState, previousRoot, process.execPath, app.getVersion()))
         throw new Error('Текущая установка не подтверждена как стабильная. Обновление отменено.');
       const previousDataSchema = previousState?.current?.dataSchemaVersion ?? CURRENT_DATA_SCHEMA;
       const previousExecutable=path.join(previousRoot,'X-ray Report Studio.exe');
@@ -514,43 +556,34 @@ app.whenReady().then(async () => {
       const smoke=await smokeTestInstalledApp({executable:installed.executable});
       if(smoke.version!==update.version)throw new Error('Проверка первого запуска сообщила неожиданную версию.');
       await log({ event: 'new-version-smoke-test-passed', targetVersion: update.version });
-      activeApplicationVersion = update.version;
-      rendererReady = false;
-      liveUpdateInProgress = true;
-      updatePhase = 'renderer-switch';
-      const previousIndex = path.join(previousRoot, 'resources', 'app', 'dist', 'index.html');
-      const installedIndex = path.join(installed.root, 'resources', 'app', 'dist', 'index.html');
+      updatePhase = 'first-start-commit';
+      const nextState={
+        status:'pending-first-start',launchAttempts:0,installedAt:new Date().toISOString(),
+        current:{version:update.version,root:installed.root,executable:installed.executable,dataSchemaVersion:CURRENT_DATA_SCHEMA},
+        previous:{version:previousVersion,root:previousRoot,executable:previousExecutable,dataSchemaVersion:previousDataSchema},
+      };
+      let stateCommitted = false;
       try {
-        await activateRendererUpdate({
-          loadFile: filename => mainWindow.loadFile(filename),
-          installedIndex,
-          previousIndex,
-          waitForReady: waitForRendererReady,
-        });
-        const nextState={
-          status:'pending-first-start',launchAttempts:0,installedAt:new Date().toISOString(),
-          current:{version:update.version,root:installed.root,executable:installed.executable,dataSchemaVersion:CURRENT_DATA_SCHEMA},
-          previous:{version:previousVersion,root:previousRoot,executable:previousExecutable,dataSchemaVersion:previousDataSchema},
-        };
         await writeJsonAtomic(installStateFile,nextState);
+        stateCommitted = true;
         await pointShortcutTo(installed.executable,installed.root);
         startupInstallState=nextState;
-        activeApplicationRoot=installed.root;
-        liveUpdateInProgress = false;
         await log({ event: 'shortcut-committed', targetVersion:update.version });
+        await log({ event: 'new-runtime-relaunch-requested', targetVersion:update.version });
+        sendProgress({stage:'restarting',loaded:archive.length,total:archive.length,percent:100});
+        app.relaunch({ execPath: installed.executable, args: [`--user-data-dir=${app.getPath('userData')}`] });
+        app.exit(0);
+        return { available:true, installing:true, version:update.version };
       } catch (activationError) {
-        liveUpdateInProgress = false;
-        activeApplicationVersion = previousVersion;
-        activeApplicationRoot = previousRoot;
-        await writeJsonAtomic(installStateFile,startupInstallState??{status:'stable'}).catch(()=>{});
-        await activateRendererUpdate({loadFile:filename=>mainWindow.loadFile(filename),installedIndex:previousIndex,previousIndex,waitForReady:waitForRendererReady}).catch(()=>{});
+        startupInstallState=previousState;
+        if (stateCommitted) {
+          if (previousState) await writeJsonAtomic(installStateFile,previousState).catch(()=>{});
+          else await fs.unlink(installStateFile).catch(()=>{});
+        }
         const shortcutRestored = await pointShortcutTo(previousExecutable,previousRoot).then(()=>true,()=>false);
-        await mainWindow.webContents.executeJavaScript(`(()=>{const label=document.querySelector('#application-version');if(label)label.textContent=${JSON.stringify(activeApplicationVersion)}})()`).catch(() => {});
         await log({ event: 'update-switch-failed', restored: shortcutRestored });
-        if (!rendererReady) void showStartupFailure('Не удалось загрузить новую и предыдущую версии интерфейса.');
         throw activationError;
       }
-      await log({ event: 'update-switch-complete', targetVersion: update.version });
     } catch (error) {
       const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code)
         ? error.code
