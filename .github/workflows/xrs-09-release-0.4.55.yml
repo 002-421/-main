@@ -10,10 +10,11 @@ on:
         required: true
         type: choice
         default: prepare
-        options: [prepare, publish]
+        options: [prepare, portable, publish]
       source_sha:
         description: Full commit SHA from codex/xrs-09-local-upgrade to package and test.
         required: true
+        default: a7e6d44167bc986d74cefff03e45588788758469
         type: string
       candidate_run_id:
         description: Successful or package-ready Windows run containing the candidate artifact to publish.
@@ -202,6 +203,86 @@ jobs:
             x-ray-report-studio/test-output/xrs-09-release/latest.json
             x-ray-report-studio/test-output/xrs-09-release/latest.json.baseline.sha256
             x-ray-report-studio/test-output/xrs-09-release/PREPARATION.txt
+
+  portable:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'portable' }}
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: x-ray-report-studio
+    steps:
+      - name: Checkout the accepted 0.4.55 source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - name: Confirm source is part of the XRS-09 release branch
+        shell: powershell
+        run: |
+          git fetch origin refs/heads/codex/xrs-09-local-upgrade:refs/remotes/origin/codex/xrs-09-local-upgrade
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git merge-base --is-ancestor HEAD origin/codex/xrs-09-local-upgrade
+          if ($LASTEXITCODE -ne 0) { throw 'Selected source is not on codex/xrs-09-local-upgrade.' }
+          Write-Host "Packaging source $(git rev-parse HEAD)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: x-ray-report-studio/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - name: Build the existing 0.4.55 application bundle
+        run: npm run build
+      - name: Package the full Windows Electron application
+        shell: powershell
+        run: |
+          $metadata = Get-Content -LiteralPath package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $metadata.version = '0.4.55'
+          $json = $metadata | ConvertTo-Json -Depth 100
+          [System.IO.File]::WriteAllText((Join-Path $PWD 'package.json'), $json + "`n", [System.Text.UTF8Encoding]::new($false))
+          python scripts/package_windows.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify portable EXE, Electron runtime, and archive integrity
+        shell: powershell
+        run: |
+          $python = @'
+          import hashlib, json, pathlib, zipfile
+          archive = pathlib.Path('release/X-ray_Report_Studio_Windows_x64.zip')
+          assert archive.is_file() and archive.stat().st_size > 0, 'Portable ZIP is missing.'
+          with zipfile.ZipFile(archive) as package:
+              assert package.testzip() is None, 'Portable ZIP failed CRC validation.'
+              names = set(package.namelist())
+              prefix = 'X-ray Report Studio/'
+              required = [
+                  prefix + 'X-ray Report Studio.exe',
+                  prefix + 'resources/app/dist/index.html',
+                  prefix + 'resources/app/electron/main.cjs',
+                  prefix + 'icudtl.dat',
+                  prefix + 'resources.pak',
+                  prefix + 'v8_context_snapshot.bin',
+              ]
+              missing = [name for name in required if name not in names]
+              assert not missing, 'Portable ZIP is missing files: ' + repr(missing)
+              metadata = json.loads(package.read(prefix + 'resources/app/package.json'))
+              assert metadata.get('version') == '0.4.55', 'Packaged app version is not 0.4.55.'
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          pathlib.Path('release/X-ray_Report_Studio_Windows_x64_0.4.55.sha256').write_text(
+              digest + '  X-ray_Report_Studio_Windows_x64.zip\n', encoding='ascii')
+          print(f'Portable ZIP verified: version 0.4.55, {archive.stat().st_size} bytes, SHA256 {digest}')
+          '@
+          $python | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XRS-0.4.55-Windows-Portable
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            x-ray-report-studio/release/X-ray_Report_Studio_Windows_x64.zip
+            x-ray-report-studio/release/X-ray_Report_Studio_Windows_x64_0.4.55.sha256
 
   publish:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && inputs.confirmation == 'PUBLISH-XRS-0.4.55' }}
