@@ -54,8 +54,20 @@ jobs:
           $electronExe = Join-Path $env:GITHUB_WORKSPACE 'x-ray-report-studio/node_modules/electron/dist/electron.exe'
           if (-not (Test-Path -LiteralPath $electronExe -PathType Leaf)) { throw "Electron runtime executable is missing: $electronExe" }
       - name: First-start confirmation and Windows shortcut handoff tests
+        id: first-start-tests
         if: steps.release-channel.outputs.updateHotfix == 'true'
-        run: node --test tests/install-state.test.mjs tests/windows-integration.test.mjs
+        shell: pwsh
+        run: |
+          $diagnostic = Join-Path $env:RUNNER_TEMP 'xrs-first-start-tests.txt'
+          node --test tests/install-state.test.mjs tests/windows-integration.test.mjs 2>&1 | Tee-Object -FilePath $diagnostic
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '## First-start updater test diagnostics' -Encoding utf8
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```text' -Encoding utf8
+            Get-Content -LiteralPath $diagnostic | Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding utf8
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```' -Encoding utf8
+            exit $testExit
+          }
       - name: Package and verify Stable 0.4.56 updater candidate
         if: steps.release-channel.outputs.stable056 == 'true'
         shell: pwsh
@@ -97,6 +109,13 @@ jobs:
       - name: Verified profile backup tests
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
         run: npm run test:preupdate-backup
+      - name: Upload synthetic first-start test diagnostics
+        if: always() && steps.first-start-tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-first-start-windows-diagnostics-${{ github.run_id }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/xrs-first-start-tests.txt
       - name: Parse Beta PowerShell scripts with Windows PowerShell 5.1
         if: steps.release-channel.outputs.beta == 'true'
         shell: powershell
