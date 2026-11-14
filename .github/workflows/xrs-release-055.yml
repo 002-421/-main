@@ -29,10 +29,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import json, os, re, urllib.request
+          import json, os, urllib.request
           repo = '002-421/-main'
           run_id = '43528607562'
           expected_sha = 'a7e6d44167bc986d74cefff03e45588788758469'
+          expected_workflow_id = 417418731
+          expected_workflow_path = '.github/workflows/xrs-09-release-0.4.55.yml'
+          expected_event = 'push'
           headers = {
               'Accept': 'application/vnd.github+json',
               'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
@@ -47,7 +50,9 @@ jobs:
           assert run.get('head_sha') == expected_sha, 'Windows candidate source SHA mismatch.'
           assert run.get('head_branch') == 'codex/xrs-09-local-upgrade', 'Windows candidate source branch mismatch.'
           assert run.get('status') == 'completed' and run.get('conclusion') in ('success', 'failure'), 'Windows candidate run is incomplete or cancelled.'
-          assert re.search(r'\.github/workflows/xrs-09-release-0\.4\.55\.yml@', run.get('path', '')), 'Unexpected workflow produced the candidate.'
+          assert run.get('workflow_id') == expected_workflow_id, 'Unexpected workflow ID produced the candidate.'
+          assert run.get('path') == expected_workflow_path, 'Unexpected workflow path produced the candidate.'
+          assert run.get('event') == expected_event, 'Unexpected event produced the candidate.'
           jobs = get('/actions/runs/' + run_id + '/jobs?per_page=100').get('jobs', [])
           steps = [step for job in jobs for step in job.get('steps', [])]
           failures = [step['name'] for step in steps if step.get('conclusion') == 'failure']
