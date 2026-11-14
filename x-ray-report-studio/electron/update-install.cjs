@@ -88,15 +88,22 @@ function verifySha256(bytes, expected) {
 }
 
 /** Install app files beside the running copy. The caller commits the shortcut only after smoke checks. */
-async function installUpdateArchive({ archive, currentRoot, version, extractArchive = extractWithTar, log = () => {} }) {
+async function installUpdateArchive({ archive, currentRoot, version, extractArchive = extractWithTar, createTemporaryDirectory = prefix => fs.mkdtemp(prefix), log = () => {} }) {
   if (!/^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/.test(String(version))) throw new Error('Некорректная версия обновления.');
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'XRayReportStudio_Update_'));
   const parent = path.dirname(currentRoot);
   const stage = path.join(parent, `.X-ray_Report_Studio_stage_${randomUUID()}`);
+  let temporary;
   let newRoot;
+  let phase = 'create-extraction-temp';
   try {
+    await log({ event: 'install-phase', phase });
+    temporary = await createTemporaryDirectory(path.join(os.tmpdir(), 'XRayReportStudio_Update_'));
+    phase = 'extract-archive';
+    await log({ event: 'install-phase', phase });
     await log({ event: 'extract-start' });
     await extractArchive(archive, temporary);
+    phase = 'validate-package';
+    await log({ event: 'install-phase', phase });
     const sourceApp = path.join(temporary, 'X-ray Report Studio Setup', 'app');
     if (!(await fs.stat(path.join(sourceApp, 'electron', 'main.cjs')).catch(() => null))) throw new Error('В архиве обновления отсутствуют файлы приложения.');
     const packageInfo = JSON.parse(await fs.readFile(path.join(sourceApp, 'package.json'), 'utf8'));
@@ -105,6 +112,8 @@ async function installUpdateArchive({ archive, currentRoot, version, extractArch
     const safeVersion = String(version);
     newRoot = path.join(parent, `App_${safeVersion}`);
     if (await fs.stat(newRoot).then(() => true, () => false)) newRoot = path.join(parent, `App_${safeVersion}_${randomUUID().slice(0, 8)}`);
+    phase = 'copy-electron-runtime';
+    await log({ event: 'install-phase', phase });
     await log({ event: 'runtime-copy-start' });
     await fs.cp(currentRoot, stage, {
       recursive: true, errorOnExist: true, force: false,
@@ -120,12 +129,12 @@ async function installUpdateArchive({ archive, currentRoot, version, extractArch
     await log({ event: 'install-folder-ready', version });
     return { root: newRoot, executable: path.join(newRoot, 'X-ray Report Studio.exe'), icon: path.join(newRoot, 'resources', 'app', 'dist', 'x-ray-report-studio.ico'), version };
   } catch (error) {
-    await log({ event: 'install-error', message: error.message });
+    try { await log({ event: 'install-error', phase, message: error.message, code: error.code, syscall: error.syscall }); } catch {}
     if (newRoot) await fs.rm(newRoot, { recursive: true, force: true }).catch(() => {});
     throw error;
   } finally {
     await fs.rm(stage, { recursive: true, force: true }).catch(() => {});
-    await fs.rm(temporary, { recursive: true, force: true }).catch(() => {});
+    if (temporary) await fs.rm(temporary, { recursive: true, force: true }).catch(() => {});
   }
 }
 

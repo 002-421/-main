@@ -2,7 +2,7 @@ name: XRS-07/XRS-08 Windows validation
 
 on:
   push:
-    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta]
+    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean]
   pull_request:
     paths:
       - 'x-ray-report-studio/**'
@@ -26,14 +26,45 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: x-ray-report-studio/package-lock.json
+      - name: Detect release channel from package version
+        id: release-channel
+        shell: pwsh
+        working-directory: x-ray-report-studio
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $isBeta = $version -match '-beta\.'
+          $sourceRef = if ($env:GITHUB_HEAD_REF) { $env:GITHUB_HEAD_REF } else { $env:GITHUB_REF_NAME }
+          $isStable056 = $version -eq '0.4.56' -and $sourceRef -eq 'codex/xrs-056-stable-clean'
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "beta=$($isBeta.ToString().ToLowerInvariant())" -Encoding utf8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "stable056=$($isStable056.ToString().ToLowerInvariant())" -Encoding utf8
       - run: npm ci
       - name: Install pinned Electron runtime
+        if: steps.release-channel.outputs.stable056 != 'true'
         run: npm run desktop:install
       - name: Install Chromium for tab lifecycle scenario
+        if: steps.release-channel.outputs.stable056 != 'true'
         run: npx playwright-core install chromium
       - run: npm run build
-      - run: npm test
+      - name: Package and verify Stable 0.4.56 updater candidate
+        if: steps.release-channel.outputs.stable056 == 'true'
+        shell: pwsh
+        run: |
+          python scripts/package_setup.py --candidate-output test-output/xrs-0.4.56 --candidate-version 0.4.56
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify_setup_package.py --zip test-output/xrs-0.4.56/X-ray_Report_Studio_Windows_Setup.zip --source-electron electron --version 0.4.56
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $archive = 'test-output/xrs-0.4.56/X-ray_Report_Studio_Windows_Setup.zip'
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          Set-Content -Path 'test-output/xrs-0.4.56/SHA256SUMS.txt' -Value "$hash  X-ray_Report_Studio_Windows_Setup.zip" -NoNewline
+          Write-Host "Stable setup ZIP SHA-256: $hash"
+      - name: Full unit suite
+        if: steps.release-channel.outputs.stable056 != 'true'
+        run: npm test
+      - name: Targeted Stable updater tests
+        if: steps.release-channel.outputs.stable056 == 'true'
+        run: node --test tests/update-channel.test.mjs tests/update-version.test.mjs tests/update-install.test.mjs tests/update-settings.test.mjs
       - name: Workspace recovery and tab isolation
+        if: steps.release-channel.outputs.stable056 != 'true'
         shell: pwsh
         run: |
           npm run test:tab-isolation
@@ -41,16 +72,22 @@ jobs:
           npm run test:workspace-recovery
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: DOCX, PDF and Electron editor integration
+        if: steps.release-channel.outputs.stable056 != 'true'
         run: npm run test:browser
       - name: Per-document Undo and Redo history across tabs and restart
+        if: steps.release-channel.outputs.stable056 != 'true'
         run: npm run test:history-browser
       - name: Word-oriented preview pagination with synthetic reports
+        if: steps.release-channel.outputs.stable056 != 'true'
         run: node tests/preview-pagination-browser.mjs
       - name: Export and preserve patient tab lifecycle (1, 2, 5, 12 tabs)
+        if: steps.release-channel.outputs.stable056 != 'true'
         run: npm run test:tab-lifecycle
       - name: Verified profile backup tests
+        if: steps.release-channel.outputs.stable056 != 'true'
         run: npm run test:preupdate-backup
       - name: Parse Beta PowerShell scripts with Windows PowerShell 5.1
+        if: steps.release-channel.outputs.beta == 'true'
         shell: powershell
         run: |
           $files = @('tests/Start-XRS-Beta.Tests.ps1', 'scripts/Start-XRS-Beta.ps1', 'scripts/XRS-PreUpdate-Backup.ps1')
@@ -62,11 +99,13 @@ jobs:
           }
           Write-Host 'PASS: Beta PowerShell scripts parse in Windows PowerShell.'
       - name: Beta onboarding with synthetic Windows profiles
+        if: steps.release-channel.outputs.beta == 'true'
         shell: pwsh
         run: |
           powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File tests/Start-XRS-Beta.Tests.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Package unpublished Windows Beta candidates
+        if: steps.release-channel.outputs.beta == 'true'
         shell: pwsh
         run: |
           python scripts/package_windows.py
@@ -77,8 +116,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git diff --exit-code -- downloads/latest.json
       - name: Packaged Beta EXE startup on Windows
+        if: steps.release-channel.outputs.beta == 'true'
         run: node tests/beta-portable-smoke.mjs
+      - name: Upload Stable 0.4.56 updater candidate
+        if: steps.release-channel.outputs.stable056 == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-0.4.56-windows-setup-candidate
+          if-no-files-found: error
+          path: |
+            x-ray-report-studio/test-output/xrs-0.4.56/X-ray_Report_Studio_Windows_Setup.zip
+            x-ray-report-studio/test-output/xrs-0.4.56/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
+        if: steps.release-channel.outputs.beta == 'true'
         with:
           name: xrs-08-windows-beta-0.4.55-beta.1
           if-no-files-found: error

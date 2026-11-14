@@ -17,9 +17,9 @@ function compareVersions(left, right) {
   return Math.sign(a.beta - b.beta);
 }
 
-function isUpdateAvailable(candidate, installed, channel = 'stable') {
+function isUpdateAvailable(candidate, installed) {
   const next = parseVersion(candidate), current = parseVersion(installed);
-  return Boolean(next && current && (channel === 'beta' || next.beta === null) && compareVersions(candidate, installed) > 0);
+  return Boolean(next && current && next.beta === null && compareVersions(candidate, installed) > 0);
 }
 
 module.exports = { parseVersion, compareVersions, isUpdateAvailable };

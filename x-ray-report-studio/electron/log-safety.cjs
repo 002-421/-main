@@ -4,7 +4,16 @@ function copyPrimitiveFields(value, allowed) {
 }
 
 function sanitizeUpdateLogEvent(event) {
-  return copyPrimitiveFields(event, ['event', 'applicationVersion', 'platform', 'currentVersion', 'targetVersion', 'version', 'bytes', 'files', 'schemaVersion', 'expected', 'actual', 'percent', 'stage', 'restored', 'errorCode']);
+  const safe = copyPrimitiveFields(event, ['event', 'applicationVersion', 'platform', 'currentVersion', 'targetVersion', 'version', 'bytes', 'files', 'schemaVersion', 'expected', 'actual', 'percent', 'stage', 'restored', 'errorCode', 'phase', 'code', 'syscall']);
+  const reasons = {
+    EACCES: 'Access denied', EPERM: 'Operation not permitted', EBUSY: 'Resource busy',
+    ENOSPC: 'Insufficient free space', ENOENT: 'File or directory not found',
+    EEXIST: 'File or directory already exists', EINVAL: 'Invalid file or argument',
+    ENAMETOOLONG: 'Path is too long', ENOTDIR: 'Expected a directory', EIO: 'Disk I/O error',
+    EROFS: 'Storage is read-only', ETIMEDOUT: 'Operation timed out',
+  };
+  if (reasons[safe.code]) safe.reason = reasons[safe.code];
+  return safe;
 }
 
 function sanitizeStartupLogEvent(event) {
