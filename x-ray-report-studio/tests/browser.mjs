@@ -164,7 +164,14 @@ try{
 
  await page.locator('#modality-select').selectOption('mri');
  await page.locator('#area-select').selectOption('head');
+ const previousHeadReportId=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
  await page.locator('[data-template="head-gm"]').click();
+ await page.waitForFunction(({previousId,templateId})=>{
+  const activeId=document.querySelector('.report-tab.active [data-report-select]')?.getAttribute('data-report-select');
+  const workspace=JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1')||'{}');
+  return Boolean(activeId&&activeId!==previousId&&workspace.activeId===activeId&&workspace.reports?.some(report=>report.id===activeId&&report.templateId===templateId));
+ },{previousId:previousHeadReportId,templateId:'head-gm'});
+ await field(patientId).waitFor({state:'visible'});
  const patientHint=await field(patientId).innerText();
  const selectedTemplateTitle=await page.locator('.template-card.selected strong').textContent();
  await field(patientId).evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,0);range.setEnd(node,1);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
@@ -444,8 +451,8 @@ try{
   reportText:document.querySelector('.report-content')?.innerText,
   reportHTML:document.querySelector('.report-content')?.outerHTML,
   templateFields:[...document.querySelectorAll('.report-content [data-template-field]')].map(field=>({id:field.getAttribute('data-field-id'),text:field.textContent,filled:field.getAttribute('data-filled')})),
-  rendererErrors:errors,
- })).catch(captureError=>({syntheticTest:true,captureError:String(captureError),rendererErrors:errors}));
+ })).catch(captureError=>({syntheticTest:true,captureError:String(captureError)}));
+ failureDom.rendererErrors=errors;
  await writeFile(path.join(output,'v3-failed-dom.json'),JSON.stringify(failureDom,null,2));
  await writeFile(path.join(output,'v3-failed-dom.html'),`<!doctype html><meta charset="utf-8"><title>Synthetic Electron failure</title>${failureDom.reportHTML??'<p>report DOM unavailable</p>'}`);
  const annotationData=JSON.stringify({detail,activeReportId:failureDom.activeReportId,tabs:failureDom.tabs,fields:failureDom.templateFields,reportText:failureDom.reportText?.slice(0,4000),rendererErrors:failureDom.rendererErrors});
