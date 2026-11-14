@@ -14,10 +14,8 @@ const electronOptions={...(process.env.ELECTRON_PATH?{executablePath:process.env
 const errors=[];
 let application=await _electron.launch(electronOptions);
 let page=await application.firstWindow();
-const initialChannel=await page.evaluate(()=>window.desktop.getUpdateChannel());
 const expectedApplicationVersion=JSON.parse(await readFile(path.join(root,'package.json'),'utf8')).version;
 assert.equal(initialChannel.version,expectedApplicationVersion);
-if(expectedApplicationVersion.includes('-beta.'))assert.equal(initialChannel.profile,'beta','prerelease app uses an isolated Beta profile');
 await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0]?.setSize(1500,1000));
 page.on('pageerror',error=>errors.push(error.message));
 const patientId='head-gm.patient', doctorId='HEAD.BASE.2.FIELD.0043';
@@ -129,9 +127,11 @@ try{
  console.log('PASS: editing a yellow template measurement removes the yellow fill and Undo restores it.');
 
  await page.locator('#settings').click();
- await page.locator('#update-channel-select').waitFor();
- await page.waitForFunction(channel=>document.querySelector('#update-channel-select')?.value===channel,initialChannel.channel);
- assert.equal(await page.locator('#beta-opt-in').isChecked(),initialChannel.channel==='beta');
+ await page.locator('#update-current-version').waitFor();
+ assert.equal(await page.locator('#update-current-version').textContent(),expectedApplicationVersion);
+ assert.equal(await page.locator('#check-updates').isVisible(),true,'update checks remain available manually');
+ assert.equal(await page.locator('#update-channel-select,#beta-opt-in,#auto-update').count(),0,'Stable/Beta switching and automatic checks are absent');
+ assert.equal(await page.locator('#rollback-update,#open-update-backups').count(),0,'extra updater controls are absent');
  await page.locator('.dialog [data-close]').first().click();
 
  await page.locator('#toggle-theme').click();

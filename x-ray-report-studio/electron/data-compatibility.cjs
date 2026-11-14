@@ -12,6 +12,7 @@ const APPLICATION_DATA_CONTRACTS = Object.freeze({
   '0.4.55': Object.freeze([CURRENT_DATA_CONTRACT]),
   // Beta uses a separate profile; the persisted report format is unchanged.
   '0.4.55-beta.1': Object.freeze([CURRENT_DATA_CONTRACT]),
+  '0.4.56': Object.freeze([CURRENT_DATA_CONTRACT]),
 });
 
 function applicationSupportsDataContract(applicationVersion, dataContract, schemaVersion = DATA_SCHEMA_VERSION) {

@@ -10,4 +10,5 @@ test('forward rollback release numbers are normal monotonic updates',()=>{
  assert.equal(isUpdateAvailable('0.4.53','0.4.54'),false);
  assert.equal(isUpdateAvailable('0.4.54','0.4.54'),false);
  assert.equal(isUpdateAvailable('0.4.x','0.4.54'),false);
+ assert.equal(isUpdateAvailable('0.4.57-beta.1','0.4.55'),false);
 });

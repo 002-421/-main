@@ -7,10 +7,8 @@ const crypto = require('node:crypto');
 const { pathToFileURL, fileURLToPath } = require('node:url');
 const { installUpdateArchive, verifySha256, writeShortcutAtomically } = require('./update-install.cjs');
 const { activateRendererUpdate, isUsableRenderer, smokeTestInstalledApp } = require('./live-update.cjs');
-const { createUserDataBackup } = require('./user-data-backup.cjs');
-const { CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema, canRollback } = require('./install-state.cjs');
-const { STABLE_MANIFEST, BETA_MANIFEST, selectedChannel, profileForLaunch, validateManifest, chooseUpdate } = require('./update-channel.cjs');
-const { changeUpdateChannel } = require('./channel-preference.cjs');
+const { CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema } = require('./install-state.cjs');
+const { STABLE_MANIFEST, validateManifest, chooseUpdate } = require('./update-channel.cjs');
 const { downloadHttps } = require('./update-download.cjs');
 const { sanitizeUpdateLogEvent, sanitizeStartupLogEvent } = require('./log-safety.cjs');
 const { summarizeFrame } = require('./startup-diagnostics.cjs');
@@ -34,21 +32,16 @@ app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu-compositing');
 app.commandLine.appendSwitch('disable-features', 'DirectComposition');
 
-// Channel preference is local to this Windows account. Beta always uses a
-// separate Chromium profile; a prerelease executable can never open Stable data.
-const channelSettingsFile = path.join(TEST_KIT_ROOT ? path.join(TEST_KIT_ROOT, 'AppData') : app.getPath('appData'), 'X-ray Report Studio Channel.json');
-let channelPreference = null;
-try { channelPreference = JSON.parse(fsSync.readFileSync(channelSettingsFile, 'utf8')); } catch { /* Default to Stable, or Beta for a prerelease executable. */ }
-let activeProfile = profileForLaunch(app.getVersion(), channelPreference);
-let activeUpdateChannel = selectedChannel(channelPreference?.channel ?? (activeProfile === 'beta' ? 'beta' : 'stable'));
+// Stable releases use the established profile. Channel selection is not part
+// of the public updater; test-kit runs can still isolate their profile below.
 if (TEST_KIT_ROOT) {
   app.setPath('appData', path.join(TEST_KIT_ROOT, 'AppData'));
   if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(TEST_KIT_ROOT, 'Profile'));
 } else if (!INVALID_TEST_KIT_LAUNCH) {
   if (!app.commandLine.hasSwitch('user-data-dir'))
-    app.setPath('userData', path.join(app.getPath('appData'), activeProfile === 'beta' ? 'MRI Report Studio Beta' : 'MRI Report Studio'));
+    app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
 }
-if (activeProfile === 'beta' || TEST_KIT_ROOT) app.setPath('sessionData', path.join(app.getPath('userData'), 'Session Data'));
+if (TEST_KIT_ROOT) app.setPath('sessionData', path.join(app.getPath('userData'), 'Session Data'));
 app.setName('X-ray Report Studio');
 let mainWindow;
 let rendererUnresponsive = false;
@@ -58,9 +51,7 @@ let startupLogQueue = Promise.resolve();
 let startupWatchdog;
 let startupFailureDialogOpen = false;
 let startupRecoveryAttempted = false;
-const sharedDictionaryDir = activeProfile === 'beta' && !TEST_KIT_ROOT
-  ? path.join(app.getPath('userData'), 'Shared Dictionary')
-  : process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR
+const sharedDictionaryDir = process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR
   ? path.resolve(process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR)
   : TEST_KIT_ROOT
     ? path.join(TEST_KIT_ROOT, 'Shared Dictionary')
@@ -69,7 +60,6 @@ const sharedDictionaryFile = path.join(sharedDictionaryDir, 'dictionary.json');
 const personalDictionaryFile = path.join(app.getPath('userData'), 'dictionary.json');
 let dictionaryQueue = Promise.resolve();
 let updateInstalling = false;
-let latestUpdateLogPath = '';
 let activeApplicationVersion = app.getVersion();
 let pendingRendererReady;
 let liveUpdateInProgress = false;
@@ -171,7 +161,6 @@ async function createUpdateLogger() {
   const directory = path.join(app.getPath('userData'), 'logs');
   await fs.mkdir(directory, { recursive: true });
   const filename = path.join(directory, `update-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
-  latestUpdateLogPath = filename;
   let queue = Promise.resolve();
   const log = entry => {
     const safe = sanitizeUpdateLogEvent(entry);
@@ -182,7 +171,6 @@ async function createUpdateLogger() {
   return { filename, log };
 }
 
-function backupRoot() { return path.join(app.getPath('appData'), 'X-ray Report Studio Backups'); }
 function shortcutLocation() { return TEST_KIT_ROOT ? path.join(TEST_KIT_ROOT, 'Shortcuts', 'X-ray Report Studio.lnk') : path.join(app.getPath('desktop'), 'X-ray Report Studio.lnk'); }
 async function pointShortcutTo(executable, root) {
   const icon = path.join(root, 'resources', 'app', 'dist', 'x-ray-report-studio.ico');
@@ -246,45 +234,6 @@ async function initializeInstallState() {
   await writeJsonAtomic(installStateFile, startupInstallState);
 }
 
-async function openLatestUpdateLog() {
-  const directory = path.join(app.getPath('userData'), 'logs');
-  let filename = latestUpdateLogPath;
-  if (!filename || !(await fs.stat(filename).catch(() => null))) {
-    const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
-    const files = await Promise.all(entries.filter(entry => entry.isFile() && /^update-.*\.log$/.test(entry.name)).map(async entry => {
-      const candidate = path.join(directory, entry.name);
-      return { candidate, mtime: (await fs.stat(candidate)).mtimeMs };
-    }));
-    filename = files.sort((left, right) => right.mtime - left.mtime)[0]?.candidate ?? '';
-  }
-  if (!filename) throw new Error('Журнал обновлений ещё не создан.');
-  const error = await shell.openPath(filename);
-  if (error) throw new Error(`Не удалось открыть журнал: ${error}`);
-}
-
-async function getRollbackStatus() {
-  try {
-    const state = await readJson(installStateFile, null);
-    const data = await ensureDataSchema(dataSchemaFile, CURRENT_DATA_SCHEMA);
-    if (state?.status !== 'stable') return { available: false, reason: 'Для текущей установки ещё не подтверждён первый успешный запуск.' };
-    const result = canRollback({ installState: state, dataState: data, currentRoot: activeApplicationRoot });
-    if (!result.available) return result;
-    if (!(await fs.stat(result.previousExecutable).catch(() => null))) return { available: false, reason: 'Файлы предыдущей версии не найдены.' };
-    return { available: true, currentVersion: result.currentVersion, previousVersion: result.previousVersion };
-  } catch {
-    return { available: false, reason: 'Не удалось подтвердить совместимость формата пользовательских данных.' };
-  }
-}
-
-async function createVerifiedUserDataBackup() {
-  await dictionaryQueue;
-  await session.defaultSession.flushStorageData();
-  return createUserDataBackup({
-    userDataDir: app.getPath('userData'), sharedDictionaryFile,
-    backupRoot: backupRoot(), allowedBackupRoot: app.getPath('appData'), forbiddenRoots: [activeApplicationRoot], version: activeApplicationVersion,
-  });
-}
-
 async function renderPdf() {
   mainWindow.setBackgroundColor('#ffffff');
   try {
@@ -313,35 +262,25 @@ async function downloadBuffer(url, limit, redirects = 0, onProgress = () => {}) 
   }
   return downloadHttps(url, limit, redirects, onProgress);
 }
-async function readUpdateManifest(kind) {
+async function readUpdateManifest() {
   let bytes;
   if (TEST_KIT_ROOT) {
-    bytes = await fs.readFile(path.join(TEST_KIT_ROOT, 'Updates', kind === 'beta' ? 'beta.json' : 'latest.json'));
+    bytes = await fs.readFile(path.join(TEST_KIT_ROOT, 'Updates', 'latest.json'));
   } else {
-    const manifestUrl = new URL(kind === 'beta' ? BETA_MANIFEST : STABLE_MANIFEST);
+    const manifestUrl = new URL(STABLE_MANIFEST);
     manifestUrl.searchParams.set('check', `${Date.now()}-${crypto.randomUUID()}`);
     bytes = await downloadBuffer(manifestUrl.toString(), 32_000);
   }
   let manifest; try { manifest=JSON.parse(bytes.toString('utf8')); } catch { throw new Error('Файл обновлений повреждён.'); }
-  return validateManifest(manifest, kind, TEST_KIT_ROOT);
+  return validateManifest(manifest, TEST_KIT_ROOT);
 }
 async function getUpdateManifest() {
-  if (activeUpdateChannel === 'stable') return chooseUpdate('stable', activeApplicationVersion, [await readUpdateManifest('stable')]);
-  const outcomes = await Promise.allSettled([readUpdateManifest('stable'), readUpdateManifest('beta')]);
-  const candidates = outcomes.filter(result => result.status === 'fulfilled').map(result => result.value);
-  if (!candidates.length) throw outcomes[0].reason;
-  return chooseUpdate(activeUpdateChannel, activeApplicationVersion, candidates);
+  return chooseUpdate('stable', activeApplicationVersion, [await readUpdateManifest()]);
 }
 
 app.whenReady().then(async () => {
   if (INVALID_TEST_KIT_LAUNCH) {
     dialog.showErrorBox('XRS-05 test kit', 'Запустите эту тестовую копию через Run-Test-App.cmd. Профиль и рабочий ярлык не были открыты.');
-    app.quit();
-    return;
-  }
-  if (app.isPackaged && activeProfile === 'beta' && !TEST_KIT_ROOT && !app.commandLine.hasSwitch('user-data-dir')
-      && fsSync.existsSync(path.join(app.getPath('appData'), 'MRI Report Studio')) && channelPreference?.onboarded !== true) {
-    dialog.showErrorBox('X-ray Report Studio Beta', 'Перед первым запуском Beta закройте рабочую версию и запустите Start-XRS-Beta.cmd из тестового комплекта. Он проверит резервную копию, затем откроет отдельный профиль.');
     app.quit();
     return;
   }
@@ -503,64 +442,9 @@ app.whenReady().then(async () => {
     requireMain(event);
     return getUpdateManifest();
   });
-  ipcMain.handle('updates:channel', async event => {
-    requireMain(event);
-    return { channel: activeUpdateChannel, profile: activeProfile, version: activeApplicationVersion };
-  });
-  ipcMain.handle('updates:set-channel', async (event, requested) => {
-    requireMain(event);
-    if (updateInstalling) throw new Error('Дождитесь завершения установки обновления.');
-    const result = await changeUpdateChannel({ requested, current: activeUpdateChannel, profile: activeProfile,
-      backup: async () => {
-      const betaRoot = path.join(app.getPath('appData'), 'MRI Report Studio Beta');
-      const existing = await fs.lstat(betaRoot).catch(error => error.code === 'ENOENT' ? null : Promise.reject(error));
-      if (existing && (!existing.isDirectory() || existing.isSymbolicLink())) throw new Error('Каталог профиля Beta имеет небезопасный тип.');
-      await createVerifiedUserDataBackup();
-      }, persist: preference => writeJsonAtomic(channelSettingsFile, preference) });
-    activeUpdateChannel = result.channel;
-    if (result.restarting) setTimeout(() => { app.relaunch(); app.exit(0); }, 250);
-    return result;
-  });
   ipcMain.handle('app:version', async event => {
     requireMain(event);
     return activeApplicationVersion;
-  });
-  ipcMain.handle('updates:open-log', async event => {
-    requireMain(event);
-    return openLatestUpdateLog();
-  });
-  ipcMain.handle('updates:rollback-info', async event => {
-    requireMain(event);
-    return getRollbackStatus();
-  });
-  ipcMain.handle('updates:open-backups', async event => {
-    requireMain(event);
-    await fs.mkdir(backupRoot(), { recursive: true });
-    const error = await shell.openPath(backupRoot());
-    if (error) throw new Error(`Не удалось открыть папку резервных копий: ${error}`);
-  });
-  ipcMain.handle('updates:rollback', async event => {
-    requireMain(event);
-    if (process.platform !== 'win32') throw new Error('Мягкий откат ярлыка поддерживается в Windows-версии приложения.');
-    if (updateInstalling) throw new Error('Обновление или откат уже выполняется.');
-    updateInstalling = true;
-    let state, previous, current;
-    try {
-    const info = await getRollbackStatus();
-    if (!info.available) throw new Error(info.reason);
-    state = await readJson(installStateFile, null);
-    const backup = await createVerifiedUserDataBackup();
-    previous = state.previous; current = state.current;
-      await pointShortcutTo(previous.executable, previous.root);
-      await writeJsonAtomic(installStateFile, { ...state, status: 'pending-first-start', launchAttempts: 0, current: previous, previous: current, lastRollbackAt: new Date().toISOString() });
-      app.relaunch({ execPath: previous.executable, args: [`--user-data-dir=${app.getPath('userData')}`] });
-      app.exit(0);
-      return { starting: true, backupFiles: backup.files };
-    } catch (error) {
-      if (current?.executable && current?.root) await pointShortcutTo(current.executable, current.root).catch(() => {});
-      if (state) await writeJsonAtomic(installStateFile, state).catch(() => {});
-      throw error;
-    } finally { updateInstalling = false; }
   });
   ipcMain.handle('updates:install', async event => {
     requireMain(event);
@@ -601,10 +485,8 @@ app.whenReady().then(async () => {
       sendProgress({stage:'installing',loaded:archive.length,total:archive.length,percent:100});
       updatePhase = 'data-schema';
       currentDataState = await ensureDataSchema(dataSchemaFile, CURRENT_DATA_SCHEMA);
-      updatePhase = 'user-data-backup';
-      await log({ event: 'user-data-backup-start' });
-      const userBackup=await createVerifiedUserDataBackup();
-      await log({ event: 'user-data-backup-verified', bytes: userBackup.bytes, files: userBackup.files });
+      // The update replaces application files side by side; the userData profile stays in place.
+      await log({ event: 'user-data-preserved-in-place' });
       const previousRoot=activeApplicationRoot,previousVersion=activeApplicationVersion;
       const previousState=await readJson(installStateFile,null);
       if (previousState && (previousState.status !== 'stable' || !previousState.current || path.resolve(previousState.current.root) !== path.resolve(previousRoot)))
