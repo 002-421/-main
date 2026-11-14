@@ -252,24 +252,25 @@ jobs:
           python3 - <<'PY'
           import hashlib,json,os,pathlib,time,urllib.request
           version=os.environ['RELEASE_VERSION']; temp=pathlib.Path(os.environ['RUNNER_TEMP'])
-          expected=(temp/'xrs-candidate-sha256.txt').read_text().strip(); base='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/'
-          for name in ['X-ray_Report_Studio_Windows_Setup.zip',f'X-ray_Report_Studio_Windows_Setup-{version}.zip']:
-              ok=False
-              for i in range(12):
-                  try:
-                      with urllib.request.urlopen(base+name+'?final='+os.environ['GITHUB_RUN_ID']+'-'+str(i),timeout=120) as r:data=r.read()
-                      if hashlib.sha256(data).hexdigest()==expected:ok=True;break
-                  except Exception as e: print('Final archive propagation pending:',type(e).__name__)
-                  time.sleep(10)
-              assert ok, f'Published ZIP did not match candidate: {name}'
-          url='https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json'; ok=False
-          for i in range(12):
+          expected=(temp/'xrs-candidate-sha256.txt').read_text().strip(); run_id=os.environ['GITHUB_RUN_ID']
+          base='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/'
+          url='https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json'
+          verified=False
+          # GitHub Raw advertises max-age=300 and may ignore query strings in its cache key.
+          # Keep the verified prior version active while the bounded cache window expires.
+          for attempt in range(42):
               try:
-                  with urllib.request.urlopen(url+'?final='+os.environ['GITHUB_RUN_ID']+'-'+str(i),timeout=60) as r:m=json.load(r)
-                  if m.get('version')==version and m.get('sha256')==expected and m.get('url','').endswith(f'X-ray_Report_Studio_Windows_Setup-{version}.zip'):ok=True;break
-              except Exception as e: print('Manifest propagation pending:',type(e).__name__)
+                  archive_hashes=[]
+                  for name in ['X-ray_Report_Studio_Windows_Setup.zip',f'X-ray_Report_Studio_Windows_Setup-{version}.zip']:
+                      with urllib.request.urlopen(base+name+'?release-check='+run_id+'-'+str(attempt),timeout=120) as r:data=r.read()
+                      archive_hashes.append(hashlib.sha256(data).hexdigest())
+                  with urllib.request.urlopen(url+'?release-check='+run_id+'-'+str(attempt),timeout=60) as r:manifest=json.load(r)
+                  verified=(archive_hashes==[expected,expected] and manifest.get('version')==version and manifest.get('sha256')==expected and manifest.get('url','').endswith(f'X-ray_Report_Studio_Windows_Setup-{version}.zip'))
+                  if verified:break
+                  print('Waiting for Raw CDN cache expiry; public manifest version:',manifest.get('version'),'canonical ZIP hash matches:',archive_hashes[0]==expected,flush=True)
+              except Exception as e:print('Final public verification pending:',type(e).__name__,flush=True)
               time.sleep(10)
-          assert ok, 'Public Stable manifest did not activate the verified release'
+          assert verified,'Public Stable manifest and ZIP did not match after the bounded CDN cache window'
           print(f'RELEASED Stable {version}; candidate SHA-256 {expected}; previous ZIP and manifest backup retained.')
           PY
       - name: Restore previous Stable manifest after activation failure
