@@ -35,8 +35,10 @@ function forms(parses:MorphParse[],targets:MorphParse[],withCase=true){
 }
 
 /** Analyze every word, then check local grammatical dependencies against all possible parses. */
-export async function morphologicalIssues(text:string):Promise<ProofIssue[]> {
+export async function morphologicalIssues(text:string,signal?:AbortSignal):Promise<ProofIssue[]> {
+  signal?.throwIfAborted();
   const analyze=await loadMorphology();
+  signal?.throwIfAborted();
   const tokens:Token[]=[];
   for(const match of text.matchAll(/[А-Яа-яЁё]+(?:[-‑][А-Яа-яЁё]+)*/gu)){
     const word=match[0],key=word.toLocaleLowerCase('ru');
@@ -48,7 +50,7 @@ export async function morphologicalIssues(text:string):Promise<ProofIssue[]> {
       if(cache.size>20000)cache.clear();cache.set(key,parses);
     }
     tokens.push({word,start:match.index!,end:match.index!+word.length,parses});
-    if(tokens.length%150===0)await new Promise(resolve=>setTimeout(resolve,0));
+    if(tokens.length%150===0){await new Promise(resolve=>setTimeout(resolve,0));signal?.throwIfAborted();}
   }
   const issues:ProofIssue[]=[];
   const joined=(left:Token,right:Token)=>/^[ \t\u00a0]+$/.test(text.slice(left.end,right.start));
@@ -74,6 +76,7 @@ export async function morphologicalIssues(text:string):Promise<ProofIssue[]> {
   };
   const government:Record<string,string[]>={без:['gent'],для:['gent'],от:['gent'],до:['gent'],из:['gent'],около:['gent'],возле:['gent'],согласно:['datv'],благодаря:['datv'],вопреки:['datv'],при:['loct'],перед:['ablt'],над:['ablt'],к:['datv'],у:['gent'],после:['gent'],вокруг:['gent'],в:['loct','accs'],на:['loct','accs'],о:['loct'],об:['loct'],по:['datv','loct'],под:['ablt','accs'],за:['ablt','accs'],с:['gent','ablt']};
   for(let i=0;i<tokens.length;i++){
+    if(i>0&&i%150===0){await new Promise(resolve=>setTimeout(resolve,0));signal?.throwIfAborted();}
     const noun=tokens[i];
     let nounParses=modifier(noun).length&&!noun.parses[0]?.tag.NOUN?[]:kinds(noun,'NOUN');
     if(modifier(noun).length){
@@ -141,5 +144,6 @@ export async function morphologicalIssues(text:string):Promise<ProofIssue[]> {
     }
     if(issues.length>=100)break;
   }
+  signal?.throwIfAborted();
   return issues;
 }

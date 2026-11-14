@@ -6,10 +6,14 @@ import { hasYellowFields } from './export-validation';
 import { paginateBrowserPreview } from './preview-pages';
 import { openStickyNote } from './sticky-note';
 import { addReportSeparators } from './report-separators';
-const prepareInlineDocument = (doc: RichNode, trackOriginal = true) => prepareInlineDocumentBase(addReportSeparators(doc), trackOriginal);
+const prepareInlineDocument = (doc: RichNode, trackOriginal = true) => prepareInlineDocumentBase(doc.content?.some(node=>node.type==='reportSection')?doc:addReportSeparators(doc), trackOriginal);
 import packageInfo from '../package.json' with { type: 'json' };
 import { canRedoReport, canUndoReport, configureReportHistoryDepth, getReportHistory, REPORT_HISTORY_DEPTHS, restoreReportHistory, runReportHistoryCommand, sanitizeReportHistory, setDefaultReportHistoryDepth, type ReportHistoryDepth, type StoredReportHistory } from './report-history';
-import { Selection } from '@tiptap/pm/state';
+import { EditorState, Selection } from '@tiptap/pm/state';
+import { ReviewEngine, TrackChangesEngine, LocalAIProvider, reviewCategories, categoryGroup, type ReviewCategory } from './ai-review';
+import { applyReviewSuggestion, highlightReviewSuggestion } from './ai-review-editor';
+import { structurePreparedBuiltin } from './ai-review-structure';
+import { planManualMigration, createMigrationBackup, readMigrationBackup, migrationBackupKeys, type ManualBoundaries } from './ai-review-migration';
 import DOMPurify from 'dompurify';
 import { makeEditor } from './editor';
 import { prepareInlineDocument as prepareInlineDocumentBase, initializeTemplateTracking, promoteInlineTemplate, resetInlineTemplate, collectInlineFields, countUnchangedParts, setReviewHighlights } from './inline-fields';
@@ -100,7 +104,7 @@ function defaultDoctor(doc:RichNode):RichNode {
   let applied=false;
   const walk=(n:RichNode)=>{if(n.content)n.content=n.content.filter(child=>{const m=fieldMark(child);if(m?.attrs?.id===DOCTOR_FIELD_ID&&child.type==='text'){if(applied)return false;applied=true;child.text=settings.doctor.trim();m.attrs={...m.attrs,filled:true};}walk(child);return true;});};walk(doc);return doc;
 }
-function newDocument(id:string) { return justifyDescription(defaultDoctor(prepareInlineDocument(initializeReportFooter(resetInlineTemplate(highlightDeletionNotes(separateRecommendations(compactTemplateTables(overrides[id]??makeTemplateDocument(id))))))))); }
+function newDocument(id:string) { const doc=justifyDescription(defaultDoctor(prepareInlineDocument(initializeReportFooter(resetInlineTemplate(highlightDeletionNotes(separateRecommendations(compactTemplateTables(overrides[id]??makeTemplateDocument(id)))))))));return !overrides[id]?structurePreparedBuiltin(id,doc):doc; }
 let initial = newDocument(activeTemplateId);
 try {
   const raw=read<any>(KEYS.draft,null);
@@ -254,6 +258,7 @@ function saveLocal():boolean {
   $('#save-state').textContent='Сохранено на компьютере';return true;
  }catch{ $('#save-state').textContent='Не сохранено';toast('Не удалось сохранить локальный черновик. Сохраните документ Word.',true);return false; }
 }
+function restoreMigrationExactly(doc:RichNode) { const node=editor.schema.nodeFromJSON(prepareInlineDocumentBase(doc));node.check();suppress=true;try{editor.view.updateState(EditorState.create({schema:editor.schema,doc:node,plugins:editor.state.plugins}));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
 function profileForTemplate() { const area=reportTemplates.find(t=>t.id===activeTemplateId)?.areaId;return area==='head'?'brain':'custom'; }
 function reportTitle(id:string,doc:RichNode){const template=reportTemplates.find(t=>t.id===id);return template?titleWithStudySide(template.title,overrides[id]??template.doc,doc):'Исследование';}
 function renderCounts() {
@@ -308,6 +313,119 @@ document.querySelectorAll<HTMLElement>('[data-block-filter]').forEach(b=>b.oncli
 
 function dialog(title:string,body:string,footer='') {closeDialog();const overlay=document.createElement('div');overlay.className='dialog-overlay';overlay.innerHTML=`<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><header><h2 id="dialog-title">${esc(title)}</h2><button data-close aria-label="Закрыть">×</button></header><div class="dialog-body">${body}</div>${footer?`<footer>${footer}</footer>`:''}</section>`;document.body.append(overlay);overlay.addEventListener('click',e=>{if(e.target===overlay||(e.target as HTMLElement).closest('[data-close]'))closeDialog();});overlay.addEventListener('keydown',e=>{if(e.key==='Tab'){const nodes=[...overlay.querySelectorAll<HTMLElement>('button,input,textarea,select')].filter(n=>!n.hasAttribute('disabled'));if(e.shiftKey&&document.activeElement===nodes[0]){e.preventDefault();nodes.at(-1)?.focus();}else if(!e.shiftKey&&document.activeElement===nodes.at(-1)){e.preventDefault();nodes[0]?.focus();}}});setTimeout(()=>overlay.querySelector<HTMLElement>('input,textarea,button')?.focus(),0);return overlay;}
 function closeDialog(){$('.dialog-overlay')?.remove();}
+// Experimental local prototype. Existing user documents are never migrated automatically.
+{
+  const trigger=document.createElement('button');
+  trigger.className='btn';trigger.textContent='AI Review';trigger.id='ai-review-open';
+  document.querySelector('.top-actions')?.append(trigger);
+  const migrateButton=document.createElement('button');migrateButton.className='btn';migrateButton.id='ai-migrate-open';migrateButton.textContent='Границы протокола';document.querySelector('.top-actions')?.append(migrateButton);
+  const savedMigrationMatches=(tabId:string,doc:RichNode)=>{try{const stored=JSON.parse(localStorage.getItem(KEYS.workspace)??'null');return stored?.activeId===tabId&&JSON.stringify(stored.reports?.find((r:OpenReport)=>r.id===tabId)?.doc)===JSON.stringify(doc);}catch{return false;}};
+  const showMigration=()=>{
+    if(templateMode){toast('Завершите редактирование шаблона.',true);return;}
+    const tabId=activeReportId,templateId=activeTemplateId,original=json(),nodes=original.content??[];
+    let already=false;try{already=planManualMigration(original).status==='already-structured';}catch{/* A flat or partially structured document still needs review. */}
+    const partial=nodes.some(n=>n.type==='reportSection')&&!already;
+    const options='<option value="">Выберите первый абзац блока</option>'+nodes.map((node,index)=>`<option value="${index}">${index+1}: ${esc(plain(node).replace(/\s+/g,' ').slice(0,95))}</option>`).join('');
+    const markup=already?'<p>Документ уже содержит структурные границы. Повторная миграция не требуется.</p>':partial?'<p>Документ частично размечен или содержит текст вне секций. Исправьте границы вручную в копии документа.</p>':`<p>Назначьте первый абзац описания, заключения и блока подписи. Проверьте полный текст каждого блока перед применением.</p><label>Начало описания<select id="migration-description">${options}</select></label><label>Начало заключения<select id="migration-conclusion">${options}</select></label><label>Начало рекомендаций и подписи<select id="migration-signature">${options}</select></label><div id="migration-preview"></div><label><input id="migration-confirm" type="checkbox"> Я проверил(а) границы всех четырёх блоков</label>`;
+    const d=dialog('Границы AI Review',markup+'<div id="migration-backups"></div>',`<button class="btn" data-close>Закрыть</button>${already||partial?'':'<button class="btn primary" id="migration-apply" disabled>Создать копию и применить</button>'}`);
+    const preview=d.querySelector<HTMLElement>('#migration-preview');
+    const apply=d.querySelector<HTMLButtonElement>('#migration-apply');
+    const selected=():ManualBoundaries|null=>{
+      const values=['description','conclusion','signature'].map(id=>(d.querySelector<HTMLSelectElement>(`#migration-${id}`)?.value??''));
+      return values.some(v=>v==='')?null:{description:Number(values[0]),conclusion:Number(values[1]),signature:Number(values[2])};
+    };
+    const update=()=>{
+      if(!preview||!apply)return;
+      preview.replaceChildren();apply.disabled=true;
+      const limits=selected();if(!limits)return;
+      try{
+        const plan=planManualMigration(original,limits);
+        for(const section of plan.document.content??[]){const heading=document.createElement('strong');heading.textContent=String(section.attrs?.title??'');const body=document.createElement('pre');body.textContent=plain(section);body.style.whiteSpace='pre-wrap';body.style.maxHeight='180px';body.style.overflow='auto';preview.append(heading,body);}
+        apply.disabled=!(d.querySelector<HTMLInputElement>('#migration-confirm')?.checked);
+      }catch{preview.textContent='Границы пересекаются или оставляют пустой блок.';}
+    };
+    d.querySelectorAll<HTMLSelectElement>('select').forEach(el=>el.onchange=update);
+    const confirm=d.querySelector<HTMLInputElement>('#migration-confirm');if(confirm)confirm.onchange=update;
+    if(apply)apply.onclick=async()=>{
+      const limits=selected();if(!limits||!confirm?.checked||activeReportId!==tabId||JSON.stringify(json())!==JSON.stringify(original)){toast('Документ или выбор границ изменился. Повторите проверку.',true);return;}
+      apply.disabled=true;let backupKey='';const previousDirty=changedSinceOpen;
+      try{
+        const plan=planManualMigration(original,limits);
+        editor.schema.nodeFromJSON(plan.document).check();
+        backupKey=await createMigrationBackup(localStorage,tabId,templateId,original);
+        if(activeReportId!==tabId||JSON.stringify(json())!==JSON.stringify(original))throw new Error('Документ изменился после резервного копирования');
+        restoreMigrationExactly(plan.document);
+        const migrated=json();
+        if(JSON.stringify(migrated.content?.slice(0,4).flatMap(n=>n.content??[]))!==JSON.stringify(original.content))throw new Error('Миграция изменила узлы документа');
+        changedSinceOpen=true;
+        if(!saveLocal()||!savedMigrationMatches(tabId,migrated))throw new Error('Результат миграции не сохранился');
+        closeDialog();renderReportTabs();toast('Границы сохранены. Исходный документ доступен в резервных копиях.');
+      }catch{
+        try{const backup=backupKey?await readMigrationBackup(localStorage,backupKey,tabId):null;restoreMigrationExactly(backup?.doc??original);changedSinceOpen=previousDirty;saveLocal();}catch{restoreMigrationExactly(original);changedSinceOpen=previousDirty;saveLocal();}
+        toast('Миграция отменена. Проверьте доступность хранилища и резервной копии.',true);
+        apply.disabled=false;
+      }
+    };
+    const backups=d.querySelector<HTMLElement>('#migration-backups')!;
+    const available=migrationBackupKeys(localStorage);
+    if(available.length){const restoreButton=document.createElement('button');restoreButton.className='btn';restoreButton.textContent='Восстановить оригинал из последней копии';backups.append(restoreButton);restoreButton.onclick=async()=>{
+      if(activeReportId!==tabId||!window.confirm('Восстановить исходный документ? Текущая версия также будет сохранена в отдельной резервной копии.'))return;
+      const current=json();let source:RichNode;
+      try{const candidates=await Promise.all(available.map(key=>readMigrationBackup(localStorage,key,tabId).then(record=>({key,record})).catch(()=>null)));const found=candidates.reverse().find(x=>x?.record.templateId===templateId);if(!found)throw new Error('Нет проверенной копии');source=found.record.doc;editor.schema.nodeFromJSON(source).check();await createMigrationBackup(localStorage,tabId,templateId,current);restoreMigrationExactly(source);changedSinceOpen=true;if(!saveLocal()||!savedMigrationMatches(tabId,json()))throw new Error('Не удалось сохранить восстановление');closeDialog();toast('Исходный документ восстановлен.');}catch{restoreMigrationExactly(current);saveLocal();toast('Восстановление не выполнено. Проверьте резервные копии.',true);}
+    };}
+  };
+  migrateButton.onclick=showMigration;
+  const tracks=new TrackChangesEngine();
+  trigger.onclick=()=>{
+    const available=new Set<ReviewCategory>(reviewCategories.map(([id])=>id));
+    const stored=read<unknown>('xrs.ai-review.categories.v1',[...available]);
+    const categories=new Set<ReviewCategory>((Array.isArray(stored)?stored:[...available]).filter((id):id is ReviewCategory=>available.has(id as ReviewCategory)));
+    const experimental=new Set<ReviewCategory>(['terminology','consistency','clinical']);
+    const choices=reviewCategories.map(([id,label])=>`<label><input type="checkbox" data-ai-category="${id}" ${categories.has(id)?'checked':''}> ${label}${experimental.has(id)?' <span data-ai-experimental="true">Экспериментальная проверка</span>':''}</label>`).join('');
+    const d=dialog('AI Review', `<label>Режим <select id="ai-mode"><option value="local">Локальная проверка</option><option value="cloud" disabled>Облачный ИИ (отключён)</option></select></label><fieldset><legend>Категории проверки</legend>${choices}</fieldset><p>Локальные правила ограничены и не подтверждают клиническую точность. Категории с пометкой «Экспериментальная проверка» не являются клинически валидированными. Медицинские замечания не исправляют документ автоматически; решение принимает врач.</p><div id="ai-results"></div>`, '<button class="btn" data-close>Закрыть</button><button class="btn" id="ai-cancel" disabled>Отменить проверку</button><button class="btn primary" id="ai-check">Проверить протокол</button>');
+    let currentCheck:AbortController|undefined;
+    const checkButton=d.querySelector<HTMLButtonElement>('#ai-check')!;
+    const cancelButton=d.querySelector<HTMLButtonElement>('#ai-cancel')!;
+    cancelButton.onclick=()=>currentCheck?.abort();
+    d.querySelector<HTMLButtonElement>('[data-close]')?.addEventListener('click',()=>currentCheck?.abort());
+    d.querySelectorAll<HTMLInputElement>('[data-ai-category]').forEach(input=>input.onchange=()=>{
+      const selected=[...d.querySelectorAll<HTMLInputElement>('[data-ai-category]:checked')].map(el=>el.dataset.aiCategory!);
+      try{localStorage.setItem('xrs.ai-review.categories.v1',JSON.stringify(selected));}catch{toast('Не удалось сохранить категории проверки.',true);}
+    });
+    checkButton.onclick=async()=>{
+      const output=d.querySelector<HTMLElement>('#ai-results')!;
+      output.textContent='Проверка…';
+      currentCheck?.abort();currentCheck=new AbortController();
+      const signal=currentCheck.signal;
+      checkButton.disabled=true;cancelButton.disabled=false;
+      try {
+        const reportId=activeReportId;
+        const snapshot=JSON.stringify(json());
+        const selected=new Set<ReviewCategory>([...d.querySelectorAll<HTMLInputElement>('[data-ai-category]:checked')].map(el=>el.dataset.aiCategory as ReviewCategory));
+        const result=await new ReviewEngine(new LocalAIProvider()).review(json(),selected,signal);
+        signal.throwIfAborted();
+        if(reportId!==activeReportId||snapshot!==JSON.stringify(json())){output.textContent='Документ изменился. Повторите проверку.';return;}
+        tracks.set(reportId,result.suggestions);
+        output.replaceChildren();
+        if(!result.suggestions.length)output.textContent='Замечаний не найдено.';
+        for(const item of result.suggestions){
+          const row=document.createElement('div');row.className='notice';
+          const title=document.createElement('p');title.textContent=`${reviewCategories.find(([id])=>id===categoryGroup(item.category))?.[1]??item.category}: ${item.explanation}`;
+          const excerpt=document.createElement('p');excerpt.textContent=`Фрагмент: ${item.original || '(позиция вставки)'} → ${item.proposed || '(без замены)'}`;
+          const safety=document.createElement('p');safety.textContent=`${item.meaningRisk?'Возможное изменение медицинского смысла; только ручная проверка.':'Медицинский смысл не проверен.'} Уверенность: ${item.confidence==='high'?'высокая для локального правила':'ограниченная'}.`;
+          const show=document.createElement('button');show.className='btn small';show.textContent='Показать в тексте';
+          show.onclick=()=>{if(activeReportId!==reportId){toast('Откройте вкладку проверенного документа.',true);return;}try{highlightReviewSuggestion(editor,item,result.blocks,reportId,activeReportId);}catch{toast('Фрагмент изменился или требует ручной проверки.',true);}};
+          const reject=document.createElement('button');reject.className='btn small';reject.textContent='Отклонить';
+          reject.onclick=()=>{try{tracks.reject(reportId,item.id);row.remove();}catch{toast('Предложение уже рассмотрено.',true);}};
+          const accept=document.createElement('button');accept.className='btn small';accept.textContent='Принять';accept.disabled=item.operation==='comment';
+          accept.onclick=()=>{if(activeReportId!==reportId){toast('Откройте вкладку проверенного документа.',true);return;}try{applyReviewSuggestion(editor,item,result.blocks,reportId,activeReportId);tracks.markAccepted(reportId,item.id);row.remove();}catch{toast('Правка устарела или затрагивает сложное форматирование. Проверьте текст вручную.',true);}};
+          row.append(title,excerpt,safety,show,accept,reject);output.append(row);
+        }
+      }catch (error) { output.textContent=signal.aborted?'Проверка отменена.':'Проверка заблокирована: границы блоков не подтверждены, возможны персональные данные или анализатор недоступен.'; }
+      finally { if(currentCheck?.signal===signal){currentCheck=undefined;checkButton.disabled=false;cancelButton.disabled=true;} }
+    };
+  };
+}
 function calculatorDialog(){
  const keys=[
   ['C','clear',''],['⌫','backspace',''],['±','sign',''],['÷','operator','÷'],

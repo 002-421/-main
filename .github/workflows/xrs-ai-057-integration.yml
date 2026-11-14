@@ -1,0 +1,80 @@
+name: XRS 0.4.57 Offline AI Review integration
+
+on:
+  push:
+    branches:
+      - codex/xrs-ai-057-integration
+
+permissions:
+  contents: read
+
+jobs:
+  windows-integration:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: x-ray-report-studio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: x-ray-report-studio/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - name: Install Electron runtime
+        run: npm run desktop:install
+      - name: Verify Electron runtime
+        shell: pwsh
+        run: |
+          $electronExe = Join-Path $env:GITHUB_WORKSPACE 'x-ray-report-studio/node_modules/electron/dist/electron.exe'
+          if (-not (Test-Path -LiteralPath $electronExe -PathType Leaf)) { throw "Electron runtime is missing: $electronExe" }
+      - run: npm run build
+      - name: Install Playwright Chromium for AI Review UI test
+        run: node node_modules/playwright-core/cli.js install chromium
+      - name: Targeted AI Review, document history and Windows tests
+        run: >-
+          node --test
+          tests/ai-review.test.mjs
+          tests/ai-review-editor.test.mjs
+          tests/ai-review-medical-integration.test.mjs
+          tests/ai-review-migration.test.mjs
+          tests/ai-review-structure.test.mjs
+          tests/clinical-review.test.mjs
+          tests/clinical-anatomy-regression.test.mjs
+          tests/clinical-consistency-matching.test.mjs
+          tests/clinical-negation-regression.test.mjs
+          tests/local-ai-provider.test.mjs
+          tests/medical-terminology-typos.test.mjs
+          tests/size-space-decimal.test.mjs
+          tests/report-history.test.mjs
+      - name: AI Review categories and no-network UI
+        run: node tests/ai-review-browser.mjs
+      - name: Electron report history and Undo/Redo
+        run: node tests/report-history-browser.mjs
+      - name: Electron workspace recovery
+        run: node tests/workspace-recovery-browser.mjs
+      - name: Electron Undo/Redo scroll regression
+        run: node tests/undo-scroll-browser.mjs
+      - name: Package Windows integration build
+        run: python scripts/package_windows.py
+      - name: Record Windows package SHA-256
+        shell: pwsh
+        run: |
+          $archive = 'release/X-ray_Report_Studio_Windows_x64.zip'
+          if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) { throw "Integration package missing: $archive" }
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          Set-Content -Path 'release/SHA256SUMS.txt' -Value "$hash  X-ray_Report_Studio_Windows_x64.zip" -NoNewline
+          "Windows integration ZIP SHA-256: $hash" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "Windows integration ZIP bytes: $((Get-Item $archive).Length)" | Add-Content $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XRS-0.4.57-AI-Review-Windows-Integration
+          if-no-files-found: error
+          path: |
+            x-ray-report-studio/release/X-ray_Report_Studio_Windows_x64.zip
+            x-ray-report-studio/release/SHA256SUMS.txt

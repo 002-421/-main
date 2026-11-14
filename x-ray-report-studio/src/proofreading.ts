@@ -17,12 +17,14 @@ export { MAX_PROOF_ISSUES } from './proofreading-core';
 export const russianProofreadingLicense = `dictionary-ru 3.0.0\n${dictionaryLicense}\n\ndictionary-en 4.0.0\n${englishDictionaryLicense}\n\nnspell 2.1.5\n${nspellLicense}\n\nis-buffer 2.0.5\n${isBufferLicense}\n\n${morphologyLicense}`;
 
 let checker: ReturnType<typeof createRussianChecker> | undefined;
-export async function checkRussian(text: string, personalWords: string[] = []) {
+export async function checkRussian(text: string, personalWords: string[] = [], signal?: AbortSignal) {
+  signal?.throwIfAborted();
   // Give the interface a frame to display the progress indicator before the
   // dictionary is parsed on the first check. Later checks reuse the dictionary.
   if (!checker) {
     await new Promise(resolve => setTimeout(resolve, 30));
+    signal?.throwIfAborted();
     checker ??= createRussianChecker(aff, dic, englishAff, englishDic);
   }
-  return checker(text, personalWords);
+  return checker(text, personalWords, signal);
 }
