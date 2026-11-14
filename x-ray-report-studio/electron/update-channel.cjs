@@ -3,47 +3,44 @@ const { pathToFileURL } = require('node:url');
 const { compareVersions, isUpdateAvailable, parseVersion } = require('./update-version.cjs');
 
 const STABLE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json';
-const BETA_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/beta.json';
 const STABLE_ARCHIVE = '/downloads/X-ray_Report_Studio_Windows_Setup.zip';
-const BETA_ARCHIVE = '/downloads/X-ray_Report_Studio_Windows_Beta_Setup.zip';
 
-function selectedChannel(value) { return value === 'beta' ? 'beta' : 'stable'; }
-function profileForLaunch(version, preference) {
-  const parsed = parseVersion(version);
-  return (parsed && parsed.beta !== null) || preference?.profile === 'beta' ? 'beta' : 'stable';
-}
-function validateManifest(manifest, kind, testKitRoot = '') {
+function validateManifest(manifest, testKitRoot = '') {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)
       || typeof manifest.version !== 'string' || !parseVersion(manifest.version)
-      || (kind === 'stable' && parseVersion(manifest.version).beta !== null)
-      || (kind === 'beta' && parseVersion(manifest.version).beta === null)
+      || parseVersion(manifest.version).beta !== null
       || typeof manifest.url !== 'string' || typeof manifest.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(manifest.sha256)
       || (manifest.notes !== undefined && (typeof manifest.notes !== 'string' || manifest.notes.length > 10000)))
     throw new Error('Файл обновлений содержит некорректные данные.');
   let url;
   if (testKitRoot) {
-    if (path.basename(manifest.url) !== manifest.url || !/^XRS_Test_Update_\d+\.\d+\.\d+(?:-beta\.\d+)?\.zip$/.test(manifest.url)) throw new Error('Недопустимый файл локального тестового обновления.');
+    if (path.basename(manifest.url) !== manifest.url || !/^XRS_Test_Update_\d+\.\d+\.\d+\.zip$/.test(manifest.url)) throw new Error('Недопустимый файл локального тестового обновления.');
     url = pathToFileURL(path.join(testKitRoot, 'Updates', manifest.url)).toString();
   } else {
     let artifact;
     try { artifact = new URL(manifest.url); } catch { throw new Error('Недопустимая ссылка на установочный файл.'); }
-    const required = kind === 'beta' ? BETA_ARCHIVE : STABLE_ARCHIVE;
-    const expectedGithub = `/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio${required}`;
-    const expectedRaw = `/002-421/-main/codex/mri-report-studio/x-ray-report-studio${required}`;
-    if (artifact.protocol !== 'https:' || !((artifact.hostname === 'github.com' && artifact.pathname === expectedGithub)
-        || (artifact.hostname === 'raw.githubusercontent.com' && artifact.pathname === expectedRaw))
+    const githubBase = '/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio';
+    const rawBase = '/002-421/-main/codex/mri-report-studio/x-ray-report-studio';
+    const archivePaths = [
+      `${githubBase}${STABLE_ARCHIVE}`,
+      `${rawBase}${STABLE_ARCHIVE}`,
+      `${githubBase}/releases/${manifest.version}${STABLE_ARCHIVE}`,
+      `${rawBase}/releases/${manifest.version}${STABLE_ARCHIVE}`,
+    ];
+    if (artifact.protocol !== 'https:' || !((artifact.hostname === 'github.com' && archivePaths.includes(artifact.pathname))
+        || (artifact.hostname === 'raw.githubusercontent.com' && archivePaths.includes(artifact.pathname)))
         || artifact.username || artifact.password || artifact.search || artifact.hash)
       throw new Error('Недопустимая ссылка на установочный файл.');
     url = artifact.toString();
   }
-  return { version: manifest.version, url, sha256: manifest.sha256.toLowerCase(), notes: manifest.notes ?? '', channel: kind };
+  return { version: manifest.version, url, sha256: manifest.sha256.toLowerCase(), notes: manifest.notes ?? '', channel: 'stable' };
 }
-function chooseUpdate(channel, installed, candidates) {
-  const allowed = candidates.filter(candidate => candidate && (selectedChannel(channel) === 'beta' || candidate.channel === 'stable'));
+function chooseUpdate(_channel, installed, candidates) {
+  const allowed = candidates.filter(candidate => candidate?.channel === 'stable' && parseVersion(candidate.version)?.beta === null);
   allowed.sort((left, right) => compareVersions(right.version, left.version));
   const chosen = allowed[0];
   if (!chosen) throw new Error('Нет доступных сведений об обновлениях.');
-  return { ...chosen, currentVersion: installed, available: isUpdateAvailable(chosen.version, installed, channel) };
+  return { ...chosen, currentVersion: installed, available: isUpdateAvailable(chosen.version, installed) };
 }
 
-module.exports = { STABLE_MANIFEST, BETA_MANIFEST, selectedChannel, profileForLaunch, validateManifest, chooseUpdate };
+module.exports = { STABLE_MANIFEST, validateManifest, chooseUpdate };

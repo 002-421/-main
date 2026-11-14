@@ -3,8 +3,21 @@ function copyPrimitiveFields(value, allowed) {
     .map(key => [key, value[key]]));
 }
 
+function safeSystemErrorReason(code) {
+  return ({
+    EACCES: 'Access denied', EPERM: 'Operation not permitted', EBUSY: 'Resource busy',
+    ENOSPC: 'Insufficient free space', ENOENT: 'File or directory not found',
+    EEXIST: 'File or directory already exists', EINVAL: 'Invalid file or argument',
+    ENAMETOOLONG: 'Path is too long', ENOTDIR: 'Expected a directory', EIO: 'Disk I/O error',
+    EROFS: 'Storage is read-only', ETIMEDOUT: 'Operation timed out',
+  })[code] ?? '';
+}
+
 function sanitizeUpdateLogEvent(event) {
-  return copyPrimitiveFields(event, ['event', 'applicationVersion', 'platform', 'currentVersion', 'targetVersion', 'version', 'bytes', 'files', 'schemaVersion', 'expected', 'actual', 'percent', 'stage', 'restored', 'errorCode']);
+  const safe = copyPrimitiveFields(event, ['event', 'applicationVersion', 'platform', 'currentVersion', 'targetVersion', 'version', 'bytes', 'files', 'schemaVersion', 'expected', 'actual', 'percent', 'stage', 'restored', 'errorCode', 'phase', 'code', 'syscall']);
+  const reason = safeSystemErrorReason(safe.code);
+  if (reason) safe.reason = reason;
+  return safe;
 }
 
 function sanitizeStartupLogEvent(event) {
@@ -21,4 +34,4 @@ function sanitizeStartupLogEvent(event) {
   return safe;
 }
 
-module.exports = { sanitizeUpdateLogEvent, sanitizeStartupLogEvent };
+module.exports = { sanitizeUpdateLogEvent, sanitizeStartupLogEvent, safeSystemErrorReason };

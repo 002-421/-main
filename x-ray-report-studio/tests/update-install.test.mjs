@@ -60,6 +60,69 @@ test('update stages a side-by-side app but leaves shortcut commit to the caller'
   assert.ok(await fs.stat(result.executable));
 });
 
+test('temporary extraction directory failure is logged before extract-start and leaves the current install intact', async t => {
+  const f = await fixture();
+  t.after(() => fs.rm(f.directory, { recursive: true, force: true }));
+  const log = [];
+  const failure = Object.assign(new Error('synthetic temporary directory access denied'), { code: 'EACCES', syscall: 'mkdtemp' });
+  await assert.rejects(installUpdateArchive({
+    archive: f.archive,
+    currentRoot: f.currentRoot,
+    version: '0.4.14',
+    createTemporaryDirectory: async () => { throw failure; },
+    extractArchive: fakeExtractor(f.packageRoot),
+    log: async entry => log.push(entry),
+  }), /synthetic temporary directory access denied/);
+  assert.equal(log.some(entry => entry.event === 'extract-start'), false);
+  assert.deepEqual(log.find(entry => entry.event === 'install-error'), {
+    event: 'install-error', phase: 'create-extraction-temp', message: failure.message, code: 'EACCES', syscall: 'mkdtemp',
+  });
+  assert.equal(await fs.readFile(path.join(f.currentRoot, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'old app');
+});
+
+test('archive extraction failure is tagged with the extraction phase', async t => {
+  const f = await fixture();
+  t.after(() => fs.rm(f.directory, { recursive: true, force: true }));
+  const log = [];
+  const failure = Object.assign(new Error('synthetic invalid ZIP'), { code: 'EINVAL', syscall: 'tar' });
+  await assert.rejects(installUpdateArchive({
+    archive: f.archive,
+    currentRoot: f.currentRoot,
+    version: '0.4.14',
+    extractArchive: async () => { throw failure; },
+    log: async entry => log.push(entry),
+  }), /synthetic invalid ZIP/);
+  assert.equal(log.some(entry => entry.event === 'extract-start'), true);
+  assert.deepEqual(log.find(entry => entry.event === 'install-error'), {
+    event: 'install-error', phase: 'extract-archive', message: failure.message, code: 'EINVAL', syscall: 'tar',
+  });
+});
+
+test('0.4.53 and 0.4.55 can update side by side to 0.4.56 without touching their synthetic profiles', async t => {
+  for (const currentVersion of ['0.4.53', '0.4.55']) {
+    const f=await fixture(); t.after(()=>fs.rm(f.directory,{recursive:true,force:true}));
+    const profile=path.join(f.directory,'MRI Report Studio');
+    await fs.mkdir(profile,{recursive:true});
+    const userFiles={
+      'workspace.json':'synthetic open reports and tab state',
+      'templates.json':'synthetic custom template',
+      'settings.json':'synthetic doctor, export and editor settings',
+      'dictionary.json':'["synthetic-word"]',
+    };
+    for(const [name,value] of Object.entries(userFiles))await fs.writeFile(path.join(profile,name),value);
+    const hashes=new Map(await Promise.all(Object.keys(userFiles).map(async name=>[name,await fs.readFile(path.join(profile,name))])));
+    await fs.writeFile(path.join(f.currentRoot,'resources','app','package.json'),JSON.stringify({version:currentVersion}));
+    await fs.writeFile(path.join(f.packageRoot,'package.json'),JSON.stringify({version:'0.4.56'}));
+
+    const installed=await installUpdateArchive({archive:f.archive,currentRoot:f.currentRoot,version:'0.4.56',extractArchive:fakeExtractor(f.packageRoot)});
+    assert.equal(installed.version,'0.4.56');
+    assert.equal(await fs.readFile(path.join(installed.root,'resources','app','electron','main.cjs'),'utf8'),'new app');
+    assert.equal(await fs.readFile(path.join(f.currentRoot,'resources','app','electron','main.cjs'),'utf8'),'old app');
+    assert.equal(JSON.parse(await fs.readFile(path.join(f.currentRoot,'resources','app','package.json'),'utf8')).version,currentVersion);
+    for(const [name,bytes] of hashes)assert.deepEqual(await fs.readFile(path.join(profile,name)),bytes,`${currentVersion}: ${name} remains byte-for-byte unchanged`);
+  }
+});
+
 test('invalid update package leaves the current installation untouched', async t => {
   const f = await fixture();
   t.after(() => fs.rm(f.directory, { recursive: true, force: true }));

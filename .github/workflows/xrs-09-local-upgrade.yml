@@ -1,0 +1,99 @@
+name: XRS-09 Windows local upgrade candidate
+
+on:
+  push:
+    branches: [codex/xrs-09-local-upgrade]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xrs-09-local-upgrade-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-candidate:
+    runs-on: windows-2022
+    timeout-minutes: 50
+    defaults:
+      run:
+        working-directory: x-ray-report-studio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: x-ray-report-studio/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - name: Install pinned Electron and Chromium
+        run: |
+          npm run desktop:install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npx playwright-core install chromium
+      - run: npm run build
+      - run: npm test
+      - name: Windows Electron browser integration
+        run: npm run test:browser
+      - name: Workspace recovery at 1, 5, and 12 tabs
+        run: npm run test:workspace-recovery
+      - name: Electron Undo/Redo history, selection and scroll
+        run: npm run test:history-browser
+      - name: DOCX export, tab lifecycle and workspace reload
+        run: npm run test:tab-lifecycle
+      - name: Parse candidate installer with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/install_windows.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+          Write-Host 'PASS: candidate installer parses in Windows PowerShell 5.1.'
+      - name: Build candidate through existing Setup packager and verify ZIP
+        shell: powershell
+        run: |
+          $manifestHash = (Get-FileHash downloads/latest.json -Algorithm SHA256).Hash
+          python scripts/package_setup.py --candidate-output test-output/xrs-09-candidate --candidate-version 0.4.55
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify_setup_package.py --zip test-output/xrs-09-candidate/X-ray_Report_Studio_Windows_Setup.zip --source-electron electron --version 0.4.55
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $afterHash = (Get-FileHash downloads/latest.json -Algorithm SHA256).Hash
+          if ($afterHash -ne $manifestHash) { throw 'Candidate packaging modified downloads/latest.json.' }
+          $zip = 'test-output/xrs-09-candidate/X-ray_Report_Studio_Windows_Setup.zip'
+          $sha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$sha  X-ray_Report_Studio_Windows_Setup.zip" | Out-File test-output/xrs-09-candidate/SHA256.txt -Encoding ascii
+          Get-Item -LiteralPath $zip | Select-Object Name,Length
+          Write-Host "Setup ZIP SHA256: $sha"
+      - name: Launch the extracted 0.4.55 Setup payload with Windows Electron
+        run: node tests/setup-candidate-smoke.mjs
+      - name: Upload synthetic editor diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-09-windows-diagnostics
+          if-no-files-found: ignore
+          path: |
+            x-ray-report-studio/test-output/report-history-failure.json
+            x-ray-report-studio/test-output/report-history-failure.png
+            x-ray-report-studio/test-output/browser-edit-failure.json
+            x-ray-report-studio/test-output/electron-startup-dom.json
+            x-ray-report-studio/test-output/electron-startup-dom.html
+            x-ray-report-studio/test-output/electron-startup-dom.png
+            x-ray-report-studio/test-output/electron-yellow-placeholder-diagnostic.json
+            x-ray-report-studio/test-output/electron-yellow-placeholder-diagnostic.html
+            x-ray-report-studio/test-output/electron-yellow-placeholder-diagnostic.png
+            x-ray-report-studio/test-output/electron-paste-diagnostic.json
+            x-ray-report-studio/test-output/electron-tab-trace.json
+            x-ray-report-studio/test-output/v3-failed.png
+            x-ray-report-studio/test-output/v3-desktop.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xrs-09-stable-0.4.55-windows-x64
+          if-no-files-found: error
+          path: |
+            x-ray-report-studio/test-output/xrs-09-candidate/X-ray_Report_Studio_Windows_Setup.zip
+            x-ray-report-studio/test-output/xrs-09-candidate/SHA256.txt

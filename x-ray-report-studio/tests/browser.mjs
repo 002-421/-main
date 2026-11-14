@@ -14,10 +14,8 @@ const electronOptions={...(process.env.ELECTRON_PATH?{executablePath:process.env
 const errors=[];
 let application=await _electron.launch(electronOptions);
 let page=await application.firstWindow();
-const initialChannel=await page.evaluate(()=>window.desktop.getUpdateChannel());
 const expectedApplicationVersion=JSON.parse(await readFile(path.join(root,'package.json'),'utf8')).version;
 assert.equal(initialChannel.version,expectedApplicationVersion);
-if(expectedApplicationVersion.includes('-beta.'))assert.equal(initialChannel.profile,'beta','prerelease app uses an isolated Beta profile');
 await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0]?.setSize(1500,1000));
 page.on('pageerror',error=>errors.push(error.message));
 const patientId='head-gm.patient', doctorId='HEAD.BASE.2.FIELD.0043';
@@ -129,9 +127,11 @@ try{
  console.log('PASS: editing a yellow template measurement removes the yellow fill and Undo restores it.');
 
  await page.locator('#settings').click();
- await page.locator('#update-channel-select').waitFor();
- await page.waitForFunction(channel=>document.querySelector('#update-channel-select')?.value===channel,initialChannel.channel);
- assert.equal(await page.locator('#beta-opt-in').isChecked(),initialChannel.channel==='beta');
+ await page.locator('#update-current-version').waitFor();
+ assert.equal(await page.locator('#update-current-version').textContent(),expectedApplicationVersion);
+ assert.equal(await page.locator('#check-updates').isVisible(),true,'update checks remain available manually');
+ assert.equal(await page.locator('#update-channel-select,#beta-opt-in,#auto-update').count(),0,'Stable/Beta switching and automatic checks are absent');
+ assert.equal(await page.locator('#rollback-update,#open-update-backups').count(),0,'extra updater controls are absent');
  await page.locator('.dialog [data-close]').first().click();
 
  await page.locator('#toggle-theme').click();
@@ -164,7 +164,14 @@ try{
 
  await page.locator('#modality-select').selectOption('mri');
  await page.locator('#area-select').selectOption('head');
+ const previousHeadReportId=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
  await page.locator('[data-template="head-gm"]').click();
+ await page.waitForFunction(({previousId,templateId})=>{
+  const activeId=document.querySelector('.report-tab.active [data-report-select]')?.getAttribute('data-report-select');
+  const workspace=JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1')||'{}');
+  return Boolean(activeId&&activeId!==previousId&&workspace.activeId===activeId&&workspace.reports?.some(report=>report.id===activeId&&report.templateId===templateId));
+ },{previousId:previousHeadReportId,templateId:'head-gm'});
+ await field(patientId).waitFor({state:'visible'});
  const patientHint=await field(patientId).innerText();
  const selectedTemplateTitle=await page.locator('.template-card.selected strong').textContent();
  await field(patientId).evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,0);range.setEnd(node,1);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
@@ -433,8 +440,24 @@ try{
  await page.screenshot({path:path.join(output,'v3-desktop.png')});
  console.log('PASS: rich selection library save and local report persistence.');
 }catch(error){
- const detail=error instanceof Error?(error.stack??error.message):String(error),annotation=detail.replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A').replaceAll(':','%3A').replaceAll(',','%2C');
- await page.screenshot({path:path.join(output,'v3-failed.png')});console.error('Renderer errors:',errors);console.error('Electron integration first failure:',detail);process.stdout.write(`::error title=Electron integration first failure::${annotation}\n`);
+ const detail=error instanceof Error?(error.stack??error.message):String(error);
+ const failureDom=await page.evaluate(()=>({
+  syntheticTest:true,
+  title:document.title,
+  documentName:document.querySelector('#document-name')?.textContent,
+  selectedTemplate:document.querySelector('.template-card.selected strong')?.textContent,
+  activeReportId:document.querySelector('.report-tab.active [data-report-select]')?.getAttribute('data-report-select'),
+  tabs:[...document.querySelectorAll('.report-tab')].map(tab=>tab.innerText),
+  reportText:document.querySelector('.report-content')?.innerText,
+  reportHTML:document.querySelector('.report-content')?.outerHTML,
+  templateFields:[...document.querySelectorAll('.report-content [data-template-field]')].map(field=>({id:field.getAttribute('data-field-id'),text:field.textContent,filled:field.getAttribute('data-filled')})),
+ })).catch(captureError=>({syntheticTest:true,captureError:String(captureError)}));
+ failureDom.rendererErrors=errors;
+ await writeFile(path.join(output,'v3-failed-dom.json'),JSON.stringify(failureDom,null,2));
+ await writeFile(path.join(output,'v3-failed-dom.html'),`<!doctype html><meta charset="utf-8"><title>Synthetic Electron failure</title>${failureDom.reportHTML??'<p>report DOM unavailable</p>'}`);
+ const annotationData=JSON.stringify({detail,activeReportId:failureDom.activeReportId,tabs:failureDom.tabs,fields:failureDom.templateFields,reportText:failureDom.reportText?.slice(0,4000),rendererErrors:failureDom.rendererErrors});
+ const annotation=annotationData.replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A').replaceAll(':','%3A').replaceAll(',','%2C');
+ await page.screenshot({path:path.join(output,'v3-failed.png')});console.error('Renderer errors:',errors);console.error('Synthetic Electron failure DOM:',JSON.stringify({...failureDom,reportHTML:failureDom.reportHTML?.slice(0,12000)},null,2));console.error('Electron integration first failure:',detail);process.stdout.write(`::error title=Electron integration first failure::${annotation}\n`);
  if(process.env.GITHUB_STEP_SUMMARY)await appendFile(process.env.GITHUB_STEP_SUMMARY,`## Electron integration failure\n\n\`\`\`text\n${detail}\n\`\`\`\n`);
  throw error;
 }finally{await application.close();}
