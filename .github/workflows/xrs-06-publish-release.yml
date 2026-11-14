@@ -44,7 +44,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: Targeted Stable updater tests
-        run: node --test tests/update-channel.test.mjs tests/update-version.test.mjs tests/update-install.test.mjs tests/update-settings.test.mjs
+        run: node --test tests/update-channel.test.mjs tests/update-version.test.mjs tests/update-install.test.mjs tests/update-settings.test.mjs tests/user-data-backup.test.mjs tests/log-safety.test.mjs tests/windows-integration.test.mjs
       - name: Package and verify Windows Setup ZIP
         shell: pwsh
         env:
@@ -174,7 +174,7 @@ jobs:
           if target.exists(): assert hashlib.sha256(target.read_bytes()).hexdigest()==digest, 'Existing versioned release ZIP differs'
           else: shutil.copyfile(candidate,target)
           fallback=dict(old_manifest)
-          fallback['url']=f'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-{previous}.zip'
+          fallback['url']='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip'
           (downloads/'latest.json').write_text(json.dumps(fallback,indent=2)+'\n',encoding='utf-8')
           release_workflow=pathlib.Path('.github/workflows/xrs-06-publish-release.yml')
           assert release_workflow.is_file(), 'Tag commit does not contain the release workflow'
@@ -214,7 +214,7 @@ jobs:
           for i in range(12):
               try:
                   with urllib.request.urlopen(manifest_url+'?verify=staged-'+os.environ['GITHUB_RUN_ID']+'-'+str(i),timeout=60) as r:current=json.load(r)
-                  if current.get('version')==old and current.get('sha256')==previous.get('sha256') and current.get('url','').endswith(f'X-ray_Report_Studio_Windows_Setup-{old}.zip'):
+                  if current.get('version')==old and current.get('sha256')==previous.get('sha256') and current.get('url')=='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip':
                       live=current;break
                   print('Waiting for public previous-version manifest propagation:',current.get('version'),current.get('url'))
               except Exception as e: print('Previous manifest propagation pending:',type(e).__name__)
@@ -234,7 +234,7 @@ jobs:
           candidate=next(pathlib.Path(os.environ['CANDIDATE_DIR']).rglob('X-ray_Report_Studio_Windows_Setup.zip')) if os.environ.get('CANDIDATE_DIR') else None
           if candidate is None: candidate=next(temp.glob('xrs-candidate/**/*.zip'))
           sha=hashlib.sha256(candidate.read_bytes()).hexdigest()
-          url=f'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-{version}.zip'
+          url='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip'
           manifest={'version':version,'url':url,'sha256':sha}
           downloads=pathlib.Path('official/x-ray-report-studio/downloads')
           shutil.copyfile(candidate,downloads/'X-ray_Report_Studio_Windows_Setup.zip')
@@ -265,7 +265,7 @@ jobs:
                       with urllib.request.urlopen(base+name+'?release-check='+run_id+'-'+str(attempt),timeout=120) as r:data=r.read()
                       archive_hashes.append(hashlib.sha256(data).hexdigest())
                   with urllib.request.urlopen(url+'?release-check='+run_id+'-'+str(attempt),timeout=60) as r:manifest=json.load(r)
-                  verified=(archive_hashes==[expected,expected] and manifest.get('version')==version and manifest.get('sha256')==expected and manifest.get('url','').endswith(f'X-ray_Report_Studio_Windows_Setup-{version}.zip'))
+                  verified=(archive_hashes==[expected,expected] and manifest.get('version')==version and manifest.get('sha256')==expected and manifest.get('url')=='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip')
                   if verified:break
                   print('Waiting for Raw CDN cache expiry; public manifest version:',manifest.get('version'),'canonical ZIP hash matches:',archive_hashes[0]==expected,flush=True)
               except Exception as e:print('Final public verification pending:',type(e).__name__,flush=True)
@@ -279,18 +279,71 @@ jobs:
           RUNNER_TEMP: ${{ runner.temp }}
           RELEASE_VERSION: ${{ steps.baseline.outputs.new_version }}
           OLD_VERSION: ${{ steps.baseline.outputs.old_version }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,shutil
+          downloads=pathlib.Path('official/x-ray-report-studio/downloads'); previous=os.environ.get('OLD_VERSION','')
+          backup=downloads/f'latest-{previous}-before-{os.environ["RELEASE_VERSION"]}.json'
+          if not backup.is_file(): print('No verified rollback manifest was staged; rollback cannot be verified.'); raise SystemExit(1)
+          value=json.loads(backup.read_text())
+          old_zip=downloads/f'X-ray_Report_Studio_Windows_Setup-{previous}.zip'
+          if not old_zip.is_file() or hashlib.sha256(old_zip.read_bytes()).hexdigest()!=value.get('sha256'):
+              print('Verified previous-version ZIP is unavailable; refusing to write a rollback manifest.'); raise SystemExit(1)
+          shutil.copyfile(old_zip,downloads/'X-ray_Report_Studio_Windows_Setup.zip')
+          PY
+          git -C official add -f -- x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip
+          if git -C official diff --cached --quiet; then echo 'Previous Stable archive is already staged.'; else
+            git -C official config user.name 'github-actions[bot]'
+            git -C official config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git -C official commit -m "rollback(xrs): restore Stable ${{ steps.baseline.outputs.old_version }} ZIP"
+            git -C official push origin HEAD:refs/heads/codex/mri-report-studio
+          fi
+          python3 - <<'PY'
+          import hashlib,os,time,urllib.request
+          previous=os.environ['OLD_VERSION']; expected=open(f'official/x-ray-report-studio/downloads/latest-{previous}-before-{os.environ["RELEASE_VERSION"]}.json').read()
+          import json
+          expected=json.loads(expected)['sha256']
+          archive_url='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip'
+          restored=False
+          for attempt in range(42):
+              try:
+                  with urllib.request.urlopen(archive_url+'?rollback-zip='+os.environ['GITHUB_RUN_ID']+'-'+str(attempt),timeout=120) as r: restored=hashlib.sha256(r.read()).hexdigest()==expected
+                  if restored: break
+                  print('Previous ZIP propagation pending; SHA-256 mismatch',flush=True)
+              except Exception as e: print('Previous ZIP rollback verification pending:',type(e).__name__,flush=True)
+              time.sleep(10)
+          assert restored, 'Previous Stable ZIP could not be restored publicly; latest.json was not rolled back'
+          PY
           python3 - <<'PY'
           import json,os,pathlib
           downloads=pathlib.Path('official/x-ray-report-studio/downloads'); previous=os.environ.get('OLD_VERSION','')
           backup=downloads/f'latest-{previous}-before-{os.environ["RELEASE_VERSION"]}.json'
-          if not backup.is_file(): print('No verified rollback manifest was staged; no manifest change is attempted.'); raise SystemExit(0)
-          value=json.loads(backup.read_text()); value['url']=f'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-{previous}.zip'
+          value=json.loads(backup.read_text()); value['url']='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip'
           (downloads/'latest.json').write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8')
           PY
           git -C official add -f -- x-ray-report-studio/downloads/latest.json
-          if git -C official diff --cached --quiet; then echo 'Previous Stable manifest is already active.'; exit 0; fi
-          git -C official config user.name 'github-actions[bot]'
-          git -C official config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -C official commit -m "rollback(xrs): restore Stable ${{ steps.baseline.outputs.old_version }} manifest"
-          git -C official push origin HEAD:refs/heads/codex/mri-report-studio
+          if git -C official diff --cached --quiet; then echo 'Previous Stable manifest is already active.'; else
+            git -C official config user.name 'github-actions[bot]'
+            git -C official config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git -C official commit -m "rollback(xrs): restore Stable ${{ steps.baseline.outputs.old_version }} manifest"
+            git -C official push origin HEAD:refs/heads/codex/mri-report-studio
+          fi
+          python3 - <<'PY'
+          import hashlib,json,os,time,urllib.request
+          previous=os.environ['OLD_VERSION']; expected=json.loads(open(f'official/x-ray-report-studio/downloads/latest-{previous}-before-{os.environ["RELEASE_VERSION"]}.json').read())['sha256']
+          base='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip'
+          manifest_url='https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json'
+          restored=False
+          for attempt in range(42):
+              try:
+                  with urllib.request.urlopen(base+'?rollback='+os.environ['GITHUB_RUN_ID']+'-'+str(attempt),timeout=120) as r: archive_hash=hashlib.sha256(r.read()).hexdigest()
+                  with urllib.request.urlopen(manifest_url+'?rollback='+os.environ['GITHUB_RUN_ID']+'-'+str(attempt),timeout=60) as r: manifest=json.load(r)
+                  restored=archive_hash==expected and manifest.get('version')==previous and manifest.get('sha256')==expected and manifest.get('url')==base
+                  if restored: break
+                  print('Rollback propagation pending: archive hash matches:',archive_hash==expected,'manifest version:',manifest.get('version'),flush=True)
+              except Exception as e: print('Rollback verification pending:',type(e).__name__,flush=True)
+              time.sleep(10)
+          assert restored, 'Previous Stable ZIP and manifest rollback could not be verified publicly'
+          print(f'Rollback verified: Stable {previous}, SHA-256 {expected}')
+          PY

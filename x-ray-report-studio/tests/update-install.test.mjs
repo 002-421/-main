@@ -60,6 +60,18 @@ test('update stages a side-by-side app but leaves shortcut commit to the caller'
   assert.ok(await fs.stat(result.executable));
 });
 
+test('an abandoned same-version folder is preserved and cannot block a fresh side-by-side update', async t => {
+  const f=await fixture();t.after(()=>fs.rm(f.directory,{recursive:true,force:true}));
+  const abandoned=path.join(f.directory,'App_0.4.57');await fs.mkdir(abandoned);await fs.writeFile(path.join(abandoned,'abandoned-marker.txt'),'keep until separately reviewed');
+  await fs.mkdir(path.join(f.directory,'.X-ray_Report_Studio_stage_previous-failure'));
+  await fs.writeFile(path.join(f.packageRoot,'package.json'),JSON.stringify({version:'0.4.57'}));
+  const result=await installUpdateArchive({archive:f.archive,currentRoot:f.currentRoot,version:'0.4.57',extractArchive:fakeExtractor(f.packageRoot)});
+  assert.notEqual(result.root,abandoned);
+  assert.equal(await fs.readFile(path.join(abandoned,'abandoned-marker.txt'),'utf8'),'keep until separately reviewed');
+  assert.equal(await fs.readFile(path.join(result.root,'resources','app','electron','main.cjs'),'utf8'),'new app');
+  assert.equal(await fs.readFile(path.join(f.currentRoot,'resources','app','electron','main.cjs'),'utf8'),'old app');
+});
+
 test('temporary extraction directory failure is logged before extract-start and leaves the current install intact', async t => {
   const f = await fixture();
   t.after(() => fs.rm(f.directory, { recursive: true, force: true }));
@@ -98,8 +110,8 @@ test('archive extraction failure is tagged with the extraction phase', async t =
   });
 });
 
-test('0.4.53 and 0.4.55 can update side by side to 0.4.56 without touching their synthetic profiles', async t => {
-  for (const currentVersion of ['0.4.53', '0.4.55']) {
+test('0.4.53, 0.4.54, 0.4.55 and 0.4.56 can stage 0.4.57 without touching their synthetic profiles', async t => {
+  for (const currentVersion of ['0.4.53', '0.4.54', '0.4.55', '0.4.56']) {
     const f=await fixture(); t.after(()=>fs.rm(f.directory,{recursive:true,force:true}));
     const profile=path.join(f.directory,'MRI Report Studio');
     await fs.mkdir(profile,{recursive:true});
@@ -112,10 +124,10 @@ test('0.4.53 and 0.4.55 can update side by side to 0.4.56 without touching their
     for(const [name,value] of Object.entries(userFiles))await fs.writeFile(path.join(profile,name),value);
     const hashes=new Map(await Promise.all(Object.keys(userFiles).map(async name=>[name,await fs.readFile(path.join(profile,name))])));
     await fs.writeFile(path.join(f.currentRoot,'resources','app','package.json'),JSON.stringify({version:currentVersion}));
-    await fs.writeFile(path.join(f.packageRoot,'package.json'),JSON.stringify({version:'0.4.56'}));
+    await fs.writeFile(path.join(f.packageRoot,'package.json'),JSON.stringify({version:'0.4.57'}));
 
-    const installed=await installUpdateArchive({archive:f.archive,currentRoot:f.currentRoot,version:'0.4.56',extractArchive:fakeExtractor(f.packageRoot)});
-    assert.equal(installed.version,'0.4.56');
+    const installed=await installUpdateArchive({archive:f.archive,currentRoot:f.currentRoot,version:'0.4.57',extractArchive:fakeExtractor(f.packageRoot)});
+    assert.equal(installed.version,'0.4.57');
     assert.equal(await fs.readFile(path.join(installed.root,'resources','app','electron','main.cjs'),'utf8'),'new app');
     assert.equal(await fs.readFile(path.join(f.currentRoot,'resources','app','electron','main.cjs'),'utf8'),'old app');
     assert.equal(JSON.parse(await fs.readFile(path.join(f.currentRoot,'resources','app','package.json'),'utf8')).version,currentVersion);

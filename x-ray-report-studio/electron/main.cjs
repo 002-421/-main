@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const { pathToFileURL, fileURLToPath } = require('node:url');
 const { installUpdateArchive, verifySha256, writeShortcutAtomically } = require('./update-install.cjs');
 const { activateRendererUpdate, isUsableRenderer, smokeTestInstalledApp } = require('./live-update.cjs');
+const { createUserDataBackup } = require('./user-data-backup.cjs');
 const { CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema } = require('./install-state.cjs');
 const { STABLE_MANIFEST, validateManifest, chooseUpdate } = require('./update-channel.cjs');
 const { downloadHttps } = require('./update-download.cjs');
@@ -172,6 +173,15 @@ async function createUpdateLogger() {
 }
 
 function shortcutLocation() { return TEST_KIT_ROOT ? path.join(TEST_KIT_ROOT, 'Shortcuts', 'X-ray Report Studio.lnk') : path.join(app.getPath('desktop'), 'X-ray Report Studio.lnk'); }
+function backupRoot() { return path.join(app.getPath('appData'), 'X-ray Report Studio Backups'); }
+async function createVerifiedUserDataBackup() {
+  session.defaultSession.flushStorageData();
+  return createUserDataBackup({
+    userDataDir: app.getPath('userData'), sharedDictionaryFile,
+    backupRoot: backupRoot(), allowedBackupRoot: app.getPath('appData'),
+    forbiddenRoots: [activeApplicationRoot], version: activeApplicationVersion,
+  });
+}
 async function pointShortcutTo(executable, root) {
   const icon = path.join(root, 'resources', 'app', 'dist', 'x-ray-report-studio.ico');
   await fs.mkdir(path.dirname(shortcutLocation()), { recursive: true });
@@ -481,10 +491,12 @@ app.whenReady().then(async () => {
       file=path.join(os.tmpdir(),`X-ray_Report_Studio_${update.version}_${crypto.randomUUID()}.zip`);
       await fs.writeFile(file,archive,{flag:'wx'});
       sendProgress({stage:'installing',loaded:archive.length,total:archive.length,percent:100});
+      updatePhase = 'user-data-backup';
+      await log({ event: 'user-data-backup-start' });
+      const userBackup = await createVerifiedUserDataBackup();
+      await log({ event: 'user-data-backup-verified', bytes: userBackup.bytes, files: userBackup.files });
       updatePhase = 'data-schema';
       currentDataState = await ensureDataSchema(dataSchemaFile, CURRENT_DATA_SCHEMA);
-      // The update replaces application files side by side; the userData profile stays in place.
-      await log({ event: 'user-data-preserved-in-place' });
       const previousRoot=activeApplicationRoot,previousVersion=activeApplicationVersion;
       const previousState=await readJson(installStateFile,null);
       if (previousState && (previousState.status !== 'stable' || !previousState.current || path.resolve(previousState.current.root) !== path.resolve(previousRoot)))
@@ -540,7 +552,11 @@ app.whenReady().then(async () => {
       }
       await log({ event: 'update-switch-complete', targetVersion: update.version });
     } catch (error) {
-      await log({ event: 'update-error', errorCode: updatePhase });
+      const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code)
+        ? error.code
+        : typeof error?.name === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(error.name) ? error.name : 'UpdateError';
+      const syscall = typeof error?.syscall === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(error.syscall) ? error.syscall : undefined;
+      await log({ event: 'update-error', errorCode, phase: updatePhase, ...(syscall ? { syscall } : {}) });
       sendProgress({stage:'error',loaded:0,total:0,percent:0,message:error.message,logFile});
       throw new Error(logFile?`${error.message} Журнал обновления: ${logFile}`:error.message);
     } finally { if (file) await fs.unlink(file).catch(() => {}); updateInstalling=false; }

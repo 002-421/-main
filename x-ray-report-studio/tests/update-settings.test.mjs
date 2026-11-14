@@ -21,8 +21,12 @@ test('update checks have no startup or periodic trigger', () => {
   assert.doesNotMatch(main, /setInterval\([^)]*update|checkForUpdates\(/);
 });
 
-test('Stable updater has no channel preference or mandatory full-profile backup gate', () => {
-  assert.doesNotMatch(main, /updates:set-channel|channel-preference|createVerifiedUserDataBackup|user-data-backup-start/);
-  assert.match(main, /user-data-preserved-in-place/);
+test('Stable updater verifies a local user-data backup before changing the installed application', () => {
+  assert.doesNotMatch(main, /updates:set-channel|channel-preference/);
+  assert.match(main, /createVerifiedUserDataBackup/);
+  assert.match(main, /user-data-backup-start/);
+  assert.match(main, /user-data-backup-verified/);
+  assert.ok(main.indexOf('await createVerifiedUserDataBackup()') < main.indexOf('installUpdateArchive({'));
   assert.match(main, /verifySha256\(archive,update\.sha256\)/);
+  assert.match(main, /errorCode, phase: updatePhase/);
 });

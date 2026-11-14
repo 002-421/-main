@@ -3,6 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const EXCLUDED_TOP_LEVEL = new Set(['logs', 'cache', 'code cache', 'gpucache', 'dawncache', 'crashpad', 'crash reports']);
+const CHROMIUM_SINGLETON_MARKERS = new Set(['singletonlock', 'singletoncookie', 'singletonsocket']);
 
 function inside(parent, candidate) {
   const relative = path.relative(path.resolve(parent), path.resolve(candidate));
@@ -30,13 +31,22 @@ function isChromiumLevelDbLock(source) {
   return path.basename(source).toLowerCase() === 'lock' && parts.slice(0, -1).some(part => part.toLowerCase() === 'leveldb');
 }
 
-async function copyTree(source, destination, relativeBase, files, excludedFiles) {
+function isChromiumSingletonMarker(source, profileRoot) {
+  return path.dirname(path.resolve(source)) === path.resolve(profileRoot)
+    && CHROMIUM_SINGLETON_MARKERS.has(path.basename(source).toLowerCase());
+}
+
+async function copyTree(source, destination, relativeBase, files, excludedFiles, profileRoot) {
   const stat = await fs.lstat(source);
+  if (isChromiumSingletonMarker(source, profileRoot) && (stat.isFile() || stat.isSymbolicLink() || stat.isSocket())) {
+    excludedFiles.push({ path: path.relative(relativeBase, destination).split(path.sep).join('/'), reason: 'ephemeral-singleton-marker' });
+    return;
+  }
   if (stat.isSymbolicLink()) throw new Error('В профиле обнаружена символическая ссылка; резервирование отменено.');
   if (stat.isDirectory()) {
     await fs.mkdir(destination, { recursive: true });
     const entries = await fs.readdir(source, { withFileTypes: true });
-    for (const entry of entries) await copyTree(path.join(source, entry.name), path.join(destination, entry.name), relativeBase, files, excludedFiles);
+    for (const entry of entries) await copyTree(path.join(source, entry.name), path.join(destination, entry.name), relativeBase, files, excludedFiles, profileRoot);
     return;
   }
   if (!stat.isFile()) throw new Error('В профиле обнаружен неподдерживаемый тип файла; резервирование отменено.');
@@ -98,7 +108,9 @@ async function verifyUserDataBackup(directory) {
   if (!Array.isArray(excludedFiles)) throw new Error('Файл описания резервной копии повреждён.');
   for (const excluded of excludedFiles) {
     const parts = excluded?.path?.split('/');
-    if (!excluded || !safeManifestPath(excluded.path) || excluded.reason !== 'ephemeral-leveldb-lock' || parts.at(-1)?.toLowerCase() !== 'lock' || !parts.slice(0, -1).some(part => part.toLowerCase() === 'leveldb')) throw new Error('Резервная копия содержит недопустимое исключение.');
+    const levelDbLock = excluded?.reason === 'ephemeral-leveldb-lock' && parts?.at(-1)?.toLowerCase() === 'lock' && parts?.slice(0, -1).some(part => part.toLowerCase() === 'leveldb');
+    const singletonMarker = excluded?.reason === 'ephemeral-singleton-marker' && parts?.length === 2 && parts[0].toLowerCase() === 'profile' && CHROMIUM_SINGLETON_MARKERS.has(parts[1].toLowerCase());
+    if (!excluded || !safeManifestPath(excluded.path) || (!levelDbLock && !singletonMarker)) throw new Error('Резервная копия содержит недопустимое исключение.');
     if (seen.has(excluded.path)) throw new Error('Резервная копия содержит повторяющиеся записи.');
     seen.add(excluded.path);
     const target = path.resolve(directory, 'data', ...parts);
@@ -137,12 +149,12 @@ async function createUserDataBackup({ userDataDir, sharedDictionaryFile, backupR
     const entries = await fs.readdir(userRoot, { withFileTypes: true });
     for (const entry of entries) {
       if (EXCLUDED_TOP_LEVEL.has(entry.name.toLowerCase())) continue;
-      await copyTree(path.join(userRoot, entry.name), path.join(stage, 'data', 'profile', entry.name), path.join(stage, 'data'), files, excludedFiles);
+      await copyTree(path.join(userRoot, entry.name), path.join(stage, 'data', 'profile', entry.name), path.join(stage, 'data'), files, excludedFiles, userRoot);
     }
     if (sharedDictionaryFile) {
       const shared = path.resolve(sharedDictionaryFile);
       if (!inside(userRoot, shared) && await fs.stat(shared).then(stat => stat.isFile(), () => false))
-        await copyTree(shared, path.join(stage, 'data', 'shared-dictionary.json'), path.join(stage, 'data'), files, excludedFiles);
+        await copyTree(shared, path.join(stage, 'data', 'shared-dictionary.json'), path.join(stage, 'data'), files, excludedFiles, path.dirname(shared));
     }
     const manifest = { format: 'xrs-user-data-backup', schemaVersion: 1, applicationVersion: version, createdAt: new Date().toISOString(), files, excludedFiles };
     await fs.writeFile(path.join(stage, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
