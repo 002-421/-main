@@ -2,7 +2,7 @@ name: XRS-07/XRS-08 Windows validation
 
 on:
   push:
-    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062]
+    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062, codex/xrs-updater-rollback-053]
   pull_request:
     paths:
       - 'x-ray-report-studio/**'
@@ -37,11 +37,13 @@ jobs:
           $isStable056 = $version -eq '0.4.56' -and $sourceRef -eq 'codex/xrs-056-stable-clean'
           $isUpdateHotfix = $sourceRef -eq 'codex/xrs-first-start-confirmation'
           $isUpdaterRecovery = $sourceRef -in @('codex/xrs-updater-recovery', 'codex/xrs-updater-062')
+          $isUpdaterRollback053 = $sourceRef -eq 'codex/xrs-updater-rollback-053'
           $isUpdaterCandidate060 = $version -eq '0.4.60' -and $isUpdaterRecovery
           Add-Content -Path $env:GITHUB_OUTPUT -Value "beta=$($isBeta.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "stable056=$($isStable056.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updateHotfix=$($isUpdateHotfix.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updaterRecovery=$($isUpdaterRecovery.ToString().ToLowerInvariant())" -Encoding utf8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "updaterRollback053=$($isUpdaterRollback053.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updaterCandidate060=$($isUpdaterCandidate060.ToString().ToLowerInvariant())" -Encoding utf8
       - run: npm ci
       - name: Install pinned Electron runtime
@@ -96,7 +98,7 @@ jobs:
         shell: pwsh
         run: |
           $diagnostic = Join-Path $env:RUNNER_TEMP 'xrs-updater-recovery-windows-tests.txt'
-          node --test tests/update-lease.test.mjs tests/update-worker.test.mjs tests/windows-processes.test.mjs tests/user-data-backup.test.mjs tests/update-install.test.mjs tests/log-safety.test.mjs tests/update-settings.test.mjs tests/update-confirmation.test.mjs tests/windows-integration.test.mjs 2>&1 | Tee-Object -FilePath $diagnostic
+          node --test tests/user-data-backup.test.mjs tests/update-install.test.mjs tests/install-state.test.mjs tests/log-safety.test.mjs tests/update-settings.test.mjs tests/update-confirmation.test.mjs tests/windows-integration.test.mjs 2>&1 | Tee-Object -FilePath $diagnostic
           $testExit = $LASTEXITCODE
           if ($testExit -ne 0) {
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '## Updater recovery Windows test diagnostics' -Encoding utf8
@@ -226,6 +228,45 @@ jobs:
           path: |
             x-ray-report-studio/test-output/xrs-0.4.56/X-ray_Report_Studio_Windows_Setup.zip
             x-ray-report-studio/test-output/xrs-0.4.56/SHA256SUMS.txt
+      - name: Package and verify unpublished 0.4.63 updater rollback candidate
+        if: steps.release-channel.outputs.updaterRollback053 == 'true'
+        shell: pwsh
+        run: |
+          python scripts/package_setup.py --candidate-output test-output/xrs-0.4.63
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $archive = 'test-output/xrs-0.4.63/X-ray_Report_Studio_Windows_Setup.zip'
+          python scripts/verify_setup_package.py --zip $archive --source-electron electron --version 0.4.63
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          Set-Content -Path 'test-output/xrs-0.4.63/SHA256SUMS.txt' -Value "$hash  X-ray_Report_Studio_Windows_Setup.zip" -NoNewline
+          Write-Host "Unpublished updater rollback Setup ZIP SHA256: $hash"
+          git diff --exit-code -- downloads/latest.json
+      - name: Parse packaged Install.ps1 with Windows PowerShell 5.1
+        if: steps.release-channel.outputs.updaterRollback053 == 'true'
+        shell: powershell
+        run: |
+          $archive = Join-Path $PWD 'test-output/xrs-0.4.63/X-ray_Report_Studio_Windows_Setup.zip'
+          $stage = Join-Path $env:RUNNER_TEMP ('XRS-Setup-Parser-' + $env:GITHUB_RUN_ID)
+          try {
+            Expand-Archive -LiteralPath $archive -DestinationPath $stage -Force
+            $installer = Join-Path $stage 'X-ray Report Studio Setup/Install.ps1'
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($installer, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+            Write-Host 'PASS: packaged Install.ps1 parses in Windows PowerShell 5.1.'
+          } finally {
+            Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+          }
+      - name: Upload unpublished 0.4.63 updater rollback candidate
+        if: steps.release-channel.outputs.updaterRollback053 == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-0.4.63-updater-rollback-053-windows-candidate
+          if-no-files-found: error
+          path: |
+            x-ray-report-studio/test-output/xrs-0.4.63/X-ray_Report_Studio_Windows_Setup.zip
+            x-ray-report-studio/test-output/xrs-0.4.63/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         if: steps.release-channel.outputs.beta == 'true'
         with:

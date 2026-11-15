@@ -36,6 +36,14 @@ def verify_setup_package(archive_path: Path, source_root: Path, expected_version
                 raise ValueError(f"Expected version {expected_version}, found {package.get('version')}.")
             if package.get('main') != 'electron/main.cjs':
                 raise ValueError('Packaged Electron entry point is incorrect.')
+            launcher_path = SETUP_ROOT + 'Install.cmd'
+            installer_path = SETUP_ROOT + 'Install.ps1'
+            if launcher_path not in names or installer_path not in names:
+                raise ValueError('Setup ZIP is missing its Windows launcher or PowerShell installer.')
+            launcher = archive.read(launcher_path).decode('ascii')
+            if ('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install.ps1"' not in launcher
+                    or ' -Command ' in launcher):
+                raise ValueError('Install.cmd must invoke the adjacent Install.ps1 file with PowerShell -File.')
 
             source_files = {path.name: path for path in source_root.glob('*.cjs') if path.is_file()}
             if 'main.cjs' not in source_files:

@@ -70,6 +70,15 @@ def normalized_text(path):
     return path.read_text(encoding='utf-8').replace('\r\n', '\n').replace('\r', '\n')
 
 
+def install_cmd_content():
+    """Run the adjacent installer script without changing machine policy."""
+    return ('@echo off\r\n'
+            'setlocal\r\n'
+            'set "MRI_STUDIO_PACKAGE=%~dp0"\r\n'
+            'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install.ps1"\r\n'
+            'exit /b %ERRORLEVEL%\r\n')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--candidate-output', type=Path,
@@ -136,25 +145,9 @@ def main():
     (setup / 'README_RU.txt').write_text(normalized_text(ROOT / 'README_RU.txt'), encoding='utf-8', newline='\n')
     (setup / 'Install.ps1').write_bytes(b'\xef\xbb\xbf' + installer.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\r\n').encode('utf-8'))
 
-    # Use an inline command so running Install.cmd does not require changing
-    # PowerShell ExecutionPolicy. Keep the readable .ps1 alongside it.
-    lines = []
-    for source in installer.splitlines():
-        line = source.strip()
-        if not line or line.startswith('#'):
-            continue
-        if not line.endswith(('{', '}')):
-            line += ';'
-        lines.append(line)
-    inline = ' '.join(lines).replace("('\"' + $destination + '\"')",
-                                     '([char]34 + $destination + [char]34)')
-    if '"' in inline:
-        raise RuntimeError('Unexpected double quote in the inline PowerShell command.')
-    command = ('@echo off\r\nsetlocal\r\nset "MRI_STUDIO_PACKAGE=%~dp0"\r\n'
-               f'powershell.exe -NoLogo -NoProfile -Command "& {{ {inline} }}"\r\n')
-    if len(command.encode('ascii')) > 8000:
-        raise RuntimeError('The inline installer exceeds the Windows command-line limit.')
-    (setup / 'Install.cmd').write_bytes(command.encode('ascii'))
+    # The inline one-liner produced by earlier packagers corrupted PowerShell
+    # control flow. Keep the source file intact and invoke it using -File.
+    (setup / 'Install.cmd').write_bytes(install_cmd_content().encode('ascii'))
     start_here = (
         f'УСТАНОВКА X-RAY REPORT STUDIO {app_version}\n\n'
         '1. Распакуйте весь архив.\n'

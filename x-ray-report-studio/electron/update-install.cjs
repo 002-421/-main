@@ -78,8 +78,12 @@ function validateZipEntries(bytes) {
 async function extractWithTar(archive, destination, tarCommand = 'tar.exe') {
   const bytes = await fs.readFile(archive);
   const isZip = bytes.length >= 4 && bytes.readUInt32LE(0) === 0x04034b50;
-  if (isZip || String(archive).toLowerCase().endsWith('.zip')) validateZipEntries(bytes);
-  await run(tarCommand, ['-xf', archive, '-C', destination]);
+  if (isZip || String(archive).toLowerCase().endsWith('.zip')) {
+    try { validateZipEntries(bytes); }
+    catch (error) { error.code ??= 'UNSAFE_ARCHIVE'; throw error; }
+  }
+  try { await run(tarCommand, ['-xf', archive, '-C', destination]); }
+  catch (error) { error.code ??= 'EXTRACT_FAILED'; throw error; }
 }
 
 function verifySha256(bytes, expected) {
@@ -89,19 +93,24 @@ function verifySha256(bytes, expected) {
 
 /** Install app files beside the running copy. The caller commits the shortcut only after smoke checks. */
 async function installUpdateArchive({ archive, currentRoot, version, extractArchive = extractWithTar, createTemporaryDirectory = prefix => fs.mkdtemp(prefix), log = () => {} }) {
-  if (!/^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/.test(String(version))) throw new Error('Некорректная версия обновления.');
+  if (!/^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/.test(String(version))) throw Object.assign(new Error('Некорректная версия обновления.'), { code: 'INVALID_UPDATE_VERSION' });
   const parent = path.dirname(currentRoot);
   const stage = path.join(parent, `.X-ray_Report_Studio_stage_${randomUUID()}`);
   let temporary;
   let newRoot;
   let phase = 'create-extraction-temp';
   const runOperation = async (operation, diagnosticPath, action) => {
+    const activeOperation = operation;
     await log({ event: 'file-operation-start', phase, operation, path: diagnosticPath });
     try {
       const result = await action();
       await log({ event: 'file-operation-complete', phase, operation, path: diagnosticPath });
       return result;
     } catch (error) {
+      if (error && typeof error === 'object') {
+        error.xrsPhase ??= phase;
+        error.xrsOperation ??= activeOperation;
+      }
       const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'FILE_OPERATION_FAILED';
       const syscall = typeof error?.syscall === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(error.syscall) ? error.syscall : undefined;
       await log({ event: 'file-operation-error', phase, operation, path: diagnosticPath, errorCode, ...(syscall ? { syscall } : {}) });
@@ -118,9 +127,11 @@ async function installUpdateArchive({ archive, currentRoot, version, extractArch
     phase = 'validate-package';
     await log({ event: 'install-phase', phase });
     const sourceApp = path.join(temporary, 'X-ray Report Studio Setup', 'app');
-    if (!(await fs.stat(path.join(sourceApp, 'electron', 'main.cjs')).catch(() => null))) throw new Error('В архиве обновления отсутствуют файлы приложения.');
-    const packageInfo = JSON.parse(await fs.readFile(path.join(sourceApp, 'package.json'), 'utf8'));
-    if (packageInfo.version !== version) throw new Error('Версия приложения в архиве не совпадает с манифестом обновления.');
+    if (!(await fs.stat(path.join(sourceApp, 'electron', 'main.cjs')).catch(() => null))) throw Object.assign(new Error('В архиве обновления отсутствуют файлы приложения.'), { code: 'PACKAGE_CONTENT_MISSING' });
+    let packageInfo;
+    try { packageInfo = JSON.parse(await fs.readFile(path.join(sourceApp, 'package.json'), 'utf8')); }
+    catch { throw Object.assign(new Error('Метаданные приложения в архиве повреждены.'), { code: 'PACKAGE_METADATA_INVALID' }); }
+    if (packageInfo.version !== version) throw Object.assign(new Error('Версия приложения в архиве не совпадает с манифестом обновления.'), { code: 'PACKAGE_VERSION_MISMATCH' });
 
     const safeVersion = String(version);
     newRoot = path.join(parent, `App_${safeVersion}`);
@@ -137,12 +148,15 @@ async function installUpdateArchive({ archive, currentRoot, version, extractArch
     await runOperation('create-staged-resources-directory', 'candidate-stage/resources', () => fs.mkdir(path.dirname(targetApp), { recursive: true }));
     await runOperation('copy-verified-app', 'verified-package/app-to-candidate-stage/resources/app', () => fs.cp(sourceApp, targetApp, { recursive: true, errorOnExist: true, force: false }));
     const executable = path.join(stage, 'X-ray Report Studio.exe');
-    if (!(await fs.stat(executable).catch(() => null))) throw new Error('В установленной копии не найден файл приложения.');
+    if (!(await fs.stat(executable).catch(() => null))) throw Object.assign(new Error('В установленной копии не найден файл приложения.'), { code: 'PACKAGE_RUNTIME_MISSING' });
     await runOperation('activate-version-directory', 'candidate-stage-to-versioned-install', () => fs.rename(stage, newRoot));
     await log({ event: 'install-folder-ready', version });
     return { root: newRoot, executable: path.join(newRoot, 'X-ray Report Studio.exe'), icon: path.join(newRoot, 'resources', 'app', 'dist', 'x-ray-report-studio.ico'), version };
   } catch (error) {
-    try { await log({ event: 'install-error', phase, message: error.message, code: error.code, syscall: error.syscall }); } catch {}
+    if (error && typeof error === 'object') error.xrsPhase ??= phase;
+    const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'INSTALL_FAILED';
+    const syscall = typeof error?.syscall === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(error.syscall) ? error.syscall : undefined;
+    try { await log({ event: 'install-error', phase, ...(typeof error?.xrsOperation === 'string' ? { operation: error.xrsOperation } : {}), errorCode, ...(syscall ? { syscall } : {}) }); } catch {}
     if (newRoot) await fs.rm(newRoot, { recursive: true, force: true }).catch(() => {});
     throw error;
   } finally {
@@ -156,7 +170,7 @@ async function writeShortcutAtomically({ shortcutPath, target, cwd, icon, writeS
   const staged = path.join(directory, `.XRS-${randomUUID()}.lnk`);
   try {
     const written = await writeShortcutLink(staged, { target, cwd, icon, description: 'X-ray Report Studio' });
-    if (!written) throw new Error('Не удалось подготовить ярлык приложения.');
+    if (!written) throw Object.assign(new Error('Не удалось подготовить ярлык приложения.'), { code: 'SHORTCUT_WRITE_FAILED' });
     await fs.rename(staged, shortcutPath);
   } finally { await fs.unlink(staged).catch(() => {}); }
 }

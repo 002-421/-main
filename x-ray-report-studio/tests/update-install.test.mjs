@@ -87,8 +87,29 @@ test('temporary extraction directory failure is logged before extract-start and 
   }), /synthetic temporary directory access denied/);
   assert.equal(log.some(entry => entry.event === 'extract-start'), false);
   assert.deepEqual(log.find(entry => entry.event === 'install-error'), {
-    event: 'install-error', phase: 'create-extraction-temp', message: failure.message, code: 'EACCES', syscall: 'mkdtemp',
+    event: 'install-error', phase: 'create-extraction-temp', operation: 'create-directory', errorCode: 'EACCES', syscall: 'mkdtemp',
   });
+  assert.equal(await fs.readFile(path.join(f.currentRoot, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'old app');
+});
+
+test('EBUSY is reported with the exact install operation and a retry can use the retained old installation', async t => {
+  const f = await fixture();
+  t.after(() => fs.rm(f.directory, { recursive: true, force: true }));
+  const log = [];
+  const busy = Object.assign(new Error('synthetic busy file'), { code: 'EBUSY', syscall: 'copyfile' });
+  await assert.rejects(installUpdateArchive({
+    archive: f.archive, currentRoot: f.currentRoot, version: '0.4.14',
+    extractArchive: fakeExtractor(f.packageRoot),
+    createTemporaryDirectory: async () => { throw busy; },
+    log: async entry => log.push(entry),
+  }), error => error.code === 'EBUSY' && error.xrsPhase === 'create-extraction-temp' && error.xrsOperation === 'create-directory');
+  assert.ok(log.some(entry => entry.event === 'file-operation-error' && entry.errorCode === 'EBUSY' && entry.operation === 'create-directory'));
+  assert.equal(await fs.readFile(path.join(f.currentRoot, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'old app');
+
+  const retry = await installUpdateArchive({
+    archive: f.archive, currentRoot: f.currentRoot, version: '0.4.14', extractArchive: fakeExtractor(f.packageRoot),
+  });
+  assert.equal(await fs.readFile(path.join(retry.root, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'new app');
   assert.equal(await fs.readFile(path.join(f.currentRoot, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'old app');
 });
 
@@ -106,7 +127,7 @@ test('archive extraction failure is tagged with the extraction phase', async t =
   }), /synthetic invalid ZIP/);
   assert.equal(log.some(entry => entry.event === 'extract-start'), true);
   assert.deepEqual(log.find(entry => entry.event === 'install-error'), {
-    event: 'install-error', phase: 'extract-archive', message: failure.message, code: 'EINVAL', syscall: 'tar',
+    event: 'install-error', phase: 'extract-archive', operation: 'extract-zip', errorCode: 'EINVAL', syscall: 'tar',
   });
 });
 

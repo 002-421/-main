@@ -4,24 +4,18 @@ const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { spawn } = require('node:child_process');
-const { pathToFileURL, fileURLToPath } = require('node:url');
+const { fileURLToPath } = require('node:url');
 const { verifySha256, writeShortcutAtomically } = require('./update-install.cjs');
-const { isUsableRenderer } = require('./live-update.cjs');
+const { activateRendererUpdate, isUsableRenderer } = require('./live-update.cjs');
 const {
   CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema,
-  getPendingFirstStartAction, isInstallConfirmed, reconcileStableInstallState,
+  getStartupFirstStartDecision, samePath, reconcileStableInstallState,
   recordFirstStartAttempt, confirmFirstStart,
 } = require('./install-state.cjs');
 const { STABLE_MANIFEST, validateManifest, chooseUpdate } = require('./update-channel.cjs');
 const { downloadHttps } = require('./update-download.cjs');
 const { sanitizeUpdateLogEvent, sanitizeStartupLogEvent } = require('./log-safety.cjs');
 const { summarizeFrame } = require('./startup-diagnostics.cjs');
-const { runUpdateWorker } = require('./update-worker.cjs');
-const { acquireUpdateLease, inspectUpdateLease, releaseUpdateLease } = require('./update-lease.cjs');
-const UPDATE_WORKER_ARG = process.argv.indexOf('--xrs-update-worker');
-const UPDATE_WORKER_CONFIG = UPDATE_WORKER_ARG >= 0 && process.argv[UPDATE_WORKER_ARG + 1]
-  ? path.resolve(process.argv[UPDATE_WORKER_ARG + 1]) : '';
 const TEST_KIT_MARKER = path.join(process.resourcesPath, 'app', 'xrs-test-mode.json');
 let TEST_KIT_ROOT = '';
 let INVALID_TEST_KIT_LAUNCH = false;
@@ -53,10 +47,10 @@ if (TEST_KIT_ROOT) {
 }
 if (TEST_KIT_ROOT) app.setPath('sessionData', path.join(app.getPath('userData'), 'Session Data'));
 app.setName('X-ray Report Studio');
-const ownsSingleInstanceLock = Boolean(UPDATE_WORKER_CONFIG) || app.requestSingleInstanceLock();
+const ownsSingleInstanceLock = app.requestSingleInstanceLock();
 if (!ownsSingleInstanceLock) app.quit();
 let mainWindow;
-if (ownsSingleInstanceLock && !UPDATE_WORKER_CONFIG) app.on('second-instance', () => {
+if (ownsSingleInstanceLock) app.on('second-instance', () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
@@ -82,6 +76,7 @@ let activeApplicationVersion = app.getVersion();
 let pendingRendererReady;
 let liveUpdateInProgress = false;
 let activeApplicationRoot = path.dirname(process.execPath);
+let activeRendererIndex = path.join(__dirname, '..', 'dist', 'index.html');
 let installStateFile = '';
 let dataSchemaFile = '';
 let startupInstallState = null;
@@ -185,6 +180,46 @@ async function createUpdateLogger() {
   return { filename, log };
 }
 
+function describeUpdateFailure(error, phase, logFile) {
+  const code = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code)
+    ? error.code : 'UPDATE_FAILED';
+  const operation = {
+    'create-directory': 'создание временной папки',
+    'extract-zip': 'распаковка проверенного архива',
+    'copy-electron-runtime': 'копирование Electron runtime в новую папку',
+    'remove-staged-app': 'замена файлов приложения в подготовленной папке',
+    'copy-verified-app': 'копирование новой версии приложения',
+    'activate-version-directory': 'подготовка отдельной папки версии',
+  }[error?.xrsOperation];
+  const phaseLabel = {
+    manifest: 'проверка сведений об обновлении',
+    download: 'загрузка архива',
+    checksum: 'проверка SHA-256 архива',
+    'write-archive': 'сохранение проверенного архива',
+    'prepare-install': 'подготовка новой установки',
+    'validate-package': 'проверка содержимого архива',
+    'activate-renderer': 'проверка интерфейса новой версии',
+    'switch-shortcut': 'переключение ярлыка',
+    'commit-install-state': 'сохранение сведений о первом запуске',
+  }[phase] ?? 'установка обновления';
+  const reason = {
+    EBUSY: 'файл занят другим процессом',
+    EPERM: 'операция запрещена Windows',
+    EACCES: 'нет доступа к файлу или папке',
+    ENOSPC: 'недостаточно свободного места',
+    ENOENT: 'не найден обязательный файл',
+    EEXIST: 'целевой файл уже существует',
+    EIO: 'ошибка чтения или записи диска',
+    ETIMEDOUT: 'истекло время ожидания',
+    UNSAFE_ARCHIVE: 'структура ZIP не прошла проверку безопасности',
+    EXTRACT_FAILED: 'Windows не смогла распаковать ZIP',
+    PACKAGE_VERSION_MISMATCH: 'версия внутри ZIP не совпадает с манифестом',
+    SHORTCUT_WRITE_FAILED: 'Windows не создала новый ярлык',
+  }[code];
+  const location = operation || phaseLabel;
+  return `Обновление остановлено на этапе «${location}» (${code}${reason ? ` — ${reason}` : ''}). Предыдущая версия и профиль оставлены без изменений.${logFile ? ` Журнал обновления: ${logFile}` : ''}`;
+}
+
 function createUpdateLogWriter(filename, getQueue = () => Promise.resolve(), setQueue = () => {}) {
   return entry => {
     const safe = sanitizeUpdateLogEvent(entry);
@@ -194,21 +229,7 @@ function createUpdateLogWriter(filename, getQueue = () => Promise.resolve(), set
   };
 }
 
-function spawnDetachedUpdateWorker(configFile, workerProfile) {
-  const args = [`--user-data-dir=${workerProfile}`, '--xrs-update-worker', configFile];
-  return new Promise((resolve, reject) => {
-    let child;
-    try {
-      child = spawn(process.execPath, args, { cwd: activeApplicationRoot, detached: true, windowsHide: true, stdio: 'ignore' });
-    } catch (error) { reject(error); return; }
-    child.once('spawn', () => { child.unref(); resolve(child.pid); });
-    child.once('error', reject);
-  });
-}
-
 function shortcutLocation() { return TEST_KIT_ROOT ? path.join(TEST_KIT_ROOT, 'Shortcuts', 'X-ray Report Studio.lnk') : path.join(app.getPath('desktop'), 'X-ray Report Studio.lnk'); }
-function backupRoot() { return path.join(app.getPath('appData'), 'X-ray Report Studio Backups'); }
-function updateCacheRoot() { return path.join(app.getPath('appData'), 'X-ray Report Studio Updates', 'verified'); }
 async function pointShortcutTo(executable, root) {
   const icon = path.join(root, 'resources', 'app', 'dist', 'x-ray-report-studio.ico');
   await fs.mkdir(path.dirname(shortcutLocation()), { recursive: true });
@@ -247,10 +268,17 @@ async function initializeInstallState() {
   installStateFile = path.join(app.getPath('userData'), 'install-state.json');
   dataSchemaFile = path.join(app.getPath('userData'), 'data-schema.json');
   currentDataState = await ensureDataSchema(dataSchemaFile, CURRENT_DATA_SCHEMA);
-  startupInstallState = await readJson(installStateFile, null);
+  try { startupInstallState = await readJson(installStateFile, null); }
+  catch (error) {
+    startupInstallState = null;
+    const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'INSTALL_STATE_UNREADABLE';
+    await logStartup({ event: 'install-state-ignored', errorCode });
+  }
   activeApplicationRoot = path.dirname(process.execPath);
   if (process.platform === 'win32' && startupInstallState?.status === 'stable'
-      && !isInstallConfirmed(startupInstallState, activeApplicationRoot, process.execPath, app.getVersion())) {
+      && (startupInstallState.current?.version !== app.getVersion()
+        || !samePath(startupInstallState.current?.root, activeApplicationRoot)
+        || !samePath(startupInstallState.current?.executable, process.execPath))) {
     try {
       const shortcutTarget = shell.readShortcutLink(shortcutLocation()).target;
       const repairedState = reconcileStableInstallState({
@@ -276,27 +304,12 @@ async function initializeInstallState() {
     }
   }
   const current = startupInstallState?.current;
-  const startupAction = getPendingFirstStartAction(startupInstallState, activeApplicationRoot, process.execPath, app.getVersion());
-  if (startupAction === 'handoff-to-candidate') {
-    try {
-      const executable = await fs.stat(current.executable);
-      if (!executable.isFile()) throw new Error('candidate-not-file');
-      await pointShortcutTo(current.executable, current.root);
-      await logStartup({ event: 'update-old-runtime-handoff', version: current.version });
-      app.relaunch({ execPath: current.executable, args: [`--user-data-dir=${app.getPath('userData')}`] });
-      app.exit(0);
-      return 'relaunch';
-    } catch (error) {
-      const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'HANDOFF_FAILED';
-      await logStartup({ event: 'update-old-runtime-handoff-failed', errorCode });
-      return 'blocked';
-    }
+  const startupAction = getStartupFirstStartDecision(startupInstallState, activeApplicationRoot, process.execPath, app.getVersion());
+  if (startupAction !== 'candidate' || !current) {
+    if (startupAction === 'ignore-legacy-state')
+      await logStartup({ event: 'legacy-pending-install-state-ignored', runtimeVersion: app.getVersion() });
+    return 'normal';
   }
-  if (startupAction === 'blocked') {
-    await logStartup({ event: 'update-pending-runtime-mismatch' });
-    return 'blocked';
-  }
-  if (startupAction !== 'candidate' || !current) return 'normal';
   pendingFirstLaunch = true;
   if (Number(startupInstallState.launchAttempts) >= 1) {
     const restored = await restoreShortcutAfterFailedFirstLaunch();
@@ -364,71 +377,8 @@ async function getUpdateManifest() {
 
 app.whenReady().then(async () => {
   if (!ownsSingleInstanceLock) return;
-  if (UPDATE_WORKER_CONFIG) {
-    let log = async () => {};
-    try {
-      if (!app.isPackaged) throw Object.assign(new Error('Update worker mode is only available in a packaged Windows application.'), { code: 'WORKER_NOT_PACKAGED' });
-      const config = JSON.parse(await fs.readFile(UPDATE_WORKER_CONFIG, 'utf8'));
-      const expectedCacheRoot = path.resolve(app.getPath('appData'), 'X-ray Report Studio Updates', 'verified');
-      const actualCacheRoot = path.resolve(config.cacheRoot ?? '');
-      const sameCacheRoot = process.platform === 'win32'
-        ? actualCacheRoot.toLocaleLowerCase('en-US') === expectedCacheRoot.toLocaleLowerCase('en-US')
-        : actualCacheRoot === expectedCacheRoot;
-      const handoffDirectory = path.resolve(path.dirname(UPDATE_WORKER_CONFIG));
-      const handoffInCache = process.platform === 'win32'
-        ? handoffDirectory.toLocaleLowerCase('en-US') === actualCacheRoot.toLocaleLowerCase('en-US')
-        : handoffDirectory === actualCacheRoot;
-      if (!sameCacheRoot || !handoffInCache)
-        throw Object.assign(new Error('Update handoff file is outside its verified cache directory.'), { code: 'INVALID_WORKER_LOCATION' });
-      if (typeof config.logFile === 'string' && path.isAbsolute(config.logFile)) log = createUpdateLogWriter(config.logFile);
-      await log({ event: 'update-worker-process-ready', phase: 'worker-startup', processState: 'worker-ready' });
-      await runUpdateWorker(config, { app, shell, log,
-        confirmBackupFailure: async () => {
-          const result = await dialog.showMessageBox(null, {
-            type: 'warning', title: 'Резервная копия не создана',
-            message: 'Не удалось создать резервную копию.',
-            detail: 'Продолжение обновления без резервной копии может привести к потере пользовательских данных.',
-            buttons: ['Отмена', 'Всё равно продолжить'], defaultId: 0, cancelId: 0, noLink: true,
-          });
-          return result.response;
-        },
-        showBackupBlocked: async () => dialog.showMessageBox(null, {
-          type: 'error', title: 'Обновление остановлено',
-          message: 'Не удалось создать резервную копию.',
-          detail: 'Продолжение обновления без резервной копии может привести к потере пользовательских данных. Обновление остановлено, поскольку файл профиля занят другим процессом. Закройте другие окна X-ray Report Studio и повторите попытку.',
-          buttons: ['ОК'], defaultId: 0, cancelId: 0, noLink: true,
-        }),
-        showProcessBlocked: async (errorCode, blockingProcesses = []) => dialog.showMessageBox(null, {
-          type: 'error', title: 'Обновление остановлено',
-          message: errorCode === 'PARENT_EXIT_TIMEOUT'
-            ? 'Не удалось безопасно закрыть X-ray Report Studio перед обновлением.'
-            : errorCode === 'PROFILE_STILL_IN_USE'
-              ? 'Файлы X-ray Report Studio всё ещё используются другим процессом.'
-              : 'Не удалось проверить, закрыты ли процессы X-ray Report Studio.',
-          detail: `Обновление остановлено для защиты файлов и пользовательских данных. Закройте указанные процессы XRS и повторите попытку.\n\n${blockingProcesses.slice(0, 8).map(item => `PID ${item.pid} (${item.processType})`).join('\n')}`,
-          buttons: ['ОК'], defaultId: 0, cancelId: 0, noLink: true,
-        }),
-      });
-    } catch (error) {
-      const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'UPDATE_WORKER_START_FAILED';
-      await log({ event: 'update-worker-start-failed', phase: 'worker-startup', errorCode, processState: 'worker-failed' });
-    } finally { app.quit(); }
-    return;
-  }
   if (INVALID_TEST_KIT_LAUNCH) {
     dialog.showErrorBox('XRS-05 test kit', 'Запустите эту тестовую копию через Run-Test-App.cmd. Профиль и рабочий ярлык не были открыты.');
-    app.quit();
-    return;
-  }
-  try {
-    const lease = await inspectUpdateLease({ cacheRoot: updateCacheRoot(), userDataDir: app.getPath('userData') });
-    if (lease.active) {
-      dialog.showErrorBox('Обновление X-ray Report Studio выполняется', `Установка уже выполняется (PID ${lease.ownerPid}). Эта копия не будет открывать профиль одновременно. Дождитесь завершения обновления и запустите приложение снова.`);
-      app.quit();
-      return;
-    }
-  } catch (error) {
-    dialog.showErrorBox('Не удалось проверить обновление X-ray Report Studio', 'Состояние обновления профиля нельзя проверить безопасно. Данные не изменены. Подождите 30 секунд и запустите приложение снова.');
     app.quit();
     return;
   }
@@ -437,15 +387,8 @@ app.whenReady().then(async () => {
   try { const saved = JSON.parse(await fs.readFile(exportSettingsFile, 'utf8')); if (typeof saved.word === 'string' && path.isAbsolute(saved.word)) lastWordDirectory = saved.word; } catch {}
 
   startupLogFile = path.join(app.getPath('userData'), 'logs', `startup-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
-  let installStartup = 'normal';
-  try { installStartup = await initializeInstallState(); }
+  try { await initializeInstallState(); }
   catch { currentDataState = { schemaVersion: 0 }; startupInstallState = null; await logStartup({ event: 'install-metadata-unavailable' }); }
-  if (installStartup === 'relaunch') return;
-  if (installStartup === 'blocked') {
-    dialog.showErrorBox('X-ray Report Studio', 'Обновлённая версия установлена, но не удалось безопасно запустить её. Следующее обновление заблокировано; предыдущая версия и данные сохранены. Запустите X-ray Report Studio через ярлык и обратитесь в поддержку, если сообщение повторится.');
-    app.quit();
-    return;
-  }
   if (currentDataState?.schemaVersion !== CURRENT_DATA_SCHEMA) {
     await dialog.showMessageBox({ type: 'error', title: 'X-ray Report Studio', message: 'Эта версия приложения несовместима с форматом сохранённых данных.', detail: 'Данные оставлены без изменений. Запустите приложение через ярлык последней рабочей версии.' });
     app.quit();
@@ -572,7 +515,7 @@ app.whenReady().then(async () => {
       mainWindow.destroy();
     }
   });
-  mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  mainWindow.loadFile(activeRendererIndex);
 
   ipcMain.handle('report:export-pdf', async (event, name) => {
     requireMain(event);
@@ -595,8 +538,6 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('updates:check', async event => {
     requireMain(event);
-    if (!isInstallConfirmed(startupInstallState, activeApplicationRoot, process.execPath, app.getVersion()))
-      throw new Error('Обновление пока недоступно: сначала запустите и подтвердите установленную версию через её ярлык.');
     return getUpdateManifest();
   });
   ipcMain.handle('app:version', async event => {
@@ -607,126 +548,139 @@ app.whenReady().then(async () => {
     requireMain(event);
     if (updateInstalling) throw new Error('Установка обновления уже запущена.');
     if (process.platform !== 'win32') throw new Error('Автообновление установщика поддерживается в Windows-версии приложения.');
-    if (!isInstallConfirmed(startupInstallState, activeApplicationRoot, process.execPath, app.getVersion()))
-      throw new Error('Следующее обновление заблокировано до фактического запуска и подтверждения текущей версии.');
     updateInstalling = true;
     let logFile = '', log = async () => {};
     const sendProgress = progress => { if (!event.sender.isDestroyed()) event.sender.send('updates:progress', progress); };
     let file = '';
-    let updateLease = null;
-    let leaseTransferred = false;
     let archiveBytes = 0;
     let updatePhase = 'manifest';
+    let installed;
+    let candidateIndex = '';
+    let shortcutChanged = false;
+    let rendererActivated = false;
+    const previousRoot = activeApplicationRoot;
+    const previousVersion = activeApplicationVersion;
+    const previousIndex = activeRendererIndex;
     try {
-      const cacheRoot = updateCacheRoot();
-      updateLease = await acquireUpdateLease({ cacheRoot, userDataDir: app.getPath('userData'), ownerPid: process.pid });
-      const update=await getUpdateManifest();
-      if (!update.available) return { available:false };
       ({ filename: logFile, log } = await createUpdateLogger());
+      const update=await getUpdateManifest();
+      if (!update.available) {
+        await log({ event: 'update-not-available', currentVersion: activeApplicationVersion });
+        return { available:false };
+      }
       await log({ event: 'update-requested', currentVersion: activeApplicationVersion, targetVersion: update.version });
-      updatePhase = 'install-state-validation';
-      const verifiedInstallState = await readJson(installStateFile, null);
-      if (!isInstallConfirmed(verifiedInstallState, activeApplicationRoot, process.execPath, app.getVersion())) {
-        const error = new Error('Текущая версия ещё не подтверждена фактическим запуском. Запустите установленную версию через ярлык перед обновлением.');
-        error.code = 'INSTALL_NOT_CONFIRMED';
-        throw error;
-      }
-      const previousRoot=activeApplicationRoot,previousVersion=activeApplicationVersion;
-      const previousState=verifiedInstallState;
-      if (!isInstallConfirmed(previousState, previousRoot, process.execPath, app.getVersion()))
-        throw new Error('Текущая установка не подтверждена как стабильная. Обновление отменено.');
-      const previousDataSchema = previousState?.current?.dataSchemaVersion ?? CURRENT_DATA_SCHEMA;
-      const previousExecutable=path.join(previousRoot,'X-ray Report Studio.exe');
-      updatePhase = 'verified-archive-cache';
-      await fs.mkdir(cacheRoot, { recursive: true });
-      file = path.join(cacheRoot, `XRS-${update.version}-${update.sha256.toLowerCase()}.zip`);
-      let archive;
-      const cachedStat = await fs.lstat(file).catch(error => error.code === 'ENOENT' ? null : Promise.reject(error));
-      if (cachedStat?.isFile() && !cachedStat.isSymbolicLink()) {
-        archive = await fs.readFile(file);
-        if (verifySha256(archive, update.sha256)) {
-          await log({ event: 'verified-candidate-cache-hit', targetVersion: update.version, bytes: archive.length, expected: update.sha256, actual: update.sha256 });
-        } else {
-          await log({ event: 'verified-candidate-cache-rejected', targetVersion: update.version, errorCode: 'CACHED_ARCHIVE_CHECKSUM_MISMATCH', operation: 'unlink-invalid-cache', path: 'updates/verified/<candidate-archive>' });
-          await fs.unlink(file);
-          archive = undefined;
+      updatePhase = 'download';
+      sendProgress({stage:'downloading',loaded:0,total:0,percent:0});
+      await log({ event: 'download-start', operation: 'download-archive' });
+      let lastLoggedPercent = -10;
+      const archive=await downloadBuffer(update.url, 250_000_000, 0, progress => {
+        sendProgress({stage:'downloading',...progress});
+        if (progress.percent !== null && progress.percent - lastLoggedPercent >= 10) {
+          lastLoggedPercent = progress.percent;
+          void log({ event: 'download-progress', ...progress });
         }
-      } else if (cachedStat) {
-        const error = new Error('Кэш кандидата имеет небезопасный тип файла.');
-        error.code = 'UNSAFE_CACHED_ARCHIVE';
-        throw error;
-      }
-      if (!archive) {
-        updatePhase = 'download';
-        sendProgress({stage:'downloading',loaded:0,total:0,percent:0});
-        await log({ event: 'download-start', operation: 'download-archive' });
-        let lastLoggedPercent = -10;
-        archive=await downloadBuffer(update.url, 250_000_000, 0, progress => {
-          sendProgress({stage:'downloading',...progress});
-          if (progress.percent !== null && progress.percent - lastLoggedPercent >= 10) {
-            lastLoggedPercent = progress.percent;
-            void log({ event: 'download-progress', ...progress });
-          }
-        });
-        archiveBytes = archive.length;
-        await log({ event: 'download-complete', bytes: archive.length });
-        updatePhase = 'checksum';
-        sendProgress({stage:'verifying',loaded:archive.length,total:archive.length,percent:100});
-        const downloadedChecksum=crypto.createHash('sha256').update(archive).digest('hex');
-        await log({ event: 'checksum-check', expected: update.sha256, actual: downloadedChecksum });
-        if(!verifySha256(archive,update.sha256)) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
-        await fs.writeFile(file,archive,{flag:'wx'});
-        await log({ event: 'verified-candidate-cached', targetVersion: update.version, bytes: archive.length, expected: update.sha256, actual: downloadedChecksum, operation: 'write-verified-cache', path: 'updates/verified/<candidate-archive>' });
-      } else {
-        archiveBytes = archive.length;
-        sendProgress({stage:'verifying',loaded:archive.length,total:archive.length,percent:100});
-      }
+      });
+      archiveBytes = archive.length;
+      await log({ event: 'download-complete', bytes: archive.length });
       updatePhase = 'checksum';
+      sendProgress({stage:'verifying',loaded:archive.length,total:archive.length,percent:100});
       const checksum=crypto.createHash('sha256').update(archive).digest('hex');
+      await log({ event: 'checksum-check', expected: update.sha256, actual: checksum });
       if(!verifySha256(archive,update.sha256)) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
       await log({ event: 'checksum-verified', expected: update.sha256, actual: checksum });
+      updatePhase = 'write-archive';
+      file=path.join(os.tmpdir(),`X-ray_Report_Studio_${update.version}_${crypto.randomUUID()}.zip`);
+      await fs.writeFile(file,archive,{flag:'wx'});
+      await log({ event: 'verified-archive-written', targetVersion: update.version, bytes: archive.length, expected: update.sha256, actual: checksum, operation: 'write-verified-archive' });
       sendProgress({stage:'installing',loaded:archive.length,total:archive.length,percent:100});
-      updatePhase = 'worker-handoff';
-      const handoffFile = path.join(cacheRoot, `handoff-${crypto.randomUUID()}.json`);
-      const resultFile = path.join(cacheRoot, `result-${crypto.randomUUID()}.json`);
-      const workerProfile = path.join(os.tmpdir(), `XRS_UpdateWorker_${crypto.randomUUID()}`);
-      const workerConfig = {
-        format: 'xrs-update-handoff', schemaVersion: 1, parentPid: process.pid,
-        archive: file, cacheRoot, sha256: update.sha256, version: update.version, currentVersion: previousVersion,
-        currentRoot: previousRoot, installationParent: path.dirname(previousRoot), userDataDir: app.getPath('userData'), sharedDictionaryFile,
-        backupRoot: backupRoot(), allowedBackupRoot: app.getPath('appData'),
-        installStateFile, dataSchemaFile, shortcutPath: shortcutLocation(), logFile,
-        resultFile, handoffFile, workerProfile, leaseFile: updateLease.leaseFile, leaseAttemptId: updateLease.attemptId, previous: {
-          version: previousVersion, root: previousRoot, executable: previousExecutable,
-          dataSchemaVersion: previousDataSchema,
-        },
-      };
-      await fs.writeFile(handoffFile, `${JSON.stringify(workerConfig)}\n`, { flag: 'wx' });
-      await log({ event: 'update-worker-launch-requested', phase: 'handoff', operation: 'write-handoff-config', path: 'updates/verified/<handoff-config>', processState: 'main-running' });
+      updatePhase = 'prepare-install';
+      installed = await installUpdateArchive({ archive: file, currentRoot: previousRoot, version: update.version, log });
+      candidateIndex = path.join(installed.root, 'resources', 'app', 'dist', 'index.html');
+      await log({ event: 'update-files-ready', targetVersion: update.version, operation: 'prepare-side-by-side-install' });
+
+      updatePhase = 'activate-renderer';
+      activeApplicationVersion = update.version;
+      activeApplicationRoot = installed.root;
+      activeRendererIndex = candidateIndex;
+      rendererReady = false;
+      liveUpdateInProgress = true;
       try {
-        const workerPid = await spawnDetachedUpdateWorker(handoffFile, workerProfile);
-        leaseTransferred = true;
-        await log({ event: 'update-worker-launched', phase: 'handoff', processState: 'main-running', operation: 'spawn-independent-worker', bytes: workerPid });
-      } catch (workerError) {
-        await fs.unlink(handoffFile).catch(() => {});
-        throw workerError;
+        await activateRendererUpdate({
+          loadFile: filename => mainWindow.loadFile(filename),
+          installedIndex: candidateIndex,
+          previousIndex,
+          waitForReady: waitForRendererReady,
+        });
+      } catch (activationError) {
+        activeApplicationVersion = previousVersion;
+        activeApplicationRoot = previousRoot;
+        activeRendererIndex = previousIndex;
+        liveUpdateInProgress = false;
+        await log({ event: 'live-renderer-update-failed', phase: updatePhase, errorCode: 'RENDERER_ACTIVATION_FAILED', recoveryAction: 'keep-previous-renderer-and-shortcut' });
+        activationError.code ??= 'RENDERER_ACTIVATION_FAILED';
+        throw activationError;
       }
-      updateInstalling = false;
-      sendProgress({stage:'restarting',loaded:archive.length,total:archive.length,percent:100});
-      await log({ event: 'main-runtime-shutdown-requested', phase: 'handoff', processState: 'main-running', recoveryAction: 'worker-waits-for-exit' });
-      app.quit();
-      return { available:true, installing:true, version:update.version };
+      rendererActivated = true;
+
+      updatePhase = 'switch-shortcut';
+      await pointShortcutTo(installed.executable, installed.root);
+      shortcutChanged = true;
+      await log({ event: 'shortcut-updated', targetVersion: update.version, operation: 'atomic-shortcut-replacement' });
+
+      updatePhase = 'commit-install-state';
+      const nextInstallState = {
+        status: 'pending-first-start', launchAttempts: 0,
+        current: { version: update.version, root: installed.root, executable: installed.executable, dataSchemaVersion: currentDataState?.schemaVersion ?? CURRENT_DATA_SCHEMA },
+        previous: { version: previousVersion, root: previousRoot, executable: path.join(previousRoot, 'X-ray Report Studio.exe'), dataSchemaVersion: currentDataState?.schemaVersion ?? CURRENT_DATA_SCHEMA },
+      };
+      await writeJsonAtomic(installStateFile, nextInstallState);
+      startupInstallState = nextInstallState;
+      liveUpdateInProgress = false;
+      await log({ event: 'live-renderer-update-complete', targetVersion: update.version, recoveryAction: 'retain-previous-install-for-first-start-rollback' });
     } catch (error) {
-      const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code)
-        ? error.code
-        : typeof error?.name === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(error.name) ? error.name : 'UpdateError';
+      const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'UPDATE_FAILED';
       const syscall = typeof error?.syscall === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(error.syscall) ? error.syscall : undefined;
-      await log({ event: 'update-error', errorCode, phase: updatePhase, ...(syscall ? { syscall } : {}) });
-      sendProgress({stage:'error',loaded:0,total:0,percent:0,message:error.message,logFile});
-      throw new Error(logFile?`${error.message} Журнал обновления: ${logFile}`:error.message);
+      updatePhase = error?.xrsPhase || updatePhase;
+      if (shortcutChanged) {
+        try {
+          await pointShortcutTo(path.join(previousRoot, 'X-ray Report Studio.exe'), previousRoot);
+          await log({ event: 'shortcut-rollback', phase: updatePhase, restored: true, recoveryAction: 'restore-previous-install' });
+        } catch (rollbackError) {
+          await log({ event: 'shortcut-rollback', phase: updatePhase, restored: false, errorCode: rollbackError?.code || 'SHORTCUT_ROLLBACK_FAILED', recoveryAction: 'previous-install-retained' });
+        }
+      }
+      if (rendererActivated) {
+        activeApplicationVersion = previousVersion;
+        activeApplicationRoot = previousRoot;
+        activeRendererIndex = previousIndex;
+        rendererReady = false;
+        liveUpdateInProgress = true;
+        try {
+          await activateRendererUpdate({
+            loadFile: filename => mainWindow.loadFile(filename),
+            installedIndex: previousIndex,
+            previousIndex: candidateIndex,
+            waitForReady: waitForRendererReady,
+          });
+          await log({ event: 'renderer-rollback', phase: updatePhase, restored: true, recoveryAction: 'restore-previous-renderer' });
+        } catch (rollbackError) {
+          await log({ event: 'renderer-rollback', phase: updatePhase, restored: false, errorCode: rollbackError?.code || 'RENDERER_ROLLBACK_FAILED', recoveryAction: 'previous-install-retained' });
+        } finally { liveUpdateInProgress = false; }
+      } else {
+        activeApplicationVersion = previousVersion;
+        activeApplicationRoot = previousRoot;
+        activeRendererIndex = previousIndex;
+        liveUpdateInProgress = false;
+      }
+      const operation = typeof error?.xrsOperation === 'string' ? error.xrsOperation : undefined;
+      await log({ event: 'update-error', errorCode, phase: updatePhase, ...(operation ? { operation } : {}), ...(syscall ? { syscall } : {}), recoveryAction: 'retain-previous-install-and-profile' });
+      const message = describeUpdateFailure({ ...error, code: errorCode, xrsOperation: operation }, updatePhase, logFile);
+      sendProgress({stage:'error',loaded:0,total:0,percent:0,message,logFile});
+      throw new Error(message);
     } finally {
-      if (updateLease && !leaseTransferred) await releaseUpdateLease(updateLease.leaseFile, updateLease.attemptId, process.pid).catch(() => {});
-      updateInstalling=false;
+      liveUpdateInProgress = false;
+      if (file) await fs.unlink(file).catch(() => {});
+      updateInstalling = false;
     }
     sendProgress({stage:'installed',loaded:archiveBytes,total:archiveBytes,percent:100});
     return { available:true, installing:false, version:activeApplicationVersion };

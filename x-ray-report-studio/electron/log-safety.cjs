@@ -46,7 +46,7 @@ function sanitizeUpdateLogEvent(event) {
     ENAMETOOLONG: 'Path is too long', ENOTDIR: 'Expected a directory', EIO: 'Disk I/O error',
     EROFS: 'Storage is read-only', ETIMEDOUT: 'Operation timed out',
   };
-  if (reasons[safe.code]) safe.reason = reasons[safe.code];
+  if (reasons[safe.code ?? safe.errorCode]) safe.reason = reasons[safe.code ?? safe.errorCode];
   return safe;
 }
 

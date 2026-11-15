@@ -1,6 +1,5 @@
-// Keep this allowlist in sync with the persisted key versions in src/workspace.ts
-// and the Electron-owned files copied by user-data-backup.cjs. Add an application
-// version only after its reader has been tested against this exact data contract.
+// Keep this allowlist in sync with the persisted key versions in src/workspace.ts.
+// Add a release only after its reader has been tested against this data contract.
 const CURRENT_DATA_CONTRACT = 'xrs-local-data-v1';
 const DATA_SCHEMA_VERSION = 1;
 
@@ -21,6 +20,9 @@ const APPLICATION_DATA_CONTRACTS = Object.freeze({
   '0.4.60': Object.freeze([CURRENT_DATA_CONTRACT]),
   // 0.4.61 is a technical release with the unchanged 0.4.60 profile contract.
   '0.4.61': Object.freeze([CURRENT_DATA_CONTRACT]),
+  // 0.4.62 and updater rollback candidates retain the same persisted profile contract.
+  '0.4.62': Object.freeze([CURRENT_DATA_CONTRACT]),
+  '0.4.63': Object.freeze([CURRENT_DATA_CONTRACT]),
 });
 
 function applicationSupportsDataContract(applicationVersion, dataContract, schemaVersion = DATA_SCHEMA_VERSION) {

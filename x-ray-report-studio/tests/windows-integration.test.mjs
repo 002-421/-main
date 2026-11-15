@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { strToU8, zipSync } from 'fflate';
@@ -32,6 +32,33 @@ async function createWindowsShortcut(filename, { target, cwd, icon }) {
     env: { ...process.env, XRS_SHORTCUT_PATH: filename, XRS_SHORTCUT_TARGET: target, XRS_SHORTCUT_CWD: cwd, XRS_SHORTCUT_ICON: icon },
   });
   return true;
+}
+
+async function hardlinkRuntimeTree(source, destination) {
+  await fs.mkdir(destination, { recursive: true });
+  for (const entry of await fs.readdir(source, { withFileTypes: true })) {
+    const from = path.join(source, entry.name), to = path.join(destination, entry.name);
+    if (entry.isDirectory()) await hardlinkRuntimeTree(from, to);
+    else if (entry.isFile()) {
+      try { await fs.link(from, to); }
+      catch (error) {
+        if (!['EXDEV', 'EPERM', 'EACCES', 'ENOTSUP', 'EMLINK'].includes(error.code)) throw error;
+        await fs.copyFile(from, to);
+      }
+    }
+  }
+}
+
+async function waitForFile(filename, child, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (child.spawnError) throw child.spawnError;
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`Synthetic Electron exited before it became ready (code ${child.exitCode}, signal ${child.signalCode}).`);
+    try { return JSON.parse(await fs.readFile(filename, 'utf8')); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error('Synthetic Electron did not report readiness within 20 seconds.');
 }
 
 test('Windows paths with spaces and Cyrillic keep old installs, atomically replace shortcuts and verify a profile backup', { skip: process.platform !== 'win32' }, async t => {
@@ -189,4 +216,93 @@ test('Windows .56 → .57 → .58 handoff and stale Stable-state recovery valida
     runtimeExecutable: executables['0.4.58'], runtimeAppPath: actualAppPath,
     shortcutTarget: executables['0.4.57'],
   }), null, 'mismatched shortcut prevents recovery from confirming Stable');
+});
+
+test('legacy side-by-side update stages a verified app while the real old Electron runtime and synthetic profile remain open', { skip: process.platform !== 'win32' }, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'XRS live update кириллица '));
+  const currentRoot = path.join(root, 'App_0.4.62');
+  const profile = path.join(root, 'Synthetic profile', 'MRI Report Studio');
+  const readyFile = path.join(root, 'worker-ready.json');
+  const stopFile = path.join(root, 'stop-worker');
+  const shortcut = path.join(root, 'Desktop', 'X-ray Report Studio.lnk');
+  const testDir = path.dirname(fileURLToPath(import.meta.url));
+  const electronDist = path.join(testDir, '..', 'node_modules', 'electron', 'dist');
+  let child;
+  let exited;
+  t.after(async () => {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      await fs.writeFile(stopFile, 'stop').catch(() => {});
+      await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 10000))]);
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 3000))]);
+    }
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await hardlinkRuntimeTree(electronDist, currentRoot);
+  const oldExecutable = path.join(currentRoot, 'X-ray Report Studio.exe');
+  await fs.rename(path.join(currentRoot, 'electron.exe'), oldExecutable);
+  const oldApp = path.join(currentRoot, 'resources', 'app');
+  await fs.rm(oldApp, { recursive: true, force: true });
+  await fs.mkdir(path.join(oldApp, 'electron'), { recursive: true });
+  await fs.writeFile(path.join(oldApp, 'package.json'), JSON.stringify({ name: 'xrs-live-smoke', productName: 'XRS live smoke', version: '0.4.62', main: 'electron/main.cjs' }));
+  await fs.writeFile(path.join(oldApp, 'electron', 'main.cjs'), [
+    "const { app } = require('electron');",
+    "const fs = require('node:fs');",
+    "app.setPath('userData', process.env.XRS_LIVE_USER_DATA);",
+    "app.whenReady().then(() => {",
+    "  fs.writeFileSync(process.env.XRS_LIVE_READY, JSON.stringify({ pid: process.pid, executable: process.execPath, userData: app.getPath('userData') }));",
+    "  const timer = setInterval(() => { if (fs.existsSync(process.env.XRS_LIVE_STOP)) { clearInterval(timer); app.quit(); } }, 100);",
+    "});",
+  ].join('\n'));
+  await fs.mkdir(profile, { recursive: true });
+  const syntheticUserFiles = {
+    'workspace.json': '{"drafts":["SYNTHETIC REPORT A"]}',
+    'dictionary.json': '["синтетический-термин"]',
+    'settings.json': '{"theme":"dark","doctor":"Synthetic Doctor"}',
+  };
+  for (const [name, contents] of Object.entries(syntheticUserFiles)) await fs.writeFile(path.join(profile, name), contents);
+  await fs.mkdir(path.dirname(shortcut), { recursive: true });
+  await writeShortcutAtomically({ shortcutPath: shortcut, target: oldExecutable, cwd: currentRoot, icon: '', writeShortcutLink: createWindowsShortcut });
+
+  child = spawn(oldExecutable, [], {
+    cwd: currentRoot, windowsHide: true, stdio: 'ignore',
+    env: { ...process.env, XRS_LIVE_USER_DATA: profile, XRS_LIVE_READY: readyFile, XRS_LIVE_STOP: stopFile },
+  });
+  exited = new Promise(resolve => child.once('exit', resolve));
+  child.once('error', error => { child.spawnError = error; });
+  const ready = await waitForFile(readyFile, child);
+  assert.equal(path.resolve(ready.userData).toLocaleLowerCase('en-US'), path.resolve(profile).toLocaleLowerCase('en-US'));
+  assert.equal(path.resolve(ready.executable).toLocaleLowerCase('en-US'), path.resolve(oldExecutable).toLocaleLowerCase('en-US'));
+  const oldExecutableBytes = await fs.readFile(oldExecutable);
+  const oldMainBytes = await fs.readFile(path.join(oldApp, 'electron', 'main.cjs'));
+
+  const packageRoot = path.join(root, 'verified update', 'X-ray Report Studio Setup', 'app');
+  await fs.mkdir(path.join(packageRoot, 'electron'), { recursive: true });
+  await fs.mkdir(path.join(packageRoot, 'dist'), { recursive: true });
+  await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ version: '0.4.63', main: 'electron/main.cjs' }));
+  await fs.writeFile(path.join(packageRoot, 'electron', 'main.cjs'), 'module.exports = true;');
+  await fs.writeFile(path.join(packageRoot, 'dist', 'index.html'), '<!doctype html><title>Synthetic XRS 0.4.63</title>');
+  const archive = path.join(root, 'verified-update.zip');
+  await fs.writeFile(archive, 'synthetic archive already passed SHA-256 verification');
+  const installed = await installUpdateArchive({
+    archive, currentRoot, version: '0.4.63',
+    extractArchive: async (_filename, destination) => fs.cp(path.dirname(packageRoot), path.join(destination, 'X-ray Report Studio Setup'), { recursive: true }),
+  });
+
+  assert.equal(child.exitCode, null, 'the real old Electron main process remains alive during side-by-side preparation');
+  assert.deepEqual(await fs.readFile(path.join(currentRoot, 'resources', 'app', 'electron', 'main.cjs')), oldMainBytes, 'the running old app files remain unchanged');
+  assert.deepEqual(await fs.readFile(oldExecutable), oldExecutableBytes, 'the running old executable is read-only to the update flow');
+  assert.equal(JSON.parse(await fs.readFile(path.join(installed.root, 'resources', 'app', 'package.json'), 'utf8')).version, '0.4.63');
+  for (const [name, contents] of Object.entries(syntheticUserFiles))
+    assert.equal(await fs.readFile(path.join(profile, name), 'utf8'), contents, `${name} remains byte-for-byte unchanged`);
+  assert.deepEqual(await fs.readdir(path.dirname(profile)), ['MRI Report Studio'], 'no profile backup/copy is created during update staging');
+
+  await writeShortcutAtomically({ shortcutPath: shortcut, target: installed.executable, cwd: installed.root, icon: installed.icon, writeShortcutLink: createWindowsShortcut });
+  const { stdout } = await runElectronWorker(path.join(electronDist, 'electron.exe'), path.join(testDir, 'windows-shortcut-worker.cjs'), {
+    env: { ...process.env, XRS_SHORTCUT_PATH: shortcut },
+  });
+  const target = JSON.parse(stdout).target;
+  const [realTarget, realInstalled] = await Promise.all([fs.realpath(target), fs.realpath(installed.executable)]);
+  assert.equal(realTarget.toLocaleLowerCase('en-US'), realInstalled.toLocaleLowerCase('en-US'), 'the real Windows shortcut targets the staged version only after preparation');
 });

@@ -154,6 +154,16 @@ function getPendingFirstStartAction(installState, runtimeRoot, runtimeExecutable
   return 'blocked';
 }
 
+// Keep the first-start rollback only for a runtime that exactly matches the
+// staged candidate. Old or inconsistent pending metadata must not prevent a
+// working installed copy from opening the editor and checking for updates.
+function getStartupFirstStartDecision(installState, runtimeRoot, runtimeExecutable = path.join(runtimeRoot, 'X-ray Report Studio.exe'), runtimeVersion = installState?.current?.version) {
+  const action = getPendingFirstStartAction(installState, runtimeRoot, runtimeExecutable, runtimeVersion);
+  if (action === 'candidate') return 'candidate';
+  if (installState?.status === 'pending-first-start') return 'ignore-legacy-state';
+  return 'normal';
+}
+
 function isInstallConfirmed(installState, runtimeRoot, runtimeExecutable = path.join(runtimeRoot, 'X-ray Report Studio.exe'), runtimeVersion = installState?.current?.version) {
   if (installState == null) return true;
   return installState.status === 'stable'
@@ -178,5 +188,6 @@ function confirmFirstStart(installState, runtimeRoot, runtimeExecutable = path.j
 module.exports = {
   CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema, canRollback,
   canonicalPath, samePath, isVersionedInstallRoot, reconcileStableInstallState,
-  getPendingFirstStartAction, isInstallConfirmed, recordFirstStartAttempt, confirmFirstStart,
+  getPendingFirstStartAction, getStartupFirstStartDecision, isInstallConfirmed,
+  recordFirstStartAttempt, confirmFirstStart,
 };

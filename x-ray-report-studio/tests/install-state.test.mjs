@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
 const {
  CURRENT_DATA_SCHEMA,ensureDataSchema,writeJsonAtomic,canRollback,
- canonicalPath,samePath,reconcileStableInstallState,getPendingFirstStartAction,isInstallConfirmed,recordFirstStartAttempt,confirmFirstStart,
+ canonicalPath,samePath,reconcileStableInstallState,getPendingFirstStartAction,getStartupFirstStartDecision,isInstallConfirmed,recordFirstStartAttempt,confirmFirstStart,
 }=require('../electron/install-state.cjs');
 const {CURRENT_DATA_CONTRACT}=require('../electron/data-compatibility.cjs');
 const {applicationSupportsDataContract}=require('../electron/data-compatibility.cjs');
@@ -17,6 +17,8 @@ test('0.4.54 keeps the existing profile contract because Undo history is optiona
  assert.equal(applicationSupportsDataContract('0.4.53',CURRENT_DATA_CONTRACT,1),true);
  assert.equal(applicationSupportsDataContract('0.4.54',CURRENT_DATA_CONTRACT,1),true);
  assert.equal(applicationSupportsDataContract('0.4.55',CURRENT_DATA_CONTRACT,1),true,'the local upgrade uses the same persisted contract');
+ assert.equal(applicationSupportsDataContract('0.4.62',CURRENT_DATA_CONTRACT,1),true);
+ assert.equal(applicationSupportsDataContract('0.4.63',CURRENT_DATA_CONTRACT,1),true,'the updater rollback candidate keeps the persisted contract');
  assert.equal(applicationSupportsDataContract('0.4.53','xrs-local-undo-history-v1',1),false);
 });
 
@@ -95,6 +97,20 @@ test('stale Stable pointer is reconciled only when the live EXE, bundled app, sh
  assert.equal(reconcileStableInstallState({...valid,dataState:{...dataState,dataContract:'unknown-contract'}}),null,'unknown profile contracts are not accepted');
  await fs.writeFile(path.join(runtimeAppPath,'package.json'),JSON.stringify({version:'0.4.57',main:'electron/main.cjs'}));
  assert.equal(reconcileStableInstallState(valid),null,'corrupt or mismatched embedded version metadata is not trusted');
+});
+
+test('legacy pending update state cannot block a working older runtime from opening and checking for updates',()=>{
+ const root=path.resolve('/safe/App_0.4.62');
+ const executable=path.join(root,'X-ray Report Studio.exe');
+ const candidateRoot=path.resolve('/safe/App_0.4.63');
+ const state={status:'pending-first-start',launchAttempts:0,
+  current:{version:'0.4.63',root:candidateRoot,executable:path.join(candidateRoot,'X-ray Report Studio.exe')},
+  previous:{version:'0.4.61',root:path.resolve('/safe/App_0.4.61'),executable:path.resolve('/safe/App_0.4.61/X-ray Report Studio.exe')}};
+ assert.equal(getPendingFirstStartAction(state,root,executable,'0.4.62'),'blocked');
+ assert.equal(getStartupFirstStartDecision(state,root,executable,'0.4.62'),'ignore-legacy-state');
+ assert.equal(state.status,'pending-first-start','the compatibility path does not rewrite user install metadata');
+ assert.equal(getStartupFirstStartDecision(state,candidateRoot,path.join(candidateRoot,'X-ray Report Studio.exe'),'0.4.63'),'candidate',
+  'the exact staged EXE still receives the first-start rollback protection');
 });
 
 test('corrupt data compatibility metadata blocks rollback',async t=>{
