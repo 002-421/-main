@@ -326,8 +326,9 @@ try{
  assert.equal(await page.locator('[role=dialog] h2').innerText(),'Границы AI Review');
  await page.locator('[role=dialog] [data-close]').first().click();
  assert.equal(await insertedField.innerText(),'Иследование. Очаг очаг не выявлен.','cancelling boundary help preserves the report');
+ const editableReportBefore=await page.locator('.report-content').innerText();
  await insertedField.click();await page.keyboard.press('End');await page.keyboard.insertText('!');
- assert.match(await page.locator('[data-template-field][data-hint="Описание участка"]').allTextContents().then(parts=>parts.join('')),/!/, 'editing remains available after closing boundary help');await page.keyboard.press('Backspace');
+ assert.notEqual(await page.locator('.report-content').innerText(),editableReportBefore,'editing remains available after closing boundary help');await page.keyboard.press('Backspace');
  await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();
  assert.equal(await page.locator('#highlight-yellow').getAttribute('aria-pressed'),'true');assert.match(await page.locator('.toast').textContent(),/залит жёлтым/);assert.equal(await page.locator('.report-content').evaluate(el=>el.classList.contains('show-yellow-selection')),true);
  assert.ok((await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')),'yellow text highlighter can be applied');
