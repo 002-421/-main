@@ -28,11 +28,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          import io, os, re, urllib.request, zipfile
+          import io, os, re, sys, urllib.request, zipfile
+          sys.stdout.reconfigure(encoding='utf-8')
           url='https://api.github.com/repos/002-421/-main/actions/runs/43732938624/logs'
           try:
               request=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GITHUB_TOKEN'],'Accept':'application/vnd.github+json'})
               with urllib.request.urlopen(request,timeout=90) as response: archive=zipfile.ZipFile(io.BytesIO(response.read()))
+              print('::warning title=Historical log files::'+str(archive.namelist()))
               for name in archive.namelist():
                   if 'Full unit suite' not in name: continue
                   lines=archive.read(name).decode('utf-8','replace').splitlines()
@@ -41,7 +43,7 @@ jobs:
                   detail='\n'.join(lines[j] for j in selected)[-25000:]
                   if detail:
                       escaped=detail.replace('%','%25').replace('\r','%0D').replace('\n','%0A')
-                      print('::notice title=Historical unit failure::'+escaped)
+                      print('::warning title=Historical unit failure::'+escaped)
           except Exception as error:
               print('::warning::Historical log retrieval unavailable: '+type(error).__name__)
       - uses: actions/setup-node@v4
