@@ -9,7 +9,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { runUpdateWorker, waitForParentExit } = require('../electron/update-worker.cjs');
 const { writeJsonAtomic } = require('../electron/install-state.cjs');
-const { acquireUpdateLease, inspectUpdateLease, releaseUpdateLease } = require('../electron/update-lease.cjs');
+const { acquireUpdateLease, inspectUpdateLease, claimUpdateLease, releaseUpdateLease } = require('../electron/update-lease.cjs');
 
 async function setup() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'xrs-worker-recovery-'));
@@ -101,6 +101,26 @@ test('worker holds one profile lease through handoff and releases it before laun
   const result = await runUpdateWorker(f.config, deps);
   assert.deepEqual(result, { installed: true, version: '0.4.59' });
   assert.equal((await inspectUpdateLease({ cacheRoot: f.config.cacheRoot, userDataDir: f.profile })).active, false);
+});
+
+test('a duplicate worker preserves the durable failure record and cannot release the active worker lease', async t => {
+  const f = await setup(); t.after(() => fs.rm(f.root, { recursive: true, force: true }));
+  const lease = await acquireUpdateLease({ cacheRoot: f.config.cacheRoot, userDataDir: f.profile, ownerPid: process.pid });
+  await claimUpdateLease(lease.leaseFile, lease.attemptId, process.pid, process.pid + 100000);
+  f.config.leaseFile = lease.leaseFile;
+  f.config.leaseAttemptId = lease.attemptId;
+  const deps = dependencies(f);
+  const result = await runUpdateWorker(f.config, deps);
+  assert.deepEqual(result, { installed: false, errorCode: 'UPDATE_LEASE_OWNED_BY_OTHER_WORKER', phase: 'wait-for-main-exit', archiveRetained: true });
+  assert.deepEqual(JSON.parse(await fs.readFile(f.config.resultFile, 'utf8')), {
+    status: 'failed', version: '0.4.59', errorCode: 'UPDATE_LEASE_OWNED_BY_OTHER_WORKER',
+    phase: 'wait-for-main-exit', at: JSON.parse(await fs.readFile(f.config.resultFile, 'utf8')).at,
+  });
+  assert.equal((await inspectUpdateLease({ cacheRoot: f.config.cacheRoot, userDataDir: f.profile })).ownerPid, process.pid + 100000);
+  assert.equal(deps.calls.backup, 0);
+  assert.equal(deps.calls.install, 0);
+  assert.equal(deps.calls.shortcut.length, 0);
+  await releaseUpdateLease(lease.leaseFile, lease.attemptId, process.pid + 100000);
 });
 
 test('a non-lock backup failure defaults to cancel and leaves the old install and verified archive untouched', async t => {

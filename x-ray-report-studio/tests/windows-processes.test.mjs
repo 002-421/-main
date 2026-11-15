@@ -54,7 +54,10 @@ function makeWorkerSource({ root, workerModule, stateModule }) {
         smokeTestInstalledApp:async()=>({ready:true,version:'0.4.60'}),writeShortcutAtomically:async o=>fs.writeFile(o.shortcutPath,o.target),
         readShortcutTarget:async f=>fs.readFile(f,'utf8'),launchDetached:async()=>{events.push('candidate-launch');await fs.writeFile(process.env.XRS_WORKER_EVENTS,JSON.stringify(events));},
         log:async event=>{const safe={};for(const key of ['event','phase','operation','processState','errorCode','recoveryAction'])if(typeof event[key]==='string')safe[key]=event[key];await diag(safe);}});
-      await fs.writeFile(process.env.XRS_WORKER_RESULT,JSON.stringify(result));
+      // The production entrypoint leaves the failure record written by
+      // runUpdateWorker untouched. Only write the helper's success result;
+      // otherwise the test adapter overwrites the diagnostic failure schema.
+      if(result.installed)await fs.writeFile(process.env.XRS_WORKER_RESULT,JSON.stringify(result));
     }catch(e){await diag({stage:'worker-top-level-error',errorCode:typeof e.code==='string'?e.code:'UNCLASSIFIED'});await fs.writeFile(process.env.XRS_WORKER_RESULT,JSON.stringify({error:e.message,code:e.code}));}finally{app.quit();}});
   `;
 }
