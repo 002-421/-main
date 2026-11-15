@@ -4,12 +4,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { waitForNoProfileProcesses, hasOtherXrsProcess } = require('../electron/windows-processes.cjs');
+const execFileAsync = promisify(execFile);
 
 function waitForProcessClose(child, timeoutMs, label) {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
@@ -18,6 +20,21 @@ function waitForProcessClose(child, timeoutMs, label) {
     child.once('close', code => { clearTimeout(timer); resolve(code); });
     child.once('error', error => { clearTimeout(timer); reject(error); });
   });
+}
+
+async function terminateProcessTree(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === 'win32' && Number.isSafeInteger(child.pid)) {
+    await execFileAsync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }).catch(() => {});
+  } else {
+    child.kill('SIGKILL');
+  }
+  await waitForProcessClose(child, 5000, 'Electron test process').catch(() => {});
+}
+
+async function readDiagnosticEvents(filename) {
+  try { return (await fs.readFile(filename, 'utf8')).trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line)); }
+  catch { return []; }
 }
 
 test('profile process inspection waits for active processes and fails closed at timeout', async () => {
@@ -47,11 +64,7 @@ test('independent Electron updater waits for the real parent Electron process be
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'xrs-independent-worker-'));
   const children = [];
   t.after(async () => {
-    await Promise.all(children.map(async child => {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      child.kill();
-      await Promise.race([waitForProcessClose(child, 5000, 'Electron test process').catch(() => {}), new Promise(resolve => setTimeout(resolve, 5000))]);
-    }));
+    await Promise.all(children.map(terminateProcessTree));
     await fs.rm(root, { recursive: true, force: true });
   });
   const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -60,11 +73,12 @@ test('independent Electron updater waits for the real parent Electron process be
   const profile = path.join(root, 'Profile', 'MRI Report Studio'), installRoot = path.join(root, 'Install', 'App_0.4.58');
   const cacheRoot = path.join(root, 'Cache'), archive = path.join(cacheRoot, 'XRS-0.4.59.zip');
   const marker = path.join(root, 'worker-events.json'), resultFile = path.join(root, 'worker-result.json');
+  const diagnosticsFile = path.join(root, 'worker-diagnostics.jsonl'), parentReadyFile = path.join(root, 'parent-ready.json');
   const shortcutPath = path.join(root, 'Desktop', 'XRS.lnk'), logFile = path.join(profile, 'logs', 'update.log');
   await Promise.all([fs.mkdir(parentApp, { recursive: true }), fs.mkdir(workerApp, { recursive: true }), fs.mkdir(profile, { recursive: true }), fs.mkdir(installRoot, { recursive: true }), fs.mkdir(cacheRoot, { recursive: true }), fs.mkdir(path.dirname(shortcutPath), { recursive: true })]);
   const parentProfile = path.join(root, 'ParentProfile'); await fs.mkdir(parentProfile);
   await fs.writeFile(path.join(parentApp, 'package.json'), JSON.stringify({ name: 'parent-fixture', version: '1.0.0', main: 'main.cjs' }));
-  await fs.writeFile(path.join(parentApp, 'main.cjs'), "const {app}=require('electron');app.whenReady().then(()=>setTimeout(()=>app.quit(),2200));");
+  await fs.writeFile(path.join(parentApp, 'main.cjs'), `const fs=require('node:fs');const {app}=require('electron');app.whenReady().then(()=>{fs.writeFileSync(${JSON.stringify(parentReadyFile)},JSON.stringify({pid:process.pid}));setTimeout(()=>app.quit(),2200);});`);
   const parentExe = path.join(installRoot, 'X-ray Report Studio.exe'); await fs.writeFile(parentExe, 'synthetic previous executable marker');
   await fs.writeFile(path.join(profile, 'workspace.json'), 'synthetic open document');
   await fs.writeFile(archive, 'synthetic verified archive');
@@ -87,29 +101,48 @@ test('independent Electron updater waits for the real parent Electron process be
   const workerSource = `
     const fs=require('node:fs/promises');const {app,shell}=require('electron');
     const {runUpdateWorker}=require(${JSON.stringify(workerModule)});const {writeJsonAtomic}=require(${JSON.stringify(stateModule)});
-    app.whenReady().then(async()=>{try{const c=JSON.parse(await fs.readFile(process.env.XRS_WORKER_CONFIG,'utf8'));c.parentPid=Number(process.env.XRS_PARENT_PID);
+    const diag=async event=>fs.appendFile(process.env.XRS_WORKER_DIAGNOSTICS,JSON.stringify(event)+'\\n');
+    diag({stage:'electron-process-started'}).catch(()=>{});
+    app.whenReady().then(async()=>{await diag({stage:'electron-app-ready'});try{const c=JSON.parse(await fs.readFile(process.env.XRS_WORKER_CONFIG,'utf8'));c.parentPid=Number(process.env.XRS_PARENT_PID);
       const events=[];const result=await runUpdateWorker(c,{app,shell,writeJsonAtomic,
         waitForProfileIdle:async()=>{},createUserDataBackup:async()=>{try{process.kill(c.parentPid,0);throw new Error('parent Electron process is still running');}catch(e){if(e.message==='parent Electron process is still running')throw e;}
           events.push('backup-after-parent-exit');await fs.writeFile(process.env.XRS_WORKER_EVENTS,JSON.stringify(events));return{files:1,bytes:20};},
         installUpdateArchive:async()=>({root:${JSON.stringify(path.join(root,'Install','App_0.4.59'))},executable:${JSON.stringify(path.join(root,'Install','App_0.4.59','X-ray Report Studio.exe'))}),
         smokeTestInstalledApp:async()=>({ready:true,version:'0.4.59'}),writeShortcutAtomically:async o=>fs.writeFile(o.shortcutPath,o.target),
-        readShortcutTarget:async f=>fs.readFile(f,'utf8'),launchDetached:async()=>{events.push('candidate-launch');await fs.writeFile(process.env.XRS_WORKER_EVENTS,JSON.stringify(events));},log:async()=>{}});
+        readShortcutTarget:async f=>fs.readFile(f,'utf8'),launchDetached:async()=>{events.push('candidate-launch');await fs.writeFile(process.env.XRS_WORKER_EVENTS,JSON.stringify(events));},
+        log:async event=>{const safe={};for(const key of ['event','phase','operation','processState','errorCode','recoveryAction'])if(typeof event[key]==='string')safe[key]=event[key];await diag(safe);}});
       await fs.writeFile(process.env.XRS_WORKER_RESULT,JSON.stringify(result));
-    }catch(e){await fs.writeFile(process.env.XRS_WORKER_RESULT,JSON.stringify({error:e.message,code:e.code}));}finally{app.quit();}});
+    }catch(e){await diag({stage:'worker-top-level-error',errorCode:typeof e.code==='string'?e.code:'UNCLASSIFIED'});await fs.writeFile(process.env.XRS_WORKER_RESULT,JSON.stringify({error:e.message,code:e.code}));}finally{app.quit();}});
   `;
   await fs.writeFile(workerEntrypoint, workerSource);
   const parent = spawn(electronExe, [parentApp, `--user-data-dir=${parentProfile}`], { cwd: parentApp, windowsHide: true, stdio: 'ignore' });
   children.push(parent);
   let parentExit;
+  const parentReadyTimer = Date.now() + 10000;
+  let parentRuntime;
+  while (Date.now() < parentReadyTimer) {
+    try { parentRuntime = JSON.parse(await fs.readFile(parentReadyFile, 'utf8')); break; }
+    catch (error) {
+      if (parent.exitCode !== null || parent.signalCode !== null) throw new Error(`Parent Electron exited before app readiness (exit=${parent.exitCode}, signal=${parent.signalCode}).`);
+      if (error.code !== 'ENOENT') throw error;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+  assert.ok(Number.isSafeInteger(parentRuntime?.pid) && parentRuntime.pid > 0, 'Parent Electron did not report its real runtime PID within 10000 ms.');
   const parentClosed = waitForProcessClose(parent, 15000, 'Parent Electron process').then(code => { parentExit = code; return code; });
-  config.parentPid = parent.pid; await fs.writeFile(configFile, JSON.stringify(config));
+  config.parentPid = parentRuntime.pid; await fs.writeFile(configFile, JSON.stringify(config));
   const worker = spawn(electronExe, [workerApp, `--user-data-dir=${path.join(root, 'WorkerProfile')}`], {
     cwd: workerApp, windowsHide: true, stdio: 'ignore',
-    env: { ...process.env, XRS_WORKER_CONFIG: configFile, XRS_WORKER_RESULT: resultFile, XRS_WORKER_EVENTS: marker, XRS_PARENT_PID: String(parent.pid) },
+    env: { ...process.env, XRS_WORKER_CONFIG: configFile, XRS_WORKER_RESULT: resultFile, XRS_WORKER_EVENTS: marker, XRS_WORKER_DIAGNOSTICS: diagnosticsFile, XRS_PARENT_PID: String(parentRuntime.pid) },
   });
   children.push(worker);
   const workerClosed = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Independent Electron worker did not finish within 30 seconds.')), 30000);
+    const timer = setTimeout(async () => {
+      const stages = await readDiagnosticEvents(diagnosticsFile);
+      const lastStage = stages.at(-1)?.event || stages.at(-1)?.stage || 'no-worker-diagnostic';
+      await terminateProcessTree(worker);
+      reject(new Error(`Independent Electron worker timed out after 30000 ms; last stage: ${lastStage}; diagnostic events: ${JSON.stringify(stages)}.`));
+    }, 30000);
     worker.once('close', code => { clearTimeout(timer); resolve(code); });
     worker.once('error', error => { clearTimeout(timer); reject(error); });
   });
