@@ -1,8 +1,17 @@
 name: XRS Stable release
 
 on:
-  push:
-    tags: ['xrs-v*']
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run Windows build and release preflight only; never publish Stable'
+        required: true
+        type: choice
+        default: preflight
+        options: [preflight]
 
 permissions:
   contents: read
@@ -13,6 +22,11 @@ concurrency:
 
 jobs:
   windows-candidate:
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true &&
+       github.event.pull_request.base.ref == 'main' &&
+       contains(github.event.pull_request.labels.*.name, 'xrs-release-approved')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'preflight')
     runs-on: windows-2022
     timeout-minutes: 45
     permissions:
@@ -20,19 +34,22 @@ jobs:
     defaults:
       run:
         working-directory: x-ray-report-studio
+    outputs:
+      version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate release tag and source version
         id: release
         shell: pwsh
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          if ($tag -notmatch '^xrs-v(\d+\.\d+\.\d+)(?:-r\d+)?$') { throw "Expected stable tag xrs-vMAJOR.MINOR.PATCH (optional -rN retry suffix), got $tag" }
-          $tagVersion = $Matches[1]
           $sourceVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($sourceVersion -ne $tagVersion) { throw "Tag version $tagVersion does not match package.json $sourceVersion" }
-          "version=$tagVersion" | Add-Content $env:GITHUB_OUTPUT -Encoding utf8
-          "Release version: $tagVersion"
+          if ($sourceVersion -notmatch '^\d+\.\d+\.\d+$') { throw "Stable release PR must set a numeric MAJOR.MINOR.PATCH version; got $sourceVersion" }
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+            $labels = (Get-Content $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json).pull_request.labels.name
+            if ($env:GITHUB_BASE_REF -ne 'main' -or -not $labels.Contains('xrs-release-approved')) { throw 'A merged release PR with xrs-release-approved label is required.' }
+          }
+          "version=$sourceVersion" | Add-Content $env:GITHUB_OUTPUT -Encoding utf8
+          "Release version: $sourceVersion"
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -64,7 +81,7 @@ jobs:
       - name: Upload verified release candidate
         uses: actions/upload-artifact@v4
         with:
-          name: xrs-stable-release-${{ github.ref_name }}
+          name: xrs-stable-release-${{ github.run_id }}
           if-no-files-found: error
           path: |
             x-ray-report-studio/test-output/stable-release/X-ray_Report_Studio_Windows_Setup.zip
@@ -72,8 +89,10 @@ jobs:
 
   publish-stable:
     needs: windows-candidate
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && contains(github.event.pull_request.labels.*.name, 'xrs-release-approved') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: xrs-stable-publish
     permissions:
       actions: read
       contents: write
@@ -82,21 +101,20 @@ jobs:
       - name: Download candidate from this run
         uses: actions/download-artifact@v4
         with:
-          name: xrs-stable-release-${{ github.ref_name }}
+          name: xrs-stable-release-${{ github.run_id }}
           path: ${{ runner.temp }}/xrs-candidate
       - name: Verify candidate and current public Stable rollback version
         id: baseline
         env:
           CANDIDATE_DIR: ${{ runner.temp }}/xrs-candidate
           RUNNER_TEMP: ${{ runner.temp }}
-          RELEASE_VERSION: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ needs.windows-candidate.outputs.version }}
         run: |
           python3 - <<'PY'
           import hashlib,io,json,os,pathlib,re,urllib.request,zipfile
           from urllib.parse import urlparse
-          tag_match=re.fullmatch(r'xrs-v(\d+\.\d+\.\d+)(?:-r\d+)?',os.environ['RELEASE_VERSION'])
-          assert tag_match, 'Release tag has an unsupported format'
-          version=tag_match.group(1)
+          version=os.environ['RELEASE_VERSION']
+          assert re.fullmatch(r'\d+\.\d+\.\d+',version), 'Release version has an unsupported format'
           root=pathlib.Path(os.environ['CANDIDATE_DIR'])
           archives=list(root.rglob('X-ray_Report_Studio_Windows_Setup.zip')); sums=list(root.rglob('SHA256SUMS.txt'))
           assert len(archives)==1 and len(sums)==1, 'Expected one Setup ZIP and SHA256SUMS.txt'
@@ -176,15 +194,11 @@ jobs:
           fallback=dict(old_manifest)
           fallback['url']='https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup.zip'
           (downloads/'latest.json').write_text(json.dumps(fallback,indent=2)+'\n',encoding='utf-8')
-          release_workflow=pathlib.Path('.github/workflows/xrs-06-publish-release.yml')
-          assert release_workflow.is_file(), 'Tag commit does not contain the release workflow'
-          target_workflow=pathlib.Path('official/.github/workflows/xrs-06-publish-release.yml'); target_workflow.parent.mkdir(parents=True,exist_ok=True)
-          shutil.copyfile(release_workflow,target_workflow)
           print('Prepared rollback and candidate archives; Stable remains on its previous version until final activation.')
           PY
           git -C official config user.name 'github-actions[bot]'
           git -C official config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -C official add -f -- .github/workflows/xrs-06-publish-release.yml x-ray-report-studio/downloads/latest.json x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-${{ steps.baseline.outputs.old_version }}.zip x-ray-report-studio/downloads/latest-${{ steps.baseline.outputs.old_version }}-before-${{ steps.baseline.outputs.new_version }}.json x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-${{ steps.baseline.outputs.new_version }}.zip
+          git -C official add -f -- x-ray-report-studio/downloads/latest.json x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-${{ steps.baseline.outputs.old_version }}.zip x-ray-report-studio/downloads/latest-${{ steps.baseline.outputs.old_version }}-before-${{ steps.baseline.outputs.new_version }}.json x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-${{ steps.baseline.outputs.new_version }}.zip
           if git -C official diff --cached --quiet; then echo 'Release staging is already present.'; else git -C official commit -m "release(xrs): stage ${{ steps.baseline.outputs.new_version }} and preserve ${{ steps.baseline.outputs.old_version }}"; git -C official push origin HEAD:refs/heads/codex/mri-report-studio; fi
       - name: Verify public versioned archives before Stable activation
         env:
@@ -222,6 +236,26 @@ jobs:
           assert live is not None, 'Previous Stable manifest is not safely active after bounded propagation checks'
           print(f'Verified public rollback {old} and candidate {version}; latest.json still selects {old}.')
           PY
+      - name: Create immutable version tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.windows-candidate.outputs.version }}
+          SOURCE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          CANDIDATE_DIR: ${{ runner.temp }}/xrs-candidate
+        run: |
+          set -euo pipefail
+          tag="xrs-v${RELEASE_VERSION}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Refusing to overwrite existing release tag ${tag}." >&2
+            exit 1
+          fi
+          archive="$(find "$CANDIDATE_DIR" -name X-ray_Report_Studio_Windows_Setup.zip -type f -print -quit)"
+          test -n "$archive"
+          git tag -a "$tag" "$SOURCE_SHA" -m "X-ray Report Studio ${RELEASE_VERSION}"
+          git push origin "refs/tags/${tag}"
+          gh release create "$tag" "$archive" \
+            --title "X-ray Report Studio ${RELEASE_VERSION}" \
+            --notes "Stable Windows release ${RELEASE_VERSION}. Installer SHA-256 is recorded in the workflow run summary."
       - name: Activate Stable manifest and canonical ZIP last
         env:
           RUNNER_TEMP: ${{ runner.temp }}
