@@ -95,13 +95,26 @@ async function installUpdateArchive({ archive, currentRoot, version, extractArch
   let temporary;
   let newRoot;
   let phase = 'create-extraction-temp';
+  const runOperation = async (operation, diagnosticPath, action) => {
+    await log({ event: 'file-operation-start', phase, operation, path: diagnosticPath });
+    try {
+      const result = await action();
+      await log({ event: 'file-operation-complete', phase, operation, path: diagnosticPath });
+      return result;
+    } catch (error) {
+      const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'FILE_OPERATION_FAILED';
+      const syscall = typeof error?.syscall === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(error.syscall) ? error.syscall : undefined;
+      await log({ event: 'file-operation-error', phase, operation, path: diagnosticPath, errorCode, ...(syscall ? { syscall } : {}) });
+      throw error;
+    }
+  };
   try {
     await log({ event: 'install-phase', phase });
-    temporary = await createTemporaryDirectory(path.join(os.tmpdir(), 'XRayReportStudio_Update_'));
+    temporary = await runOperation('create-directory', 'update-extraction-temp', () => createTemporaryDirectory(path.join(os.tmpdir(), 'XRayReportStudio_Update_')));
     phase = 'extract-archive';
     await log({ event: 'install-phase', phase });
     await log({ event: 'extract-start' });
-    await extractArchive(archive, temporary);
+    await runOperation('extract-zip', 'verified-update-archive', () => extractArchive(archive, temporary));
     phase = 'validate-package';
     await log({ event: 'install-phase', phase });
     const sourceApp = path.join(temporary, 'X-ray Report Studio Setup', 'app');
@@ -115,17 +128,17 @@ async function installUpdateArchive({ archive, currentRoot, version, extractArch
     phase = 'copy-electron-runtime';
     await log({ event: 'install-phase', phase });
     await log({ event: 'runtime-copy-start' });
-    await fs.cp(currentRoot, stage, {
+    await runOperation('copy-electron-runtime', 'current-install-to-candidate-stage', () => fs.cp(currentRoot, stage, {
       recursive: true, errorOnExist: true, force: false,
       filter: async source => path.basename(source).toLowerCase() !== 'default_app.asar',
-    });
+    }));
     const targetApp = path.join(stage, 'resources', 'app');
-    await fs.rm(targetApp, { recursive: true, force: true });
-    await fs.mkdir(path.dirname(targetApp), { recursive: true });
-    await fs.cp(sourceApp, targetApp, { recursive: true, errorOnExist: true, force: false });
+    await runOperation('remove-staged-app', 'candidate-stage/resources/app', () => fs.rm(targetApp, { recursive: true, force: true }));
+    await runOperation('create-staged-resources-directory', 'candidate-stage/resources', () => fs.mkdir(path.dirname(targetApp), { recursive: true }));
+    await runOperation('copy-verified-app', 'verified-package/app-to-candidate-stage/resources/app', () => fs.cp(sourceApp, targetApp, { recursive: true, errorOnExist: true, force: false }));
     const executable = path.join(stage, 'X-ray Report Studio.exe');
     if (!(await fs.stat(executable).catch(() => null))) throw new Error('В установленной копии не найден файл приложения.');
-    await fs.rename(stage, newRoot);
+    await runOperation('activate-version-directory', 'candidate-stage-to-versioned-install', () => fs.rename(stage, newRoot));
     await log({ event: 'install-folder-ready', version });
     return { root: newRoot, executable: path.join(newRoot, 'X-ray Report Studio.exe'), icon: path.join(newRoot, 'resources', 'app', 'dist', 'x-ray-report-studio.ico'), version };
   } catch (error) {

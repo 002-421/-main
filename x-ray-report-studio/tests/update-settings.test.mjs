@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const workspace = await readFile(new URL('../src/workspace.ts', import.meta.url), 'utf8');
 const main = await readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
+const worker = await readFile(new URL('../electron/update-worker.cjs', import.meta.url), 'utf8');
 const preload = await readFile(new URL('../electron/preload.cjs', import.meta.url), 'utf8');
 
 test('settings expose only current version and a manual Stable update check', () => {
@@ -21,12 +22,15 @@ test('update checks have no startup or periodic trigger', () => {
   assert.doesNotMatch(main, /setInterval\([^)]*update|checkForUpdates\(/);
 });
 
-test('Stable updater verifies a local user-data backup before changing the installed application', () => {
+test('Stable updater verifies and caches a candidate before handing installation to an independent process', () => {
   assert.doesNotMatch(main, /updates:set-channel|channel-preference/);
-  assert.match(main, /createVerifiedUserDataBackup/);
-  assert.match(main, /user-data-backup-start/);
-  assert.match(main, /user-data-backup-verified/);
-  assert.ok(main.indexOf('await createVerifiedUserDataBackup()') < main.indexOf('installUpdateArchive({'));
+  assert.match(main, /verified-candidate-cache-hit/);
+  assert.match(main, /spawnDetachedUpdateWorker/);
+  assert.match(main, /app\.quit\(\)/);
+  assert.doesNotMatch(main, /app\.relaunch\(\{ execPath: installed\.executable/);
+  assert.match(main, /runUpdateWorker\(config, \{ app, shell, log \}\)/);
+  assert.match(worker, /user-data-backup-start/);
+  assert.match(worker, /processState: 'main-exited'/);
   assert.match(main, /verifySha256\(archive,update\.sha256\)/);
   assert.match(main, /errorCode, phase: updatePhase/);
 });

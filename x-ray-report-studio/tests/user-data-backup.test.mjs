@@ -4,9 +4,19 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
 
 const require=createRequire(import.meta.url);
-const {createUserDataBackup,verifyUserDataBackup}=require('../electron/user-data-backup.cjs');
+const {createUserDataBackup,verifyUserDataBackup,runWithFileRetry}=require('../electron/user-data-backup.cjs');
+
+test('transient EBUSY is retried a bounded number of times; persistent lock remains a hard failure',async()=>{
+ let calls=0;const retries=[];
+ const result=await runWithFileRetry(async()=>{calls++;if(calls<3)throw Object.assign(new Error('busy'),{code:'EBUSY'});return 'verified';},async(_error,attempt)=>retries.push(attempt));
+ assert.equal(result,'verified');assert.equal(calls,3);assert.deepEqual(retries,[1,2]);
+ calls=0;
+ await assert.rejects(runWithFileRetry(async()=>{calls++;throw Object.assign(new Error('still locked'),{code:'EBUSY'});},async()=>{},2),{code:'EBUSY'});
+ assert.equal(calls,3,'a persistent file lock is never ignored');
+});
 
 test('local update backup includes the Chromium Local Storage database holding report history plus settings and dictionaries',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-backup-test-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
@@ -67,6 +77,29 @@ test('backup records and excludes only Chromium LevelDB LOCK while preserving da
  manifest.excludedFiles[0].reason='unverified-skip';
  await fs.writeFile(path.join(backup.directory,'manifest.json'),JSON.stringify(manifest));
  await assert.rejects(verifyUserDataBackup(backup.directory),/недопустимое исключение/);
+});
+
+test('Windows backup does not skip a locked user data file; it reports the safe relative path and succeeds after unlock',{skip:process.platform!=='win32'},async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-win-busy-profile-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const profile=path.join(root,'synthetic-profile'),backups=path.join(root,'Backups'),filename=path.join(profile,'Local Storage','leveldb','workspace-state.ldb');
+ await fs.mkdir(path.dirname(filename),{recursive:true});await fs.writeFile(filename,'synthetic workspace state');
+ const script='$p=[Console]::In.ReadLine();$f=[System.IO.File]::Open($p,[System.IO.FileMode]::Open,[System.IO.FileAccess]::ReadWrite,[System.IO.FileShare]::None);[Console]::Out.WriteLine("LOCKED");[Console]::Out.Flush();Start-Sleep -Seconds 60;$f.Dispose()';
+ const child=spawn('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{stdio:['pipe','pipe','pipe'],windowsHide:true});
+ let output='';child.stdout.setEncoding('utf8');child.stdout.on('data',chunk=>{output+=chunk;});child.stdin.end(`${filename}\n`);
+ try {
+  const deadline=Date.now()+10000;while(!output.includes('LOCKED')&&Date.now()<deadline&&child.exitCode===null)await new Promise(resolve=>setTimeout(resolve,25));
+  assert.ok(output.includes('LOCKED'),'PowerShell should hold the synthetic workspace file without sharing');
+  let events=[];
+  await assert.rejects(createUserDataBackup({userDataDir:profile,backupRoot:backups,onOperation:event=>events.push(event)}),error=>{
+   assert.ok(['EBUSY','EPERM'].includes(error.code),`unexpected file-lock error: ${error.code}`);
+   assert.equal(error.backupRelativePath,'profile/Local Storage/leveldb/workspace-state.ldb');return true;
+  });
+  assert.ok(events.some(event=>event.event==='file-operation-retry'&&event.path==='profile/Local Storage/leveldb/workspace-state.ldb'));
+ } finally {child.kill();}
+ const recovered=await createUserDataBackup({userDataDir:profile,backupRoot:backups});
+ assert.equal(await fs.readFile(path.join(recovered.directory,'data','profile','Local Storage','leveldb','workspace-state.ldb'),'utf8'),'synthetic workspace state');
+ assert.equal((await verifyUserDataBackup(recovered.directory)).files,1);
+ assert.equal(await fs.readFile(filename,'utf8'),'synthetic workspace state');
 });
 
 test('an open Windows LevelDB LOCK does not block a verified backup', { skip: process.platform !== 'win32' }, async t => {

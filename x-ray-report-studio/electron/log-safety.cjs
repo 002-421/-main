@@ -3,8 +3,35 @@ function copyPrimitiveFields(value, allowed) {
     .map(key => [key, value[key]]));
 }
 
+const SAFE_PROFILE_PATH_PARTS = new Set([
+  'profile', 'shared-dictionary.json', 'dictionary.json', 'preferences', 'local state',
+  'local storage', 'session data', 'indexeddb', 'leveldb', 'network', 'cookies',
+  'web data', 'login data', 'current', 'lock', 'log', 'manifest', 'journal',
+  'code cache', 'cache', 'service worker', 'databases', 'blob_storage', 'gpu cache',
+]);
+
+function sanitizeDiagnosticPath(value) {
+  if (typeof value !== 'string' || !value) return undefined;
+  const normalized = value.replaceAll('\\', '/');
+  const marker = normalized.toLowerCase().lastIndexOf('/profile/');
+  let parts = normalized.toLowerCase().startsWith('profile/')
+    ? normalized.split('/')
+    : marker >= 0 ? ['profile', ...normalized.slice(marker + 9).split('/')]
+      : normalized.split('/').slice(-4);
+  parts = parts.filter(Boolean).map((part, index) => {
+    const lower = part.toLowerCase();
+    if (SAFE_PROFILE_PATH_PARTS.has(lower) || /^manifest-[0-9]+$/i.test(part) || /^\d+\.ldb$/i.test(part)) return part;
+    if (index === parts.length - 1 && /^\d+\.(log|ldb)$/i.test(part)) return `<${part.slice(-3).toLowerCase()}>`;
+    if (index === parts.length - 1 && /^\.[a-z0-9_-]{1,12}$/i.test(part)) return `<extension:${part.slice(1).toLowerCase()}>`;
+    return '<redacted>';
+  });
+  return parts.join('/').slice(0, 240);
+}
+
 function sanitizeUpdateLogEvent(event) {
-  const safe = copyPrimitiveFields(event, ['event', 'applicationVersion', 'platform', 'currentVersion', 'targetVersion', 'version', 'bytes', 'files', 'schemaVersion', 'expected', 'actual', 'percent', 'stage', 'restored', 'errorCode', 'phase', 'code', 'syscall']);
+  const safe = copyPrimitiveFields(event, ['event', 'applicationVersion', 'platform', 'currentVersion', 'targetVersion', 'version', 'bytes', 'files', 'schemaVersion', 'expected', 'actual', 'percent', 'stage', 'restored', 'errorCode', 'phase', 'code', 'syscall', 'operation', 'attempt', 'processState', 'recoveryAction']);
+  const diagnosticPath = sanitizeDiagnosticPath(event?.path);
+  if (diagnosticPath) safe.path = diagnosticPath;
   const reasons = {
     EACCES: 'Access denied', EPERM: 'Operation not permitted', EBUSY: 'Resource busy',
     ENOSPC: 'Insufficient free space', ENOENT: 'File or directory not found',

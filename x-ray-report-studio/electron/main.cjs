@@ -4,10 +4,10 @@ const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const crypto = require('node:crypto');
+const { spawn } = require('node:child_process');
 const { pathToFileURL, fileURLToPath } = require('node:url');
-const { installUpdateArchive, verifySha256, writeShortcutAtomically } = require('./update-install.cjs');
-const { isUsableRenderer, smokeTestInstalledApp } = require('./live-update.cjs');
-const { createUserDataBackup } = require('./user-data-backup.cjs');
+const { verifySha256, writeShortcutAtomically } = require('./update-install.cjs');
+const { isUsableRenderer } = require('./live-update.cjs');
 const {
   CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema,
   getPendingFirstStartAction, isInstallConfirmed, reconcileStableInstallState,
@@ -17,6 +17,10 @@ const { STABLE_MANIFEST, validateManifest, chooseUpdate } = require('./update-ch
 const { downloadHttps } = require('./update-download.cjs');
 const { sanitizeUpdateLogEvent, sanitizeStartupLogEvent } = require('./log-safety.cjs');
 const { summarizeFrame } = require('./startup-diagnostics.cjs');
+const { runUpdateWorker } = require('./update-worker.cjs');
+const UPDATE_WORKER_ARG = process.argv.indexOf('--xrs-update-worker');
+const UPDATE_WORKER_CONFIG = UPDATE_WORKER_ARG >= 0 && process.argv[UPDATE_WORKER_ARG + 1]
+  ? path.resolve(process.argv[UPDATE_WORKER_ARG + 1]) : '';
 const TEST_KIT_MARKER = path.join(process.resourcesPath, 'app', 'xrs-test-mode.json');
 let TEST_KIT_ROOT = '';
 let INVALID_TEST_KIT_LAUNCH = false;
@@ -167,25 +171,34 @@ async function createUpdateLogger() {
   await fs.mkdir(directory, { recursive: true });
   const filename = path.join(directory, `update-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
   let queue = Promise.resolve();
-  const log = entry => {
-    const safe = sanitizeUpdateLogEvent(entry);
-    queue = queue.then(() => fs.appendFile(filename, `${JSON.stringify({ time: new Date().toISOString(), ...safe })}\n`, 'utf8')).catch(() => {});
-    return queue;
-  };
+  const log = createUpdateLogWriter(filename, () => queue, value => { queue = value; });
   await log({ event: 'log-start', applicationVersion: app.getVersion(), platform: process.platform });
   return { filename, log };
 }
 
-function shortcutLocation() { return TEST_KIT_ROOT ? path.join(TEST_KIT_ROOT, 'Shortcuts', 'X-ray Report Studio.lnk') : path.join(app.getPath('desktop'), 'X-ray Report Studio.lnk'); }
-function backupRoot() { return path.join(app.getPath('appData'), 'X-ray Report Studio Backups'); }
-async function createVerifiedUserDataBackup() {
-  session.defaultSession.flushStorageData();
-  return createUserDataBackup({
-    userDataDir: app.getPath('userData'), sharedDictionaryFile,
-    backupRoot: backupRoot(), allowedBackupRoot: app.getPath('appData'),
-    forbiddenRoots: [activeApplicationRoot], version: activeApplicationVersion,
+function createUpdateLogWriter(filename, getQueue = () => Promise.resolve(), setQueue = () => {}) {
+  return entry => {
+    const safe = sanitizeUpdateLogEvent(entry);
+    const queue = getQueue().then(() => fs.appendFile(filename, `${JSON.stringify({ time: new Date().toISOString(), ...safe })}\n`, 'utf8')).catch(() => {});
+    setQueue(queue);
+    return queue;
+  };
+}
+
+function spawnDetachedUpdateWorker(configFile, workerProfile) {
+  const args = [`--user-data-dir=${workerProfile}`, '--xrs-update-worker', configFile];
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn(process.execPath, args, { cwd: activeApplicationRoot, detached: true, windowsHide: true, stdio: 'ignore' });
+    } catch (error) { reject(error); return; }
+    child.once('spawn', () => { child.unref(); resolve(child.pid); });
+    child.once('error', reject);
   });
 }
+
+function shortcutLocation() { return TEST_KIT_ROOT ? path.join(TEST_KIT_ROOT, 'Shortcuts', 'X-ray Report Studio.lnk') : path.join(app.getPath('desktop'), 'X-ray Report Studio.lnk'); }
+function backupRoot() { return path.join(app.getPath('appData'), 'X-ray Report Studio Backups'); }
 async function pointShortcutTo(executable, root) {
   const icon = path.join(root, 'resources', 'app', 'dist', 'x-ray-report-studio.ico');
   await fs.mkdir(path.dirname(shortcutLocation()), { recursive: true });
@@ -340,6 +353,31 @@ async function getUpdateManifest() {
 }
 
 app.whenReady().then(async () => {
+  if (UPDATE_WORKER_CONFIG) {
+    let log = async () => {};
+    try {
+      if (!app.isPackaged) throw Object.assign(new Error('Update worker mode is only available in a packaged Windows application.'), { code: 'WORKER_NOT_PACKAGED' });
+      const config = JSON.parse(await fs.readFile(UPDATE_WORKER_CONFIG, 'utf8'));
+      const expectedCacheRoot = path.resolve(app.getPath('appData'), 'X-ray Report Studio Updates', 'verified');
+      const actualCacheRoot = path.resolve(config.cacheRoot ?? '');
+      const sameCacheRoot = process.platform === 'win32'
+        ? actualCacheRoot.toLocaleLowerCase('en-US') === expectedCacheRoot.toLocaleLowerCase('en-US')
+        : actualCacheRoot === expectedCacheRoot;
+      const handoffDirectory = path.resolve(path.dirname(UPDATE_WORKER_CONFIG));
+      const handoffInCache = process.platform === 'win32'
+        ? handoffDirectory.toLocaleLowerCase('en-US') === actualCacheRoot.toLocaleLowerCase('en-US')
+        : handoffDirectory === actualCacheRoot;
+      if (!sameCacheRoot || !handoffInCache)
+        throw Object.assign(new Error('Update handoff file is outside its verified cache directory.'), { code: 'INVALID_WORKER_LOCATION' });
+      if (typeof config.logFile === 'string' && path.isAbsolute(config.logFile)) log = createUpdateLogWriter(config.logFile);
+      await log({ event: 'update-worker-process-ready', phase: 'worker-startup', processState: 'worker-ready' });
+      await runUpdateWorker(config, { app, shell, log });
+    } catch (error) {
+      const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'UPDATE_WORKER_START_FAILED';
+      await log({ event: 'update-worker-start-failed', phase: 'worker-startup', errorCode, processState: 'worker-failed' });
+    } finally { app.quit(); }
+    return;
+  }
   if (INVALID_TEST_KIT_LAUNCH) {
     dialog.showErrorBox('XRS-05 test kit', 'Запустите эту тестовую копию через Run-Test-App.cmd. Профиль и рабочий ярлык не были открыты.');
     app.quit();
@@ -540,77 +578,91 @@ app.whenReady().then(async () => {
         error.code = 'INSTALL_NOT_CONFIRMED';
         throw error;
       }
-      sendProgress({stage:'downloading',loaded:0,total:0,percent:0});
-      await log({ event: 'download-start' });
-      let lastLoggedPercent = -10;
-      const archive=await downloadBuffer(update.url, 250_000_000, 0, progress => {
-        sendProgress({stage:'downloading',...progress});
-        if (progress.percent !== null && progress.percent - lastLoggedPercent >= 10) {
-          lastLoggedPercent = progress.percent;
-          void log({ event: 'download-progress', ...progress });
-        }
-      });
-      archiveBytes = archive.length;
-      await log({ event: 'download-complete', bytes: archive.length });
-      sendProgress({stage:'verifying',loaded:archive.length,total:archive.length,percent:100});
-      const checksum=crypto.createHash('sha256').update(archive).digest('hex');
-      await log({ event: 'checksum-check', expected: update.sha256, actual: checksum });
-      if(!verifySha256(archive,update.sha256)) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
-      await log({ event: 'checksum-verified' });
-      file=path.join(os.tmpdir(),`X-ray_Report_Studio_${update.version}_${crypto.randomUUID()}.zip`);
-      await fs.writeFile(file,archive,{flag:'wx'});
-      sendProgress({stage:'installing',loaded:archive.length,total:archive.length,percent:100});
-      updatePhase = 'user-data-backup';
-      await log({ event: 'user-data-backup-start' });
-      const userBackup = await createVerifiedUserDataBackup();
-      await log({ event: 'user-data-backup-verified', bytes: userBackup.bytes, files: userBackup.files });
-      updatePhase = 'data-schema';
-      currentDataState = await ensureDataSchema(dataSchemaFile, CURRENT_DATA_SCHEMA);
       const previousRoot=activeApplicationRoot,previousVersion=activeApplicationVersion;
       const previousState=verifiedInstallState;
       if (!isInstallConfirmed(previousState, previousRoot, process.execPath, app.getVersion()))
         throw new Error('Текущая установка не подтверждена как стабильная. Обновление отменено.');
       const previousDataSchema = previousState?.current?.dataSchemaVersion ?? CURRENT_DATA_SCHEMA;
       const previousExecutable=path.join(previousRoot,'X-ray Report Studio.exe');
-      updatePhase = 'side-by-side-install';
-      const installed = await installUpdateArchive({
-        archive: file,
-        currentRoot: previousRoot,
-        version: update.version,
-        log,
-      });
-      updatePhase = 'new-version-smoke-test';
-      const smoke=await smokeTestInstalledApp({executable:installed.executable});
-      if(smoke.version!==update.version)throw new Error('Проверка первого запуска сообщила неожиданную версию.');
-      await log({ event: 'new-version-smoke-test-passed', targetVersion: update.version });
-      updatePhase = 'first-start-commit';
-      const nextState={
-        status:'pending-first-start',launchAttempts:0,installedAt:new Date().toISOString(),
-        current:{version:update.version,root:installed.root,executable:installed.executable,dataSchemaVersion:CURRENT_DATA_SCHEMA},
-        previous:{version:previousVersion,root:previousRoot,executable:previousExecutable,dataSchemaVersion:previousDataSchema},
-      };
-      let stateCommitted = false;
-      try {
-        await writeJsonAtomic(installStateFile,nextState);
-        stateCommitted = true;
-        await pointShortcutTo(installed.executable,installed.root);
-        startupInstallState=nextState;
-        await log({ event: 'shortcut-committed', targetVersion:update.version });
-        await log({ event: 'new-runtime-relaunch-requested', targetVersion:update.version });
-        sendProgress({stage:'restarting',loaded:archive.length,total:archive.length,percent:100});
-        app.relaunch({ execPath: installed.executable, args: [`--user-data-dir=${app.getPath('userData')}`] });
-        app.exit(0);
-        return { available:true, installing:true, version:update.version };
-      } catch (activationError) {
-        startupInstallState=previousState;
-        if (stateCommitted) {
-          if (previousState) await writeJsonAtomic(installStateFile,previousState).catch(()=>{});
-          else await fs.unlink(installStateFile).catch(()=>{});
+      updatePhase = 'verified-archive-cache';
+      const cacheRoot = path.join(app.getPath('appData'), 'X-ray Report Studio Updates', 'verified');
+      await fs.mkdir(cacheRoot, { recursive: true });
+      file = path.join(cacheRoot, `XRS-${update.version}-${update.sha256.toLowerCase()}.zip`);
+      let archive;
+      const cachedStat = await fs.lstat(file).catch(error => error.code === 'ENOENT' ? null : Promise.reject(error));
+      if (cachedStat?.isFile() && !cachedStat.isSymbolicLink()) {
+        archive = await fs.readFile(file);
+        if (verifySha256(archive, update.sha256)) {
+          await log({ event: 'verified-candidate-cache-hit', targetVersion: update.version, bytes: archive.length, expected: update.sha256, actual: update.sha256 });
+        } else {
+          await log({ event: 'verified-candidate-cache-rejected', targetVersion: update.version, errorCode: 'CACHED_ARCHIVE_CHECKSUM_MISMATCH', operation: 'unlink-invalid-cache', path: 'updates/verified/<candidate-archive>' });
+          await fs.unlink(file);
+          archive = undefined;
         }
-        const shortcutRestored = await pointShortcutTo(previousExecutable,previousRoot).then(()=>true,()=>false);
-        await log({ event: 'update-switch-failed', restored: shortcutRestored });
-        throw activationError;
+      } else if (cachedStat) {
+        const error = new Error('Кэш кандидата имеет небезопасный тип файла.');
+        error.code = 'UNSAFE_CACHED_ARCHIVE';
+        throw error;
       }
+      if (!archive) {
+        updatePhase = 'download';
+        sendProgress({stage:'downloading',loaded:0,total:0,percent:0});
+        await log({ event: 'download-start', operation: 'download-archive' });
+        let lastLoggedPercent = -10;
+        archive=await downloadBuffer(update.url, 250_000_000, 0, progress => {
+          sendProgress({stage:'downloading',...progress});
+          if (progress.percent !== null && progress.percent - lastLoggedPercent >= 10) {
+            lastLoggedPercent = progress.percent;
+            void log({ event: 'download-progress', ...progress });
+          }
+        });
+        archiveBytes = archive.length;
+        await log({ event: 'download-complete', bytes: archive.length });
+        updatePhase = 'checksum';
+        sendProgress({stage:'verifying',loaded:archive.length,total:archive.length,percent:100});
+        const downloadedChecksum=crypto.createHash('sha256').update(archive).digest('hex');
+        await log({ event: 'checksum-check', expected: update.sha256, actual: downloadedChecksum });
+        if(!verifySha256(archive,update.sha256)) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
+        await fs.writeFile(file,archive,{flag:'wx'});
+        await log({ event: 'verified-candidate-cached', targetVersion: update.version, bytes: archive.length, expected: update.sha256, actual: downloadedChecksum, operation: 'write-verified-cache', path: 'updates/verified/<candidate-archive>' });
+      } else {
+        archiveBytes = archive.length;
+        sendProgress({stage:'verifying',loaded:archive.length,total:archive.length,percent:100});
+      }
+      updatePhase = 'checksum';
+      const checksum=crypto.createHash('sha256').update(archive).digest('hex');
+      if(!verifySha256(archive,update.sha256)) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
+      await log({ event: 'checksum-verified', expected: update.sha256, actual: checksum });
+      sendProgress({stage:'installing',loaded:archive.length,total:archive.length,percent:100});
+      updatePhase = 'worker-handoff';
+      const handoffFile = path.join(cacheRoot, `handoff-${crypto.randomUUID()}.json`);
+      const resultFile = path.join(cacheRoot, `result-${crypto.randomUUID()}.json`);
+      const workerProfile = path.join(os.tmpdir(), `XRS_UpdateWorker_${crypto.randomUUID()}`);
+      const workerConfig = {
+        format: 'xrs-update-handoff', schemaVersion: 1, parentPid: process.pid,
+        archive: file, cacheRoot, sha256: update.sha256, version: update.version, currentVersion: previousVersion,
+        currentRoot: previousRoot, installationParent: path.dirname(previousRoot), userDataDir: app.getPath('userData'), sharedDictionaryFile,
+        backupRoot: backupRoot(), allowedBackupRoot: app.getPath('appData'),
+        installStateFile, dataSchemaFile, shortcutPath: shortcutLocation(), logFile,
+        resultFile, handoffFile, workerProfile, previous: {
+          version: previousVersion, root: previousRoot, executable: previousExecutable,
+          dataSchemaVersion: previousDataSchema,
+        },
+      };
+      await fs.writeFile(handoffFile, `${JSON.stringify(workerConfig)}\n`, { flag: 'wx' });
+      await log({ event: 'update-worker-launch-requested', phase: 'handoff', operation: 'write-handoff-config', path: 'updates/verified/<handoff-config>', processState: 'main-running' });
+      try {
+        const workerPid = await spawnDetachedUpdateWorker(handoffFile, workerProfile);
+        await log({ event: 'update-worker-launched', phase: 'handoff', processState: 'main-running', operation: 'spawn-independent-worker', bytes: workerPid });
+      } catch (workerError) {
+        await fs.unlink(handoffFile).catch(() => {});
+        throw workerError;
+      }
+      updateInstalling = false;
+      sendProgress({stage:'restarting',loaded:archive.length,total:archive.length,percent:100});
+      await log({ event: 'main-runtime-shutdown-requested', phase: 'handoff', processState: 'main-running', recoveryAction: 'worker-waits-for-exit' });
+      app.quit();
+      return { available:true, installing:true, version:update.version };
     } catch (error) {
       const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code)
         ? error.code
@@ -619,7 +671,7 @@ app.whenReady().then(async () => {
       await log({ event: 'update-error', errorCode, phase: updatePhase, ...(syscall ? { syscall } : {}) });
       sendProgress({stage:'error',loaded:0,total:0,percent:0,message:error.message,logFile});
       throw new Error(logFile?`${error.message} Журнал обновления: ${logFile}`:error.message);
-    } finally { if (file) await fs.unlink(file).catch(() => {}); updateInstalling=false; }
+    } finally { updateInstalling=false; }
     sendProgress({stage:'installed',loaded:archiveBytes,total:archiveBytes,percent:100});
     return { available:true, installing:false, version:activeApplicationVersion };
   });

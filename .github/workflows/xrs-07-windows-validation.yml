@@ -2,7 +2,7 @@ name: XRS-07/XRS-08 Windows validation
 
 on:
   push:
-    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation]
+    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery]
   pull_request:
     paths:
       - 'x-ray-report-studio/**'
@@ -36,15 +36,17 @@ jobs:
           $sourceRef = if ($env:GITHUB_HEAD_REF) { $env:GITHUB_HEAD_REF } else { $env:GITHUB_REF_NAME }
           $isStable056 = $version -eq '0.4.56' -and $sourceRef -eq 'codex/xrs-056-stable-clean'
           $isUpdateHotfix = $sourceRef -eq 'codex/xrs-first-start-confirmation'
+          $isUpdaterRecovery = $sourceRef -eq 'codex/xrs-updater-recovery'
           Add-Content -Path $env:GITHUB_OUTPUT -Value "beta=$($isBeta.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "stable056=$($isStable056.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updateHotfix=$($isUpdateHotfix.ToString().ToLowerInvariant())" -Encoding utf8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "updaterRecovery=$($isUpdaterRecovery.ToString().ToLowerInvariant())" -Encoding utf8
       - run: npm ci
       - name: Install pinned Electron runtime
         if: steps.release-channel.outputs.stable056 != 'true'
         run: npm run desktop:install
       - name: Install Chromium for tab lifecycle scenario
-        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npx playwright-core install chromium
       - run: npm run build
       - name: Verify Electron runtime for Windows shortcut test
@@ -81,13 +83,16 @@ jobs:
           Set-Content -Path 'test-output/xrs-0.4.56/SHA256SUMS.txt' -Value "$hash  X-ray_Report_Studio_Windows_Setup.zip" -NoNewline
           Write-Host "Stable setup ZIP SHA-256: $hash"
       - name: Full unit suite
-        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm test
       - name: Targeted Stable updater tests
         if: steps.release-channel.outputs.stable056 == 'true'
         run: node --test tests/update-channel.test.mjs tests/update-version.test.mjs tests/update-install.test.mjs tests/update-settings.test.mjs
+      - name: Updater recovery and Windows process tests
+        if: steps.release-channel.outputs.updaterRecovery == 'true'
+        run: node --test tests/update-worker.test.mjs tests/windows-processes.test.mjs tests/user-data-backup.test.mjs tests/update-install.test.mjs tests/log-safety.test.mjs tests/update-settings.test.mjs tests/windows-integration.test.mjs
       - name: Workspace recovery and tab isolation
-        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         shell: pwsh
         run: |
           npm run test:tab-isolation
@@ -95,19 +100,19 @@ jobs:
           npm run test:workspace-recovery
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: DOCX, PDF and Electron editor integration
-        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm run test:browser
       - name: Per-document Undo and Redo history across tabs and restart
-        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm run test:history-browser
       - name: Word-oriented preview pagination with synthetic reports
-        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: node tests/preview-pagination-browser.mjs
       - name: Export and preserve patient tab lifecycle (1, 2, 5, 12 tabs)
-        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm run test:tab-lifecycle
       - name: Verified profile backup tests
-        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true'
+        if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm run test:preupdate-backup
       - name: Upload synthetic first-start test diagnostics
         if: always() && steps.first-start-tests.outcome == 'failure'
