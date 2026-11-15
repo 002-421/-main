@@ -28,7 +28,7 @@ test('Stable updater verifies and caches a candidate before handing installation
   assert.match(main, /spawnDetachedUpdateWorker/);
   assert.match(main, /app\.quit\(\)/);
   assert.doesNotMatch(main, /app\.relaunch\(\{ execPath: installed\.executable/);
-  assert.match(main, /runUpdateWorker\(config, \{ app, shell, log \}\)/);
+  assert.match(main, /runUpdateWorker\(config, \{ app, shell, log,[\s\S]*?confirmBackupFailure/);
   assert.match(worker, /user-data-backup-start/);
   assert.match(worker, /processState: 'main-exited'/);
   assert.match(main, /verifySha256\(archive,update\.sha256\)/);

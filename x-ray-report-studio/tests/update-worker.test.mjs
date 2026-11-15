@@ -73,6 +73,7 @@ test('worker waits for the old Electron process, backs up after exit, stages sid
   assert.deepEqual(result, { installed: true, version: '0.4.59' });
   assert.equal(deps.calls.parentPid, 12345);
   assert.equal(deps.calls.backup, 1);
+  assert.equal(deps.calls.log.some(entry => entry.event === 'user-data-backup-override-authorized'), false);
   assert.equal(deps.calls.installArchive, f.archive);
   assert.ok(deps.calls.log.findIndex(entry => entry.event === 'update-worker-parent-exited') < deps.calls.log.findIndex(entry => entry.event === 'user-data-backup-start'));
   assert.ok(deps.calls.log.filter(entry => entry.event === 'file-operation-complete').every(entry => entry.processState === 'main-exited'));
@@ -84,6 +85,80 @@ test('worker waits for the old Electron process, backs up after exit, stages sid
   assert.equal(state.previous.version, '0.4.58');
   assert.equal(await fs.readFile(path.join(f.profile, 'workspace.json'), 'utf8'), 'synthetic open document and tabs');
   await assert.rejects(fs.stat(f.archive), { code: 'ENOENT' });
+});
+
+test('a non-lock backup failure defaults to cancel and leaves the old install and verified archive untouched', async t => {
+  const f = await setup(); t.after(() => fs.rm(f.root, { recursive: true, force: true }));
+  const failure = Object.assign(new Error('synthetic disk full'), { code: 'ENOSPC' });
+  let prompts = 0;
+  const deps = dependencies(f, {
+    createUserDataBackup: async () => { throw failure; },
+    confirmBackupFailure: async code => { prompts++; assert.equal(code, 'ENOSPC'); return 0; },
+  });
+  const result = await runUpdateWorker(f.config, deps);
+  assert.deepEqual(result, { installed: false, errorCode: 'BACKUP_OVERRIDE_DECLINED', phase: 'user-data-backup', archiveRetained: true });
+  assert.equal(prompts, 1);
+  assert.equal(deps.calls.install, 0);
+  assert.equal(deps.calls.shortcut.length, 0);
+  assert.deepEqual(JSON.parse(await fs.readFile(f.installStateFile, 'utf8')), f.previousState);
+  assert.equal(await fs.readFile(f.archive, 'utf8'), 'synthetic verified update archive');
+  assert.ok(deps.calls.log.some(entry => entry.event === 'user-data-backup-override-declined' && entry.errorCode === 'ENOSPC'));
+  assert.equal(deps.calls.log.some(entry => entry.event === 'user-data-backup-verified'), false);
+});
+
+test('a non-lock backup failure continues only after explicit one-attempt consent and does not claim a verified backup', async t => {
+  const f = await setup(); t.after(() => fs.rm(f.root, { recursive: true, force: true }));
+  const failure = Object.assign(new Error('synthetic disk full'), { code: 'ENOSPC' });
+  const deps = dependencies(f, {
+    createUserDataBackup: async () => { throw failure; },
+    confirmBackupFailure: async code => { assert.equal(code, 'ENOSPC'); return 1; },
+  });
+  const result = await runUpdateWorker(f.config, deps);
+  assert.deepEqual(result, { installed: true, version: '0.4.59' });
+  assert.equal(deps.calls.install, 1);
+  assert.equal(deps.calls.shortcut[0], path.join(f.nextRoot, 'X-ray Report Studio.exe'));
+  assert.deepEqual(deps.calls.log.find(entry => entry.event === 'user-data-backup-override-authorized'), {
+    event: 'user-data-backup-override-authorized', phase: 'user-data-backup', errorCode: 'ENOSPC',
+    processState: 'main-exited', recoveryAction: 'continue-without-backup-for-this-attempt',
+  });
+  assert.equal(deps.calls.log.some(entry => entry.event === 'user-data-backup-verified'), false);
+  assert.equal(await fs.readFile(path.join(f.profile, 'workspace.json'), 'utf8'), 'synthetic open document and tabs');
+});
+
+test('a locked profile file is a hard stop and never offers backup override', async t => {
+  const f = await setup(); t.after(() => fs.rm(f.root, { recursive: true, force: true }));
+  const failure = Object.assign(new Error('synthetic locked file'), { code: 'EBUSY' });
+  let prompts = 0, notices = 0;
+  const deps = dependencies(f, {
+    createUserDataBackup: async () => { throw failure; },
+    confirmBackupFailure: async () => { prompts++; return 1; },
+    showBackupBlocked: async code => { notices++; assert.equal(code, 'EBUSY'); },
+  });
+  const result = await runUpdateWorker(f.config, deps);
+  assert.equal(result.errorCode, 'EBUSY');
+  assert.equal(prompts, 0);
+  assert.equal(notices, 1);
+  assert.equal(deps.calls.install, 0);
+  assert.equal(deps.calls.shortcut.length, 0);
+  assert.deepEqual(JSON.parse(await fs.readFile(f.installStateFile, 'utf8')), f.previousState);
+  assert.equal(await fs.readFile(f.archive, 'utf8'), 'synthetic verified update archive');
+});
+
+test('an active or unverifiable XRS process is explained and never reaches the backup override', async t => {
+  const f = await setup(); t.after(() => fs.rm(f.root, { recursive: true, force: true }));
+  let prompts = 0, notices = 0;
+  const deps = dependencies(f, {
+    waitForProfileIdle: async () => { throw Object.assign(new Error('synthetic other XRS process'), { code: 'PROFILE_STILL_IN_USE' }); },
+    confirmBackupFailure: async () => { prompts++; return 1; },
+    showProcessBlocked: async code => { notices++; assert.equal(code, 'PROFILE_STILL_IN_USE'); },
+  });
+  const result = await runUpdateWorker(f.config, deps);
+  assert.equal(result.errorCode, 'PROFILE_STILL_IN_USE');
+  assert.equal(prompts, 0);
+  assert.equal(notices, 1);
+  assert.equal(deps.calls.backup, 0);
+  assert.equal(deps.calls.install, 0);
+  assert.equal(await fs.readFile(f.archive, 'utf8'), 'synthetic verified update archive');
 });
 
 test('backup failure retains old install, shortcut, state and verified archive, then relaunches old version', async t => {

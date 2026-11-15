@@ -371,7 +371,33 @@ app.whenReady().then(async () => {
         throw Object.assign(new Error('Update handoff file is outside its verified cache directory.'), { code: 'INVALID_WORKER_LOCATION' });
       if (typeof config.logFile === 'string' && path.isAbsolute(config.logFile)) log = createUpdateLogWriter(config.logFile);
       await log({ event: 'update-worker-process-ready', phase: 'worker-startup', processState: 'worker-ready' });
-      await runUpdateWorker(config, { app, shell, log });
+      await runUpdateWorker(config, { app, shell, log,
+        confirmBackupFailure: async () => {
+          const result = await dialog.showMessageBox(null, {
+            type: 'warning', title: 'Резервная копия не создана',
+            message: 'Не удалось создать резервную копию.',
+            detail: 'Продолжение обновления без резервной копии может привести к потере пользовательских данных.',
+            buttons: ['Отмена', 'Всё равно продолжить'], defaultId: 0, cancelId: 0, noLink: true,
+          });
+          return result.response;
+        },
+        showBackupBlocked: async () => dialog.showMessageBox(null, {
+          type: 'error', title: 'Обновление остановлено',
+          message: 'Не удалось создать резервную копию.',
+          detail: 'Продолжение обновления без резервной копии может привести к потере пользовательских данных. Обновление остановлено, поскольку файл профиля занят другим процессом. Закройте другие окна X-ray Report Studio и повторите попытку.',
+          buttons: ['ОК'], defaultId: 0, cancelId: 0, noLink: true,
+        }),
+        showProcessBlocked: async errorCode => dialog.showMessageBox(null, {
+          type: 'error', title: 'Обновление остановлено',
+          message: errorCode === 'PARENT_EXIT_TIMEOUT'
+            ? 'Не удалось безопасно закрыть X-ray Report Studio перед обновлением.'
+            : errorCode === 'PROFILE_STILL_IN_USE'
+              ? 'Файлы X-ray Report Studio всё ещё используются другим процессом.'
+              : 'Не удалось проверить, закрыты ли процессы X-ray Report Studio.',
+          detail: 'Обновление остановлено для защиты файлов и пользовательских данных. Закройте другие окна приложения и повторите попытку.',
+          buttons: ['ОК'], defaultId: 0, cancelId: 0, noLink: true,
+        }),
+      });
     } catch (error) {
       const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'UPDATE_WORKER_START_FAILED';
       await log({ event: 'update-worker-start-failed', phase: 'worker-startup', errorCode, processState: 'worker-failed' });

@@ -493,14 +493,25 @@ async function checkForAppUpdates(){
   const update=await window.desktop.checkForUpdates();
   const availableLabel=document.querySelector('#update-status');if(availableLabel)availableLabel.textContent=`Последняя проверенная версия: ${update.version}${update.available?' — доступно обновление':''}.`;
   if(!update.available){toast(`Обновлений нет. Установлена версия ${update.currentVersion}; последняя версия ${update.version}.`);return;}
-  const d=dialog('Доступна новая версия X-ray Report Studio',`<p>Установлена версия <b>${esc(update.currentVersion)}</b>, доступна версия <b>${esc(update.version)}</b>.</p><p>Установка начнётся только после вашего подтверждения. Открытые черновики сохраняются в текущем локальном профиле; профиль при обновлении не переносится и не перезаписывается.</p><p id="release-notes" hidden></p><p>Проверяются только сведения о версии; медицинские тексты и данные пациентов не отправляются.</p><div id="update-progress" class="update-progress hidden"><div class="update-progress-caption"><span id="update-progress-label">Подготовка загрузки…</span><b id="update-progress-percent">0%</b></div><div class="update-progress-track"><div id="update-progress-fill"></div></div><small id="update-progress-detail">Подключение к GitHub</small><details id="update-error-details" hidden><summary>Подробности ошибки</summary><pre id="update-error-text"></pre></details></div>`,`<button class="btn" data-close>Позже</button><button class="btn" id="release-notes-button">Что нового</button><button class="btn primary" id="install-update">Установить обновление</button>`);
+  const d=dialog('Доступна новая версия X-ray Report Studio',`<div id="update-main"><p>Установлена версия <b>${esc(update.currentVersion)}</b>, доступна версия <b>${esc(update.version)}</b>.</p><p>Проверяются только сведения о версии; медицинские тексты и данные пациентов не отправляются.</p><p id="release-notes" hidden></p><div id="update-progress" class="update-progress hidden"><div class="update-progress-caption"><span id="update-progress-label">Подготовка загрузки…</span><b id="update-progress-percent">0%</b></div><div class="update-progress-track"><div id="update-progress-fill"></div></div><small id="update-progress-detail">Подключение к GitHub</small><details id="update-error-details" hidden><summary>Подробности ошибки</summary><pre id="update-error-text"></pre></details></div></div><section id="update-confirmation" class="update-confirmation" hidden aria-labelledby="update-confirmation-title"><p id="update-confirmation-title">Убедитесь, что все отчёты были сохранены локально.</p><p>Установить обновление сейчас?</p><div class="update-confirm-actions"><button class="btn" id="cancel-update-confirmation">Отмена</button><button class="btn primary" id="confirm-update-install">ОК</button></div></section>`,`<button class="btn" data-close>Позже</button><button class="btn" id="release-notes-button">Что нового</button><button class="btn primary" id="install-update">Установить обновление</button>`);
   d.querySelector('#release-notes-button')!.addEventListener('click',()=>{const notes=d.querySelector<HTMLElement>('#release-notes')!;notes.textContent=update.notes?.trim()||'Описание этой версии пока недоступно.';notes.hidden=false;});
-  d.querySelector('#install-update')!.addEventListener('click',async()=>{
-   const button=d.querySelector<HTMLButtonElement>('#install-update')!;
-   const hasUnsavedChanges=changedSinceOpen||openReports.some(report=>report.dirty);
-   if(!saveLocal()){toast('Не удалось сохранить локальные черновики. Установка отменена.',true);return;}
-   if(hasUnsavedChanges&&!window.confirm('Есть изменения, которые ещё не экспортированы в Word или PDF. Черновики сохранены на этом компьютере. Установить обновление сейчас?'))return;
+  let installStarted=false;
+  const footer=d.querySelector<HTMLElement>(':scope > .dialog > footer')!;
+  d.querySelector('#install-update')!.addEventListener('click',()=>{
+   d.querySelector<HTMLElement>('#update-main')!.hidden=true;
+   footer.style.display='none';
+   d.querySelector<HTMLElement>('#update-confirmation')!.hidden=false;
+   d.querySelector<HTMLButtonElement>('#confirm-update-install')!.focus();
+  });
+  d.querySelector('#cancel-update-confirmation')!.addEventListener('click',()=>closeDialog());
+  d.querySelector('#confirm-update-install')!.addEventListener('click',async()=>{
+   if(installStarted)return;
+   installStarted=true;
+   const button=d.querySelector<HTMLButtonElement>('#confirm-update-install')!;
+   if(!saveLocal()){installStarted=false;toast('Не удалось сохранить рабочее пространство. Обновление остановлено.',true);return;}
+   button.disabled=true;
    editor.setEditable(false);button.disabled=true;button.textContent='Установка обновления…';
+   d.querySelector<HTMLElement>('#update-confirmation')!.hidden=true;
    const progress=d.querySelector<HTMLElement>('#update-progress')!;progress.classList.remove('hidden');
    window.desktop!.onUpdateProgress(value=>{
     const label=d.querySelector<HTMLElement>('#update-progress-label')!,percent=d.querySelector<HTMLElement>('#update-progress-percent')!,detail=d.querySelector<HTMLElement>('#update-progress-detail')!,fill=d.querySelector<HTMLElement>('#update-progress-fill')!;
@@ -510,7 +521,7 @@ async function checkForAppUpdates(){
     else{fill.classList.remove('indeterminate');fill.style.width='100%';percent.textContent='100%';label.textContent=value.stage==='verifying'?'Проверка файла':value.stage==='installing'?'Установка обновления':'Установка завершена';detail.textContent=value.stage==='verifying'?'Проверяется контрольная сумма':value.stage==='installing'?'Подготавливаются файлы приложения':'Готово';}
    });
    try{await window.desktop!.installUpdate();const version=await window.desktop!.getApplicationVersion();const label=document.querySelector('#application-version');if(label)label.textContent=version;toast(`Приложение обновлено до версии ${version}.`);closeDialog();}
-   catch(error){editor.setEditable(true);button.disabled=false;button.textContent='Установить обновление';d.querySelector<HTMLElement>('#update-progress-label')!.textContent='Не удалось установить обновление';d.querySelector<HTMLElement>('#update-progress-detail')!.textContent='Текущая версия оставлена без изменений';d.querySelector<HTMLElement>('#update-error-details')!.hidden=false;d.querySelector<HTMLElement>('#update-error-text')!.textContent=(error as Error).message||'Установка остановлена по неизвестной причине.';toast('Не удалось установить обновление. Текущая версия оставлена без изменений.',true);}
+   catch(error){installStarted=false;editor.setEditable(true);button.disabled=false;button.textContent='ОК';d.querySelector<HTMLElement>('#update-confirmation')!.hidden=true;d.querySelector<HTMLElement>('#update-main')!.hidden=false;footer.style.display='';d.querySelector<HTMLElement>('#update-progress-label')!.textContent='Не удалось установить обновление';d.querySelector<HTMLElement>('#update-progress-detail')!.textContent='Текущая версия оставлена без изменений';d.querySelector<HTMLElement>('#update-error-details')!.hidden=false;d.querySelector<HTMLElement>('#update-error-text')!.textContent=(error as Error).message||'Установка остановлена по неизвестной причине.';toast('Не удалось установить обновление. Текущая версия оставлена без изменений.',true);}
    finally{window.desktop!.clearUpdateProgress();}
   });
  }catch(error){toast(`Не удалось проверить обновления: ${(error as Error).message}`,true);}

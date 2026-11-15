@@ -45,6 +45,9 @@ async function runUpdateWorker(config, dependencies = {}) {
   const writeShortcut = dependencies.writeShortcutAtomically ?? writeShortcutAtomically;
   const writeState = dependencies.writeJsonAtomic ?? writeJsonAtomic;
   const launch = dependencies.launchDetached ?? launchDetached;
+  const confirmBackupFailure = dependencies.confirmBackupFailure ?? (async () => 0);
+  const showBackupBlocked = dependencies.showBackupBlocked ?? (async () => {});
+  const showProcessBlocked = dependencies.showProcessBlocked ?? (async () => {});
   const readShortcutTarget = dependencies.readShortcutTarget ?? (filename => shell.readShortcutLink(filename).target);
   const app = dependencies.app;
   const shell = dependencies.shell;
@@ -73,13 +76,20 @@ async function runUpdateWorker(config, dependencies = {}) {
   let profileIdle = false;
   try {
     await log({ event: 'update-worker-start', phase, processState: 'main-running', operation: 'wait-for-parent' });
-    await wait(config.parentPid);
+    try { await wait(config.parentPid); }
+    catch (error) {
+      await showProcessBlocked(typeof error?.code === 'string' ? error.code : 'PROCESS_STATE_UNKNOWN');
+      throw error;
+    }
     mainExited = true;
     await log({ event: 'update-worker-parent-exited', phase, processState: 'main-exited', operation: 'wait-for-parent' });
     phase = 'wait-for-profile-idle';
-    await waitForProfileIdle({ installRoot: config.installationParent ?? path.dirname(config.currentRoot), userDataDir: config.userDataDir }, {
+    try { await waitForProfileIdle({ installRoot: config.installationParent ?? path.dirname(config.currentRoot), userDataDir: config.userDataDir }, {
       onState: processState => log({ event: 'update-worker-process-state', phase, processState, operation: 'verify-profile-idle' }),
-    });
+    }); } catch (error) {
+      await showProcessBlocked(typeof error?.code === 'string' ? error.code : 'PROCESS_STATE_UNKNOWN');
+      throw error;
+    }
     profileIdle = true;
     await log({ event: 'update-worker-profile-idle', phase, processState: 'no-other-xrs-processes', operation: 'verify-profile-idle' });
 
@@ -110,16 +120,34 @@ async function runUpdateWorker(config, dependencies = {}) {
 
     phase = 'user-data-backup';
     await log({ event: 'user-data-backup-start', phase, processState: 'main-exited' });
-    const userBackup = await backup({
-      userDataDir: config.userDataDir,
-      sharedDictionaryFile: config.sharedDictionaryFile,
-      backupRoot: config.backupRoot,
-      allowedBackupRoot: config.allowedBackupRoot,
-      forbiddenRoots: [config.currentRoot],
-      version: config.currentVersion,
-      onOperation: event => log({ ...event, processState: 'main-exited' }),
-    });
-    await log({ event: 'user-data-backup-verified', phase, bytes: userBackup.bytes, files: userBackup.files, processState: 'main-exited' });
+    try {
+      const userBackup = await backup({
+        userDataDir: config.userDataDir,
+        sharedDictionaryFile: config.sharedDictionaryFile,
+        backupRoot: config.backupRoot,
+        allowedBackupRoot: config.allowedBackupRoot,
+        forbiddenRoots: [config.currentRoot],
+        version: config.currentVersion,
+        onOperation: event => log({ ...event, processState: 'main-exited' }),
+      });
+      await log({ event: 'user-data-backup-verified', phase, bytes: userBackup.bytes, files: userBackup.files, processState: 'main-exited' });
+    } catch (error) {
+      const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'BACKUP_FAILED';
+      if (['EBUSY', 'EPERM', 'PROFILE_STILL_IN_USE', 'PARENT_EXIT_TIMEOUT', 'PROCESS_STATE_UNKNOWN'].includes(errorCode)) {
+        await log({ event: 'user-data-backup-blocked', phase, errorCode, processState: 'main-exited', recoveryAction: 'stop-update-retain-previous' });
+        await showBackupBlocked(errorCode);
+        throw error;
+      }
+      let response = 0;
+      try { response = await confirmBackupFailure(errorCode); } catch { response = 0; }
+      if (response !== 1) {
+        const declined = new Error('Backup failed; the update was cancelled by the user.');
+        declined.code = 'BACKUP_OVERRIDE_DECLINED';
+        await log({ event: 'user-data-backup-override-declined', phase, errorCode, processState: 'main-exited', recoveryAction: 'retain-previous-and-verified-archive' });
+        throw declined;
+      }
+      await log({ event: 'user-data-backup-override-authorized', phase, errorCode, processState: 'main-exited', recoveryAction: 'continue-without-backup-for-this-attempt' });
+    }
 
     phase = 'side-by-side-install';
     const installed = await install({ archive: config.archive, currentRoot: config.currentRoot, version: config.version, log });
