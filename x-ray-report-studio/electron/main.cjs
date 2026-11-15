@@ -18,6 +18,7 @@ const { downloadHttps } = require('./update-download.cjs');
 const { sanitizeUpdateLogEvent, sanitizeStartupLogEvent } = require('./log-safety.cjs');
 const { summarizeFrame } = require('./startup-diagnostics.cjs');
 const { runUpdateWorker } = require('./update-worker.cjs');
+const { acquireUpdateLease, inspectUpdateLease, releaseUpdateLease } = require('./update-lease.cjs');
 const UPDATE_WORKER_ARG = process.argv.indexOf('--xrs-update-worker');
 const UPDATE_WORKER_CONFIG = UPDATE_WORKER_ARG >= 0 && process.argv[UPDATE_WORKER_ARG + 1]
   ? path.resolve(process.argv[UPDATE_WORKER_ARG + 1]) : '';
@@ -52,7 +53,15 @@ if (TEST_KIT_ROOT) {
 }
 if (TEST_KIT_ROOT) app.setPath('sessionData', path.join(app.getPath('userData'), 'Session Data'));
 app.setName('X-ray Report Studio');
+const ownsSingleInstanceLock = Boolean(UPDATE_WORKER_CONFIG) || app.requestSingleInstanceLock();
+if (!ownsSingleInstanceLock) app.quit();
 let mainWindow;
+if (ownsSingleInstanceLock && !UPDATE_WORKER_CONFIG) app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
 let rendererUnresponsive = false;
 let rendererReady = false;
 let startupLogFile = '';
@@ -199,6 +208,7 @@ function spawnDetachedUpdateWorker(configFile, workerProfile) {
 
 function shortcutLocation() { return TEST_KIT_ROOT ? path.join(TEST_KIT_ROOT, 'Shortcuts', 'X-ray Report Studio.lnk') : path.join(app.getPath('desktop'), 'X-ray Report Studio.lnk'); }
 function backupRoot() { return path.join(app.getPath('appData'), 'X-ray Report Studio Backups'); }
+function updateCacheRoot() { return path.join(app.getPath('appData'), 'X-ray Report Studio Updates', 'verified'); }
 async function pointShortcutTo(executable, root) {
   const icon = path.join(root, 'resources', 'app', 'dist', 'x-ray-report-studio.ico');
   await fs.mkdir(path.dirname(shortcutLocation()), { recursive: true });
@@ -353,6 +363,7 @@ async function getUpdateManifest() {
 }
 
 app.whenReady().then(async () => {
+  if (!ownsSingleInstanceLock) return;
   if (UPDATE_WORKER_CONFIG) {
     let log = async () => {};
     try {
@@ -387,14 +398,14 @@ app.whenReady().then(async () => {
           detail: 'Продолжение обновления без резервной копии может привести к потере пользовательских данных. Обновление остановлено, поскольку файл профиля занят другим процессом. Закройте другие окна X-ray Report Studio и повторите попытку.',
           buttons: ['ОК'], defaultId: 0, cancelId: 0, noLink: true,
         }),
-        showProcessBlocked: async errorCode => dialog.showMessageBox(null, {
+        showProcessBlocked: async (errorCode, blockingProcesses = []) => dialog.showMessageBox(null, {
           type: 'error', title: 'Обновление остановлено',
           message: errorCode === 'PARENT_EXIT_TIMEOUT'
             ? 'Не удалось безопасно закрыть X-ray Report Studio перед обновлением.'
             : errorCode === 'PROFILE_STILL_IN_USE'
               ? 'Файлы X-ray Report Studio всё ещё используются другим процессом.'
               : 'Не удалось проверить, закрыты ли процессы X-ray Report Studio.',
-          detail: 'Обновление остановлено для защиты файлов и пользовательских данных. Закройте другие окна приложения и повторите попытку.',
+          detail: `Обновление остановлено для защиты файлов и пользовательских данных. Закройте указанные процессы XRS и повторите попытку.\n\n${blockingProcesses.slice(0, 8).map(item => `PID ${item.pid} (${item.processType})`).join('\n')}`,
           buttons: ['ОК'], defaultId: 0, cancelId: 0, noLink: true,
         }),
       });
@@ -406,6 +417,18 @@ app.whenReady().then(async () => {
   }
   if (INVALID_TEST_KIT_LAUNCH) {
     dialog.showErrorBox('XRS-05 test kit', 'Запустите эту тестовую копию через Run-Test-App.cmd. Профиль и рабочий ярлык не были открыты.');
+    app.quit();
+    return;
+  }
+  try {
+    const lease = await inspectUpdateLease({ cacheRoot: updateCacheRoot(), userDataDir: app.getPath('userData') });
+    if (lease.active) {
+      dialog.showErrorBox('Обновление X-ray Report Studio выполняется', `Установка уже выполняется (PID ${lease.ownerPid}). Эта копия не будет открывать профиль одновременно. Дождитесь завершения обновления и запустите приложение снова.`);
+      app.quit();
+      return;
+    }
+  } catch (error) {
+    dialog.showErrorBox('Не удалось проверить обновление X-ray Report Studio', 'Состояние обновления профиля нельзя проверить безопасно. Данные не изменены. Подождите 30 секунд и запустите приложение снова.');
     app.quit();
     return;
   }
@@ -590,9 +613,13 @@ app.whenReady().then(async () => {
     let logFile = '', log = async () => {};
     const sendProgress = progress => { if (!event.sender.isDestroyed()) event.sender.send('updates:progress', progress); };
     let file = '';
+    let updateLease = null;
+    let leaseTransferred = false;
     let archiveBytes = 0;
     let updatePhase = 'manifest';
     try {
+      const cacheRoot = updateCacheRoot();
+      updateLease = await acquireUpdateLease({ cacheRoot, userDataDir: app.getPath('userData'), ownerPid: process.pid });
       const update=await getUpdateManifest();
       if (!update.available) return { available:false };
       ({ filename: logFile, log } = await createUpdateLogger());
@@ -611,7 +638,6 @@ app.whenReady().then(async () => {
       const previousDataSchema = previousState?.current?.dataSchemaVersion ?? CURRENT_DATA_SCHEMA;
       const previousExecutable=path.join(previousRoot,'X-ray Report Studio.exe');
       updatePhase = 'verified-archive-cache';
-      const cacheRoot = path.join(app.getPath('appData'), 'X-ray Report Studio Updates', 'verified');
       await fs.mkdir(cacheRoot, { recursive: true });
       file = path.join(cacheRoot, `XRS-${update.version}-${update.sha256.toLowerCase()}.zip`);
       let archive;
@@ -670,7 +696,7 @@ app.whenReady().then(async () => {
         currentRoot: previousRoot, installationParent: path.dirname(previousRoot), userDataDir: app.getPath('userData'), sharedDictionaryFile,
         backupRoot: backupRoot(), allowedBackupRoot: app.getPath('appData'),
         installStateFile, dataSchemaFile, shortcutPath: shortcutLocation(), logFile,
-        resultFile, handoffFile, workerProfile, previous: {
+        resultFile, handoffFile, workerProfile, leaseFile: updateLease.leaseFile, leaseAttemptId: updateLease.attemptId, previous: {
           version: previousVersion, root: previousRoot, executable: previousExecutable,
           dataSchemaVersion: previousDataSchema,
         },
@@ -679,6 +705,7 @@ app.whenReady().then(async () => {
       await log({ event: 'update-worker-launch-requested', phase: 'handoff', operation: 'write-handoff-config', path: 'updates/verified/<handoff-config>', processState: 'main-running' });
       try {
         const workerPid = await spawnDetachedUpdateWorker(handoffFile, workerProfile);
+        leaseTransferred = true;
         await log({ event: 'update-worker-launched', phase: 'handoff', processState: 'main-running', operation: 'spawn-independent-worker', bytes: workerPid });
       } catch (workerError) {
         await fs.unlink(handoffFile).catch(() => {});
@@ -697,7 +724,10 @@ app.whenReady().then(async () => {
       await log({ event: 'update-error', errorCode, phase: updatePhase, ...(syscall ? { syscall } : {}) });
       sendProgress({stage:'error',loaded:0,total:0,percent:0,message:error.message,logFile});
       throw new Error(logFile?`${error.message} Журнал обновления: ${logFile}`:error.message);
-    } finally { updateInstalling=false; }
+    } finally {
+      if (updateLease && !leaseTransferred) await releaseUpdateLease(updateLease.leaseFile, updateLease.attemptId, process.pid).catch(() => {});
+      updateInstalling=false;
+    }
     sendProgress({stage:'installed',loaded:archiveBytes,total:archiveBytes,percent:100});
     return { available:true, installing:false, version:activeApplicationVersion };
   });

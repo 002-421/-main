@@ -6,6 +6,7 @@ const { createUserDataBackup } = require('./user-data-backup.cjs');
 const { smokeTestInstalledApp } = require('./live-update.cjs');
 const { CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, samePath } = require('./install-state.cjs');
 const { waitForNoProfileProcesses } = require('./windows-processes.cjs');
+const { getUpdateLeaseFile, claimUpdateLease, startUpdateLeaseHeartbeat } = require('./update-lease.cjs');
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 function inside(parent, candidate) {
@@ -61,6 +62,9 @@ async function runUpdateWorker(config, dependencies = {}) {
       || typeof config.installStateFile !== 'string' || !inside(config.userDataDir, config.installStateFile)
       || typeof config.dataSchemaFile !== 'string' || !inside(config.userDataDir, config.dataSchemaFile)
       || typeof config.version !== 'string' || !/^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/.test(config.version)
+      || ((config.leaseFile === undefined) !== (config.leaseAttemptId === undefined))
+      || (config.leaseFile !== undefined && (!samePath(config.leaseFile, getUpdateLeaseFile(config.cacheRoot, config.userDataDir))
+        || typeof config.leaseAttemptId !== 'string' || !/^[a-f0-9-]{36}$/i.test(config.leaseAttemptId)))
       || !config.previous || config.previous.version !== config.currentVersion
       || path.resolve(config.previous.root) !== path.resolve(config.currentRoot)
       || path.resolve(config.previous.executable) !== path.resolve(config.currentRoot, 'X-ray Report Studio.exe')
@@ -74,20 +78,31 @@ async function runUpdateWorker(config, dependencies = {}) {
   let priorInstallState;
   let mainExited = false;
   let profileIdle = false;
+  let stopLeaseHeartbeat = async () => {};
   try {
+    if (config.leaseFile) {
+      await claimUpdateLease(config.leaseFile, config.leaseAttemptId, config.parentPid, process.pid);
+      stopLeaseHeartbeat = startUpdateLeaseHeartbeat(config.leaseFile, config.leaseAttemptId, process.pid);
+    }
     await log({ event: 'update-worker-start', phase, processState: 'main-running', operation: 'wait-for-parent' });
     try { await wait(config.parentPid); }
     catch (error) {
-      await showProcessBlocked(typeof error?.code === 'string' ? error.code : 'PROCESS_STATE_UNKNOWN');
+      await showProcessBlocked(typeof error?.code === 'string' ? error.code : 'PROCESS_STATE_UNKNOWN', error?.blockingProcesses ?? []);
       throw error;
     }
     mainExited = true;
     await log({ event: 'update-worker-parent-exited', phase, processState: 'main-exited', operation: 'wait-for-parent' });
     phase = 'wait-for-profile-idle';
     try { await waitForProfileIdle({ installRoot: config.installationParent ?? path.dirname(config.currentRoot), userDataDir: config.userDataDir }, {
-      onState: processState => log({ event: 'update-worker-process-state', phase, processState, operation: 'verify-profile-idle' }),
+      onState: (processState, details = {}) => log({
+        event: 'update-worker-process-state', phase, processState, operation: 'verify-profile-idle',
+        ...(Number.isSafeInteger(details.attempt) ? { attempt: details.attempt } : {}),
+        ...(Number.isSafeInteger(details.waitedMs) ? { waitedMs: details.waitedMs } : {}),
+        ...(Array.isArray(details.blockingProcesses) ? { processCount: details.blockingProcesses.length } : {}),
+        ...(Array.isArray(details.blockingProcesses) ? { blockingProcesses: details.blockingProcesses } : {}),
+      }),
     }); } catch (error) {
-      await showProcessBlocked(typeof error?.code === 'string' ? error.code : 'PROCESS_STATE_UNKNOWN');
+      await showProcessBlocked(typeof error?.code === 'string' ? error.code : 'PROCESS_STATE_UNKNOWN', error?.blockingProcesses ?? []);
       throw error;
     }
     profileIdle = true;
@@ -187,6 +202,8 @@ async function runUpdateWorker(config, dependencies = {}) {
       throw error;
     }
     await log({ event: 'shortcut-committed', phase, targetVersion: config.version, processState: 'main-exited' });
+    await stopLeaseHeartbeat();
+    stopLeaseHeartbeat = async () => {};
     launch(installed.executable, [`--user-data-dir=${config.userDataDir}`], { cwd: installed.root });
     await log({ event: 'new-runtime-launched', phase, targetVersion: config.version, processState: 'main-exited' });
     await fs.unlink(config.archive).catch(() => {});
@@ -195,7 +212,7 @@ async function runUpdateWorker(config, dependencies = {}) {
   } catch (error) {
     const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'UPDATE_WORKER_FAILED';
     const syscall = typeof error?.syscall === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(error.syscall) ? error.syscall : undefined;
-    await log({ event: 'update-worker-error', phase, errorCode, ...(syscall ? { syscall } : {}), processState: 'main-exited', recoveryAction: 'retain-current-and-cached-archive' });
+    await log({ event: 'update-worker-error', phase, errorCode, ...(syscall ? { syscall } : {}), processState: 'main-exited', recoveryAction: 'retain-current-and-cached-archive', ...(Array.isArray(error?.blockingProcesses) ? { blockingProcesses: error.blockingProcesses } : {}) });
     if (activationStarted) {
       try {
         if (priorInstallState) await writeState(config.installStateFile, priorInstallState);
@@ -206,6 +223,8 @@ async function runUpdateWorker(config, dependencies = {}) {
         await log({ event: 'update-worker-activation-restore-failed', phase, restored: false, recoveryAction: 'manual-support-required' });
       }
     }
+    await stopLeaseHeartbeat().catch(() => {});
+    stopLeaseHeartbeat = async () => {};
     await fs.writeFile(config.resultFile, JSON.stringify({ status: 'failed', version: config.version, errorCode, phase, at: new Date().toISOString() }), { flag: 'w' }).catch(() => {});
     if (mainExited && profileIdle && config.previous?.executable && config.previous?.root) {
       try {
@@ -216,6 +235,8 @@ async function runUpdateWorker(config, dependencies = {}) {
       }
     }
     return { installed: false, errorCode, phase, archiveRetained: true };
+  } finally {
+    await stopLeaseHeartbeat().catch(() => {});
   }
 }
 

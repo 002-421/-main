@@ -29,7 +29,14 @@ function sanitizeDiagnosticPath(value) {
 }
 
 function sanitizeUpdateLogEvent(event) {
-  const safe = copyPrimitiveFields(event, ['event', 'applicationVersion', 'platform', 'currentVersion', 'targetVersion', 'version', 'bytes', 'files', 'schemaVersion', 'expected', 'actual', 'percent', 'stage', 'restored', 'errorCode', 'phase', 'code', 'syscall', 'operation', 'attempt', 'processState', 'recoveryAction']);
+  const safe = copyPrimitiveFields(event, ['event', 'applicationVersion', 'platform', 'currentVersion', 'targetVersion', 'version', 'bytes', 'files', 'schemaVersion', 'expected', 'actual', 'percent', 'stage', 'restored', 'errorCode', 'phase', 'code', 'syscall', 'operation', 'attempt', 'processState', 'processCount', 'waitedMs', 'recoveryAction']);
+  if (Array.isArray(event?.blockingProcesses)) {
+    safe.blockingProcesses = event.blockingProcesses.slice(0, 12).flatMap(item => {
+      if (!Number.isSafeInteger(item?.pid) || item.pid <= 0 || typeof item?.processType !== 'string'
+          || !/^(?:electron-main|electron-[a-z0-9_-]{1,32}|update-worker|unknown)$/.test(item.processType)) return [];
+      return [{ ...copyPrimitiveFields(item, ['pid', 'parentPid', 'processType', 'matchesInstall', 'matchesProfile', 'matchesWorker']) }];
+    });
+  }
   const diagnosticPath = sanitizeDiagnosticPath(event?.path);
   if (diagnosticPath) safe.path = diagnosticPath;
   const reasons = {

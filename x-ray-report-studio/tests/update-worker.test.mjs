@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { runUpdateWorker, waitForParentExit } = require('../electron/update-worker.cjs');
 const { writeJsonAtomic } = require('../electron/install-state.cjs');
+const { acquireUpdateLease, inspectUpdateLease, releaseUpdateLease } = require('../electron/update-lease.cjs');
 
 async function setup() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'xrs-worker-recovery-'));
@@ -87,6 +88,21 @@ test('worker waits for the old Electron process, backs up after exit, stages sid
   await assert.rejects(fs.stat(f.archive), { code: 'ENOENT' });
 });
 
+test('worker holds one profile lease through handoff and releases it before launching the candidate', async t => {
+  const f = await setup(); t.after(() => fs.rm(f.root, { recursive: true, force: true }));
+  const lease = await acquireUpdateLease({ cacheRoot: f.config.cacheRoot, userDataDir: f.profile, ownerPid: process.pid });
+  f.config.leaseFile = lease.leaseFile;
+  f.config.leaseAttemptId = lease.attemptId;
+  const deps = dependencies(f, {
+    launchDetached: async () => {
+      assert.equal((await inspectUpdateLease({ cacheRoot: f.config.cacheRoot, userDataDir: f.profile })).active, false);
+    },
+  });
+  const result = await runUpdateWorker(f.config, deps);
+  assert.deepEqual(result, { installed: true, version: '0.4.59' });
+  assert.equal((await inspectUpdateLease({ cacheRoot: f.config.cacheRoot, userDataDir: f.profile })).active, false);
+});
+
 test('a non-lock backup failure defaults to cancel and leaves the old install and verified archive untouched', async t => {
   const f = await setup(); t.after(() => fs.rm(f.root, { recursive: true, force: true }));
   const failure = Object.assign(new Error('synthetic disk full'), { code: 'ENOSPC' });
@@ -146,6 +162,8 @@ test('a locked profile file is a hard stop and never offers backup override', as
 
 test('an active or unverifiable XRS process is explained and never reaches the backup override', async t => {
   const f = await setup(); t.after(() => fs.rm(f.root, { recursive: true, force: true }));
+  const lease = await acquireUpdateLease({ cacheRoot: f.config.cacheRoot, userDataDir: f.profile, ownerPid: process.pid });
+  f.config.leaseFile = lease.leaseFile; f.config.leaseAttemptId = lease.attemptId;
   let prompts = 0, notices = 0;
   const deps = dependencies(f, {
     waitForProfileIdle: async () => { throw Object.assign(new Error('synthetic other XRS process'), { code: 'PROFILE_STILL_IN_USE' }); },
@@ -159,6 +177,9 @@ test('an active or unverifiable XRS process is explained and never reaches the b
   assert.equal(deps.calls.backup, 0);
   assert.equal(deps.calls.install, 0);
   assert.equal(await fs.readFile(f.archive, 'utf8'), 'synthetic verified update archive');
+  assert.equal((await inspectUpdateLease({ cacheRoot: f.config.cacheRoot, userDataDir: f.profile })).active, false);
+  const nextAttempt = await acquireUpdateLease({ cacheRoot: f.config.cacheRoot, userDataDir: f.profile, ownerPid: process.pid });
+  await releaseUpdateLease(nextAttempt.leaseFile, nextAttempt.attemptId, process.pid);
 });
 
 test('backup failure retains old install, shortcut, state and verified archive, then relaunches old version', async t => {

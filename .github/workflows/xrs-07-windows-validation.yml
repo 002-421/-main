@@ -2,7 +2,7 @@ name: XRS-07/XRS-08 Windows validation
 
 on:
   push:
-    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery]
+    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062]
   pull_request:
     paths:
       - 'x-ray-report-studio/**'
@@ -36,7 +36,7 @@ jobs:
           $sourceRef = if ($env:GITHUB_HEAD_REF) { $env:GITHUB_HEAD_REF } else { $env:GITHUB_REF_NAME }
           $isStable056 = $version -eq '0.4.56' -and $sourceRef -eq 'codex/xrs-056-stable-clean'
           $isUpdateHotfix = $sourceRef -eq 'codex/xrs-first-start-confirmation'
-          $isUpdaterRecovery = $sourceRef -eq 'codex/xrs-updater-recovery'
+          $isUpdaterRecovery = $sourceRef -in @('codex/xrs-updater-recovery', 'codex/xrs-updater-062')
           $isUpdaterCandidate060 = $version -eq '0.4.60' -and $isUpdaterRecovery
           Add-Content -Path $env:GITHUB_OUTPUT -Value "beta=$($isBeta.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "stable056=$($isStable056.ToString().ToLowerInvariant())" -Encoding utf8
@@ -96,7 +96,7 @@ jobs:
         shell: pwsh
         run: |
           $diagnostic = Join-Path $env:RUNNER_TEMP 'xrs-updater-recovery-windows-tests.txt'
-          node --test tests/update-worker.test.mjs tests/windows-processes.test.mjs tests/user-data-backup.test.mjs tests/update-install.test.mjs tests/log-safety.test.mjs tests/update-settings.test.mjs tests/update-confirmation.test.mjs tests/windows-integration.test.mjs 2>&1 | Tee-Object -FilePath $diagnostic
+          node --test tests/update-lease.test.mjs tests/update-worker.test.mjs tests/windows-processes.test.mjs tests/user-data-backup.test.mjs tests/update-install.test.mjs tests/log-safety.test.mjs tests/update-settings.test.mjs tests/update-confirmation.test.mjs tests/windows-integration.test.mjs 2>&1 | Tee-Object -FilePath $diagnostic
           $testExit = $LASTEXITCODE
           if ($testExit -ne 0) {
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '## Updater recovery Windows test diagnostics' -Encoding utf8

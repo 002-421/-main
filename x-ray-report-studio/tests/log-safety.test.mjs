@@ -16,3 +16,10 @@ test('update file diagnostics retain a redacted relative profile path and operat
  const event=sanitizeUpdateLogEvent({event:'file-operation-error',phase:'user-data-backup',operation:'read-source-for-sha256',path:'profile/Local Storage/leveldb/Клиент Иванов/протокол.docx',errorCode:'EBUSY',syscall:'read',processState:'main-exited',attempt:3,patientName:'Иванов'});
  assert.deepEqual(event,{event:'file-operation-error',phase:'user-data-backup',operation:'read-source-for-sha256',path:'profile/Local Storage/leveldb/<redacted>/<redacted>',errorCode:'EBUSY',syscall:'read',processState:'main-exited',attempt:3});
 });
+
+test('blocking process diagnostics retain only PID and type without profile paths or command lines',()=>{
+ const event=sanitizeUpdateLogEvent({event:'update-worker-process-state',phase:'wait-for-profile-idle',processState:'other-process-running',processCount:1,waitedMs:5000,blockingProcesses:[{pid:123,parentPid:12,name:'X-ray Report Studio.exe',processType:'electron-renderer',matchesInstall:true,matchesProfile:true,matchesWorker:false,commandLine:'patient text',executablePath:'C:\\Users\\Doctor\\MRI Report Studio'}]});
+ assert.deepEqual(event,{event:'update-worker-process-state',phase:'wait-for-profile-idle',processState:'other-process-running',processCount:1,waitedMs:5000,blockingProcesses:[{pid:123,parentPid:12,processType:'electron-renderer',matchesInstall:true,matchesProfile:true,matchesWorker:false}]});
+ assert.equal(JSON.stringify(event).includes('Doctor'),false);
+ assert.equal(JSON.stringify(event).includes('patient text'),false);
+});

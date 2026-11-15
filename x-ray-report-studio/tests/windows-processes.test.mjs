@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { waitForNoProfileProcesses, hasOtherXrsProcess } = require('../electron/windows-processes.cjs');
+const { waitForNoProfileProcesses, hasOtherXrsProcess, inspectOtherXrsProcesses, classifyOtherXrsProcesses } = require('../electron/windows-processes.cjs');
+const { acquireUpdateLease, inspectUpdateLease, releaseUpdateLease } = require('../electron/update-lease.cjs');
 const execFileAsync = promisify(execFile);
 
 function waitForProcessClose(child, timeoutMs, label) {
@@ -80,10 +81,63 @@ test('profile process inspection waits for active processes and fails closed at 
     onState: async state => states.push(state),
   });
   assert.equal(polls, 3);
-  assert.deepEqual(states, ['other-process-running', 'other-process-running', 'clear']);
+  assert.deepEqual(states, ['other-process-running', 'clear']);
   await assert.rejects(waitForNoProfileProcesses({}, {
     timeoutMs: 1, pollMs: 1, query: async () => true,
   }), { code: 'PROFILE_STILL_IN_USE' });
+});
+
+test('process inspection ignores the worker and its Electron children but reports another instance using this profile', () => {
+  const installRoot = 'C:\\Program Files\\X-ray Report Studio\\App_0.4.60';
+  const profile = 'C:\\Users\\Synthetic\\AppData\\Roaming\\MRI Report Studio';
+  const processes = [
+    { ProcessId: 500, ParentProcessId: 100, Name: 'X-ray Report Studio.exe', ExecutablePath: `${installRoot}\\X-ray Report Studio.exe`, CommandLine: '--xrs-update-worker' },
+    { ProcessId: 501, ParentProcessId: 500, Name: 'X-ray Report Studio.exe', ExecutablePath: `${installRoot}\\X-ray Report Studio.exe`, CommandLine: '--type=gpu-process' },
+    { ProcessId: 700, ParentProcessId: 1, Name: 'X-ray Report Studio.exe', ExecutablePath: `${installRoot}\\X-ray Report Studio.exe`, CommandLine: `"X-ray Report Studio.exe" --user-data-dir="${profile}"` },
+    { ProcessId: 701, ParentProcessId: 1, Name: 'X-ray Report Studio.exe', ExecutablePath: `${installRoot}\\X-ray Report Studio.exe`, CommandLine: '"X-ray Report Studio.exe" --user-data-dir="C:\\Other Profile"' },
+    { ProcessId: 702, ParentProcessId: 1, Name: 'X-ray Report Studio.exe', ExecutablePath: `${installRoot}\\X-ray Report Studio.exe`, CommandLine: '"X-ray Report Studio.exe" --user-data-dir="C:\\Temp\\WorkerProfile" --xrs-update-worker C:\\Cache\\handoff.json' },
+  ];
+  const processTree = [
+    { ProcessId: 500, ParentProcessId: 100 },
+    { ProcessId: 600, ParentProcessId: 500 },
+    { ProcessId: 501, ParentProcessId: 600 },
+    { ProcessId: 700, ParentProcessId: 1 },
+    { ProcessId: 701, ParentProcessId: 1 },
+    { ProcessId: 702, ParentProcessId: 1 },
+  ];
+  const blockers = classifyOtherXrsProcesses(processes, { installRoot, userDataDir: profile, workerPid: 500, processTree });
+  assert.deepEqual(blockers.map(item => item.pid), [700, 702]);
+  assert.equal(blockers[0].processType, 'electron-main');
+  assert.equal(blockers[0].matchesProfile, true);
+  assert.equal(blockers[1].processType, 'update-worker');
+  assert.equal(blockers[1].matchesWorker, true);
+  assert.equal(JSON.stringify(blockers).includes('Synthetic'), false);
+});
+
+test('Windows PowerShell single-row JSON is normalized as a process list', async () => {
+  const installRoot = 'C:\\Program Files\\X-ray Report Studio\\App_0.4.60';
+  const profile = 'C:\\Users\\Synthetic\\AppData\\Roaming\\MRI Report Studio';
+  const snapshot = {
+    processes: { ProcessId: 700, ParentProcessId: 1, Name: 'X-ray Report Studio.exe', ExecutablePath: `${installRoot}\\X-ray Report Studio.exe`, CommandLine: `X-ray Report Studio.exe --user-data-dir="${profile}"` },
+    processTree: { ProcessId: 700, ParentProcessId: 1 },
+  };
+  const blockers = await inspectOtherXrsProcesses({
+    platform: 'win32', installRoot, userDataDir: profile, workerPid: 500,
+    run: async () => ({ stdout: JSON.stringify(snapshot) }),
+  });
+  assert.equal(blockers.length, 1);
+  assert.equal(blockers[0].pid, 700);
+});
+
+test('profile process wait emits safe PID and process type diagnostics and keeps a bounded timeout', async () => {
+  const diagnostics = [];
+  await assert.rejects(waitForNoProfileProcesses({}, {
+    timeoutMs: 3, pollMs: 1,
+    query: async () => [{ pid: 700, processType: 'electron-renderer', matchesProfile: true }],
+    onState: async (state, detail) => diagnostics.push({ state, detail }),
+  }), error => error.code === 'PROFILE_STILL_IN_USE' && error.blockingProcesses[0].pid === 700);
+  assert.equal(diagnostics[0].state, 'other-process-running');
+  assert.equal(diagnostics[0].detail.blockingProcesses[0].processType, 'electron-renderer');
 });
 
 test('Windows CIM process query runs and confirms an idle synthetic install root', { skip: process.platform !== 'win32' }, async () => {
@@ -112,7 +166,7 @@ test('independent Electron updater stages 0.4.60 from 0.4.59 after the real pare
   await Promise.all([fs.mkdir(parentApp, { recursive: true }), fs.mkdir(workerApp, { recursive: true }), fs.mkdir(profile, { recursive: true }), fs.mkdir(installRoot, { recursive: true }), fs.mkdir(cacheRoot, { recursive: true }), fs.mkdir(path.dirname(shortcutPath), { recursive: true })]);
   const parentProfile = path.join(root, 'ParentProfile'); await fs.mkdir(parentProfile);
   await fs.writeFile(path.join(parentApp, 'package.json'), JSON.stringify({ name: 'parent-fixture', version: '1.0.0', main: 'main.cjs' }));
-  await fs.writeFile(path.join(parentApp, 'main.cjs'), `const fs=require('node:fs');const {app}=require('electron');app.whenReady().then(()=>{fs.writeFileSync(${JSON.stringify(parentReadyFile)},JSON.stringify({pid:process.pid}));setTimeout(()=>app.quit(),2200);});`);
+  await fs.writeFile(path.join(parentApp, 'main.cjs'), `const fs=require('node:fs');const {app}=require('electron');app.whenReady().then(()=>{fs.writeFileSync(${JSON.stringify(parentReadyFile)},JSON.stringify({pid:process.pid}));setTimeout(()=>app.quit(),6000);});`);
   const parentExe = path.join(installRoot, 'X-ray Report Studio.exe'); await fs.writeFile(parentExe, 'synthetic previous executable marker');
   await fs.writeFile(path.join(profile, 'workspace.json'), 'synthetic open document');
   await fs.writeFile(archive, 'synthetic verified archive');
@@ -127,6 +181,8 @@ test('independent Electron updater stages 0.4.60 from 0.4.59 after the real pare
     handoffFile: path.join(cacheRoot, 'handoff.json'), previous: { version: '0.4.59', root: installRoot, executable: parentExe, dataSchemaVersion: 1 },
   };
   const configFile = path.join(cacheRoot, 'handoff.json');
+  let testLease;
+  t.after(async () => { if (testLease) await releaseUpdateLease(testLease.leaseFile, testLease.attemptId, testLease.ownerPid).catch(() => {}); });
   const workerEntrypoint = path.join(workerApp, 'main.cjs');
   const workerModule = path.resolve(testDir, '../electron/update-worker.cjs');
   const stateModule = path.resolve(testDir, '../electron/install-state.cjs');
@@ -150,12 +206,36 @@ test('independent Electron updater stages 0.4.60 from 0.4.59 after the real pare
   }
   assert.ok(Number.isSafeInteger(parentRuntime?.pid) && parentRuntime.pid > 0, 'Parent Electron did not report its real runtime PID within 10000 ms.');
   const parentClosed = waitForProcessClose(parent, 15000, 'Parent Electron process').then(code => { parentExit = code; return code; });
-  config.parentPid = parentRuntime.pid; await fs.writeFile(configFile, JSON.stringify(config));
+  config.parentPid = parentRuntime.pid;
+  testLease = await acquireUpdateLease({ cacheRoot, userDataDir: profile, ownerPid: parentRuntime.pid });
+  config.leaseFile = testLease.leaseFile; config.leaseAttemptId = testLease.attemptId;
+  await fs.writeFile(configFile, JSON.stringify(config));
   const worker = spawn(electronExe, [workerApp, `--user-data-dir=${path.join(root, 'WorkerProfile')}`], {
     cwd: workerApp, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, XRS_WORKER_CONFIG: configFile, XRS_WORKER_RESULT: resultFile, XRS_WORKER_EVENTS: marker, XRS_WORKER_DIAGNOSTICS: diagnosticsFile, XRS_PARENT_PID: String(parentRuntime.pid) },
   });
   children.push(worker);
+  const workerLeaseDeadline = Date.now() + 10000;
+  let workerHasLease = false;
+  while (Date.now() < workerLeaseDeadline) {
+    workerHasLease = (await readDiagnosticEvents(diagnosticsFile)).some(item => item.event === 'update-worker-start');
+    if (workerHasLease) break;
+    if (worker.exitCode !== null || worker.signalCode !== null) break;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.equal(workerHasLease, true, 'first Electron worker must claim the profile lease before the duplicate starts');
+  const duplicateConfig = { ...config, resultFile: path.join(root, 'duplicate-worker-result.json') };
+  const duplicateConfigFile = path.join(cacheRoot, 'duplicate-handoff.json');
+  await fs.writeFile(duplicateConfigFile, JSON.stringify(duplicateConfig));
+  const duplicateWorker = spawn(electronExe, [workerApp, `--user-data-dir=${path.join(root, 'DuplicateWorkerProfile')}`], {
+    cwd: workerApp, windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'],
+    env: { ...process.env, XRS_WORKER_CONFIG: duplicateConfigFile, XRS_WORKER_RESULT: duplicateConfig.resultFile, XRS_WORKER_EVENTS: marker, XRS_WORKER_DIAGNOSTICS: path.join(root, 'duplicate-worker-diagnostics.jsonl'), XRS_PARENT_PID: String(parentRuntime.pid) },
+  });
+  children.push(duplicateWorker);
+  assert.equal(await waitForProcessClose(duplicateWorker, 15000, 'Duplicate updater worker'), 0);
+  assert.deepEqual(JSON.parse(await fs.readFile(duplicateConfig.resultFile, 'utf8')), {
+    status: 'failed', version: '0.4.60', errorCode: 'UPDATE_LEASE_OWNED_BY_OTHER_WORKER', phase: 'wait-for-main-exit', at: JSON.parse(await fs.readFile(duplicateConfig.resultFile, 'utf8')).at,
+  });
   for (const [stream, source] of [[worker.stdout, 'stdout'], [worker.stderr, 'stderr']]) {
     stream.setEncoding('utf8');
     stream.on('data', chunk => {
@@ -188,4 +268,5 @@ test('independent Electron updater stages 0.4.60 from 0.4.59 after the real pare
   assert.deepEqual(JSON.parse(workerResultText), { installed: true, version: '0.4.60' });
   assert.deepEqual(JSON.parse(await fs.readFile(marker, 'utf8')), ['backup-after-parent-exit', 'candidate-launch']);
   assert.equal(await fs.readFile(path.join(profile, 'workspace.json'), 'utf8'), 'synthetic open document');
+  assert.equal((await inspectUpdateLease({ cacheRoot, userDataDir: profile })).active, false, 'worker releases its lease before relaunch');
 });
