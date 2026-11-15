@@ -57,6 +57,15 @@ test('0.4.59 can safely roll back to the confirmed 0.4.58 Stable data contract',
  assert.equal(canRollback({installState:{...installState,status:'pending-first-start'},dataState:compatibleData,currentRoot}).available,false);
 });
 
+test('0.4.61 preserves the confirmed 0.4.60 profile contract for rollback',()=>{
+ const currentRoot=path.resolve('/safe/App_0.4.61');
+ const installState={status:'stable',current:{version:'0.4.61',root:currentRoot},previous:{version:'0.4.60',root:'/safe/App_0.4.60',executable:'/safe/App_0.4.60/X-ray Report Studio.exe',dataSchemaVersion:1}};
+ const compatibleData={schemaVersion:1,dataContract:CURRENT_DATA_CONTRACT};
+ assert.equal(applicationSupportsDataContract('0.4.60',CURRENT_DATA_CONTRACT,1),true);
+ assert.equal(applicationSupportsDataContract('0.4.61',CURRENT_DATA_CONTRACT,1),true);
+ assert.equal(canRollback({installState,dataState:compatibleData,currentRoot}).available,true);
+});
+
 test('stale Stable pointer is reconciled only when the live EXE, bundled app, shortcut and retained install agree',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-stable-state-recovery-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const appRoot=version=>path.join(root,`App_${version}`);

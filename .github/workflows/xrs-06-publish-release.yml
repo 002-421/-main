@@ -53,7 +53,7 @@ jobs:
           }
       - run: npm run build
       - name: Targeted Stable updater tests
-        run: node --test tests/update-channel.test.mjs tests/update-version.test.mjs tests/update-install.test.mjs tests/update-settings.test.mjs tests/user-data-backup.test.mjs tests/log-safety.test.mjs tests/windows-integration.test.mjs
+        run: node --test tests/update-channel.test.mjs tests/update-version.test.mjs tests/update-install.test.mjs tests/update-settings.test.mjs tests/update-worker.test.mjs tests/user-data-backup.test.mjs tests/log-safety.test.mjs tests/windows-integration.test.mjs tests/windows-processes.test.mjs
       - name: Package and verify Windows Setup ZIP
         shell: pwsh
         env:
