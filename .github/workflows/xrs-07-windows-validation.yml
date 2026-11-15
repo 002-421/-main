@@ -180,7 +180,7 @@ jobs:
             $result | ForEach-Object { Write-Host $_ }
             if ($scenarioExit -ne 0) {
               $diagnostic = ($result | Out-String).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-              Write-Host "::error title=$scenario::$diagnostic"
+              Write-Host "::error title=${scenario}::$diagnostic"
               exit $scenarioExit
             }
           }
