@@ -103,7 +103,7 @@ test('independent Electron updater waits for the real parent Electron process be
     const {runUpdateWorker}=require(${JSON.stringify(workerModule)});const {writeJsonAtomic}=require(${JSON.stringify(stateModule)});
     const diag=async event=>fs.appendFile(process.env.XRS_WORKER_DIAGNOSTICS,JSON.stringify(event)+'\\n');
     diag({stage:'electron-process-started'}).catch(()=>{});
-    app.whenReady().then(async()=>{await diag({stage:'electron-app-ready'});try{const c=JSON.parse(await fs.readFile(process.env.XRS_WORKER_CONFIG,'utf8'));c.parentPid=Number(process.env.XRS_PARENT_PID);
+    app.whenReady().then(async()=>{try{await diag({stage:'electron-app-ready'});const c=JSON.parse(await fs.readFile(process.env.XRS_WORKER_CONFIG,'utf8'));c.parentPid=Number(process.env.XRS_PARENT_PID);
       const events=[];const result=await runUpdateWorker(c,{app,shell,writeJsonAtomic,
         waitForProfileIdle:async()=>{},createUserDataBackup:async()=>{try{process.kill(c.parentPid,0);throw new Error('parent Electron process is still running');}catch(e){if(e.message==='parent Electron process is still running')throw e;}
           events.push('backup-after-parent-exit');await fs.writeFile(process.env.XRS_WORKER_EVENTS,JSON.stringify(events));return{files:1,bytes:20};},
@@ -132,25 +132,40 @@ test('independent Electron updater waits for the real parent Electron process be
   const parentClosed = waitForProcessClose(parent, 15000, 'Parent Electron process').then(code => { parentExit = code; return code; });
   config.parentPid = parentRuntime.pid; await fs.writeFile(configFile, JSON.stringify(config));
   const worker = spawn(electronExe, [workerApp, `--user-data-dir=${path.join(root, 'WorkerProfile')}`], {
-    cwd: workerApp, windowsHide: true, stdio: 'ignore',
+    cwd: workerApp, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, XRS_WORKER_CONFIG: configFile, XRS_WORKER_RESULT: resultFile, XRS_WORKER_EVENTS: marker, XRS_WORKER_DIAGNOSTICS: diagnosticsFile, XRS_PARENT_PID: String(parentRuntime.pid) },
   });
   children.push(worker);
+  for (const [stream, source] of [[worker.stdout, 'stdout'], [worker.stderr, 'stderr']]) {
+    stream.setEncoding('utf8');
+    stream.on('data', chunk => {
+      const safeChunk = String(chunk).slice(0, 2000);
+      fs.appendFile(diagnosticsFile, `${JSON.stringify({ stage: `electron-${source}`, output: safeChunk })}\n`).catch(() => {});
+    });
+  }
+  let workerTimedOut = false;
   const workerClosed = new Promise((resolve, reject) => {
     const timer = setTimeout(async () => {
+      workerTimedOut = true;
       const stages = await readDiagnosticEvents(diagnosticsFile);
       const lastStage = stages.at(-1)?.event || stages.at(-1)?.stage || 'no-worker-diagnostic';
       await terminateProcessTree(worker);
       reject(new Error(`Independent Electron worker timed out after 30000 ms; last stage: ${lastStage}; diagnostic events: ${JSON.stringify(stages)}.`));
     }, 30000);
-    worker.once('close', code => { clearTimeout(timer); resolve(code); });
+    worker.once('close', code => { clearTimeout(timer); if (!workerTimedOut) resolve(code); });
     worker.once('error', error => { clearTimeout(timer); reject(error); });
   });
   await new Promise(resolve => setTimeout(resolve, 500));
   await assert.rejects(fs.stat(marker), { code: 'ENOENT' }, 'backup must not start while the Electron parent is still alive');
-  await Promise.all([parentClosed, workerClosed]);
+  const [, workerExitCode] = await Promise.all([parentClosed, workerClosed]);
   assert.equal(parentExit, 0);
-  assert.deepEqual(JSON.parse(await fs.readFile(resultFile, 'utf8')), { installed: true, version: '0.4.59' });
+  let workerResultText;
+  try { workerResultText = await fs.readFile(resultFile, 'utf8'); }
+  catch (error) {
+    const stages = await readDiagnosticEvents(diagnosticsFile);
+    throw new Error(`Electron worker exited with code ${workerExitCode} without writing its result (${error.code}); diagnostics: ${JSON.stringify(stages)}.`);
+  }
+  assert.deepEqual(JSON.parse(workerResultText), { installed: true, version: '0.4.59' });
   assert.deepEqual(JSON.parse(await fs.readFile(marker, 'utf8')), ['backup-after-parent-exit', 'candidate-launch']);
   assert.equal(await fs.readFile(path.join(profile, 'workspace.json'), 'utf8'), 'synthetic open document');
 });
