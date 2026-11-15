@@ -63,7 +63,7 @@ async function saveWord(name){
  const filePath=path.join(output,name);await rm(filePath,{force:true});
  await application.evaluate(({session},dest)=>session.defaultSession.once('will-download',(_event,item)=>item.setSavePath(dest)),filePath);
  await page.locator('#save-menu-toggle').click();assert.equal(await page.locator('#save-menu-toggle').getAttribute('aria-expanded'),'true');assert.equal(await page.locator('#export-pdf').isVisible(),true);await page.locator('#save-docx').click();assert.equal(await page.locator('#save-menu-items').isVisible(),false);
- assert.ok(await page.locator('.paged-preview-frame iframe, .preview-page').count(),'paginated preview opens before Word export');
+ assert.ok(await page.locator('.paged-preview-frame iframe, .preview-page').count(),'paginated preview opens before Word export');assert.equal(await page.locator('#preview-save-pdf').count(),0,'Word menu selection stays on the Word export path');
  await page.locator('#preview-save-word').click();
  if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
  for(let i=0;i<200;i++){
@@ -220,7 +220,7 @@ try{
  assert.match(clip.text,/Тестовый Пациент/);assert.match(clip.html,/Arial/);
  const pdfPath=path.join(output,'v3-native.pdf');
  await application.evaluate(({dialog},filePath)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath});},pdfPath);
- await page.locator('#save-menu-toggle').click();await page.locator('#export-pdf').click();await page.locator('#preview-save-pdf').click();if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
+ await page.locator('#save-menu-toggle').click();await page.locator('#export-pdf').click();assert.equal(await page.locator('#preview-save-word').count(),0,'PDF menu selection stays on the PDF export path');await page.locator('#preview-save-pdf').click();if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
  await page.getByRole('status').filter({hasText:'PDF сохранён'}).waitFor({timeout:30000});
  assert.equal((await readFile(pdfPath)).subarray(0,5).toString(),'%PDF-');
  console.log('PASS: formatted clipboard and actual desktop PDF export.');

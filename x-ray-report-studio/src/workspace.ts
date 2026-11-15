@@ -621,7 +621,7 @@ function closeSaveMenu(){saveMenu.hidden=true;saveMenuToggle.setAttribute('aria-
 saveMenuToggle.onclick=()=>{saveMenu.hidden=!saveMenu.hidden;saveMenuToggle.setAttribute('aria-expanded',String(!saveMenu.hidden));};
 document.addEventListener('click',event=>{if(!(event.target as HTMLElement).closest('.save-menu'))closeSaveMenu();});
 saveMenu.addEventListener('keydown',event=>{if(event.key==='Escape'){closeSaveMenu();saveMenuToggle.focus();event.stopPropagation();}});
-$('#save-docx').onclick=()=>{closeSaveMenu();previewReport();};$('#open-report').onclick=()=>($('#report-file') as HTMLInputElement).click();
+$('#save-docx').onclick=()=>{closeSaveMenu();void previewReport('word');};$('#open-report').onclick=()=>($('#report-file') as HTMLInputElement).click();
 $('#export-template-docx').onclick=async()=>{
  if(templateMode){toast('Сначала завершите редактирование текущего шаблона.',true);return;}
  try{
@@ -689,16 +689,17 @@ $('#restore-template-backup').onclick=()=>{
   });
  }));
 };
-async function previewReport(){
+async function previewReport(preferred?:'word'|'pdf'){
  const cleanupExport=mountExportEditor();
  try{
   const previewDoc=exportDocument();const stampedEditor=makeEditor(document.createElement('div'),templateMode?promoteInlineTemplate(json()):json(),()=>{});if(!templateMode)decorateExportFooter(stampedEditor.view.dom);const html=DOMPurify.sanitize(stampedEditor.view.dom.innerHTML);stampedEditor.destroy();await document.fonts.ready;const body=`<div class="export-preview-scroll paginated-browser-preview">${paginateBrowserPreview(html,previewDoc)}</div>`;
-  const d=dialog('Постраничный предпросмотр',`${body}<p class="preview-note">Предпросмотр рассчитан по размеру страницы, полям и шрифту Word. Оранжевая рамка отмечает блок, перенос которого нужно проверить. Переносы могут отличаться в Microsoft Word: перед отправкой проверьте сохранённый DOCX.</p>`,'<button class="btn" data-close>Закрыть</button><button class="btn" id="preview-save-pdf">Сохранить PDF</button><button class="btn primary" id="preview-save-word">Сохранить Word</button>');
-  d.querySelector('.dialog')!.classList.add('wide-preview');d.querySelector('#preview-save-word')!.addEventListener('click',()=>{closeDialog();void saveWord();});d.querySelector('#preview-save-pdf')!.addEventListener('click',()=>{closeDialog();requestPdfExport();});
+  const footer='<button class="btn" data-close>Закрыть</button>'+(preferred==='word'?'':'<button class="btn" id="preview-save-pdf">Сохранить PDF</button>')+(preferred==='pdf'?'':'<button class="btn primary" id="preview-save-word">Сохранить Word</button>');
+  const d=dialog('Постраничный предпросмотр',`${body}<p class="preview-note">Предпросмотр рассчитан по размеру страницы, полям и шрифту Word. Оранжевая рамка отмечает блок, перенос которого нужно проверить. Переносы могут отличаться в Microsoft Word: перед отправкой проверьте сохранённый DOCX.</p>`,footer);
+  d.querySelector('.dialog')!.classList.add('wide-preview');d.querySelector('#preview-save-word')?.addEventListener('click',()=>{closeDialog();void saveWord();});d.querySelector('#preview-save-pdf')?.addEventListener('click',()=>{closeDialog();requestPdfExport();});
  }catch(e){toast(`Не удалось подготовить постраничный предпросмотр: ${(e as Error).message}`,true);}
  finally{cleanupExport();}
 }
-$('#preview-report').onclick=previewReport;
+$('#preview-report').onclick=()=>void previewReport();
 $('#report-file').onchange=async event=>{
  const input=event.target as HTMLInputElement,file=input.files?.[0];input.value='';if(!file)return;
  try{
@@ -731,7 +732,7 @@ async function printPDF(confirmed=false){
  const cleanupExport=mountExportEditor();
  try{if(window.desktop){const r=await window.desktop.exportPDF(filename('.pdf'));if(!r.canceled){markReportExported(savedReport.id,savedReport.snapshot);toast('PDF сохранён.');}}else{const printStyle=document.createElement('style');printStyle.textContent=`@media print{@page{size:A4;margin:43mm 18mm 27mm;@bottom-center{content:"Данное заключение не является диагнозом и должно быть интерпретировано лечащим врачом на основании клинико-лабораторных данных и других диагностических исследований\\A Исследование выполнено на томографе, указанном в протоколе";white-space:pre-line;text-align:center;font:8px Arial,sans-serif;color:#64748b}@bottom-right{content:counter(page);font:9pt Arial,sans-serif;color:#000}}}`;document.head.append(printStyle);const old=document.title;document.title=filename('');try{window.print();}finally{document.title=old;printStyle.remove();}}}catch(e){toast(`Не удалось сохранить PDF: ${(e as Error).message}`,true);}finally{cleanupExport();}}
 function requestPdfExport(){void printPDF();}
-$('#export-pdf').onclick=()=>{closeSaveMenu();previewReport();};
+$('#export-pdf').onclick=()=>{closeSaveMenu();void previewReport('pdf');};
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeSaveMenu();closeDialog();clearProofPopup();$('.sidebar').classList.remove('open');}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();if(templateMode)finishTemplate(true);else previewReport();}if(e.key==='F2'){e.preventDefault();nextField();}});
 window.addEventListener('beforeunload',()=>{if(!templateMode)saveLocal();});
 ($('#modality-select') as HTMLSelectElement).value=modalityForTemplate();renderTemplates();renderBlocks();renderCounts();renderReportTabs();
