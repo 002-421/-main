@@ -61,4 +61,6 @@ try{
  assert.deepEqual(errors,[]);
  console.log('PASS packaged Electron: real IPC, Cyrillic profile, remember from card, idempotent merge, two tabs, process restart, removal and renewed spelling finding.');
 }catch(error){await mkdir('test-output',{recursive:true});await writeFile('test-output/dictionary-electron-error.txt',String(error.stack));if(page)await page.screenshot({path:'test-output/dictionary-electron-error.png'}).catch(()=>{});throw error;
-}finally{await app?.close();await rm(temp,{recursive:true,force:true});}
+}finally{await app?.close();// Windows can keep a runtime DLL mapped briefly after the main process exits.
+ // Retry only test-directory removal; report failure if it remains locked.
+ await rm(temp,{recursive:true,force:true,maxRetries:10,retryDelay:200});}
