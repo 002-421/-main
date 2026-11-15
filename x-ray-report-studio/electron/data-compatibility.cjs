@@ -23,6 +23,7 @@ const APPLICATION_DATA_CONTRACTS = Object.freeze({
   // 0.4.62 and updater rollback candidates retain the same persisted profile contract.
   '0.4.62': Object.freeze([CURRENT_DATA_CONTRACT]),
   '0.4.63': Object.freeze([CURRENT_DATA_CONTRACT]),
+  '0.4.64': Object.freeze([CURRENT_DATA_CONTRACT]),
 });
 
 function applicationSupportsDataContract(applicationVersion, dataContract, schemaVersion = DATA_SCHEMA_VERSION) {

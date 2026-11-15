@@ -45,6 +45,7 @@ jobs:
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updaterRecovery=$($isUpdaterRecovery.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updaterRollback053=$($isUpdaterRollback053.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updaterCandidate060=$($isUpdaterCandidate060.ToString().ToLowerInvariant())" -Encoding utf8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version" -Encoding utf8
       - run: npm ci
       - name: Install pinned Electron runtime
         if: steps.release-channel.outputs.stable056 != 'true'
@@ -228,24 +229,27 @@ jobs:
           path: |
             x-ray-report-studio/test-output/xrs-0.4.56/X-ray_Report_Studio_Windows_Setup.zip
             x-ray-report-studio/test-output/xrs-0.4.56/SHA256SUMS.txt
-      - name: Package and verify unpublished 0.4.63 updater rollback candidate
+      - name: Package and verify unpublished ${{ steps.release-channel.outputs.version }} updater candidate
         if: steps.release-channel.outputs.updaterRollback053 == 'true'
         shell: pwsh
         run: |
-          python scripts/package_setup.py --candidate-output test-output/xrs-0.4.63
+          $version = '${{ steps.release-channel.outputs.version }}'
+          $output = "test-output/xrs-$version"
+          python scripts/package_setup.py --candidate-output $output
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $archive = 'test-output/xrs-0.4.63/X-ray_Report_Studio_Windows_Setup.zip'
-          python scripts/verify_setup_package.py --zip $archive --source-electron electron --version 0.4.63
+          $archive = Join-Path $output 'X-ray_Report_Studio_Windows_Setup.zip'
+          python scripts/verify_setup_package.py --zip $archive --source-electron electron --version $version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
-          Set-Content -Path 'test-output/xrs-0.4.63/SHA256SUMS.txt' -Value "$hash  X-ray_Report_Studio_Windows_Setup.zip" -NoNewline
-          Write-Host "Unpublished updater rollback Setup ZIP SHA256: $hash"
+          Set-Content -Path (Join-Path $output 'SHA256SUMS.txt') -Value "$hash  X-ray_Report_Studio_Windows_Setup.zip" -NoNewline
+          Write-Host "Unpublished updater candidate $version Setup ZIP SHA256: $hash"
           git diff --exit-code -- downloads/latest.json
       - name: Parse packaged Install.ps1 with Windows PowerShell 5.1
         if: steps.release-channel.outputs.updaterRollback053 == 'true'
         shell: powershell
         run: |
-          $archive = Join-Path $PWD 'test-output/xrs-0.4.63/X-ray_Report_Studio_Windows_Setup.zip'
+          $version = '${{ steps.release-channel.outputs.version }}'
+          $archive = Join-Path $PWD "test-output/xrs-$version/X-ray_Report_Studio_Windows_Setup.zip"
           $stage = Join-Path $env:RUNNER_TEMP ('XRS-Setup-Parser-' + $env:GITHUB_RUN_ID)
           try {
             Expand-Archive -LiteralPath $archive -DestinationPath $stage -Force
@@ -258,15 +262,15 @@ jobs:
           } finally {
             Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
           }
-      - name: Upload unpublished 0.4.63 updater rollback candidate
+      - name: Upload unpublished ${{ steps.release-channel.outputs.version }} updater candidate
         if: steps.release-channel.outputs.updaterRollback053 == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: xrs-0.4.63-updater-rollback-053-windows-candidate
+          name: xrs-${{ steps.release-channel.outputs.version }}-updater-rollback-053-windows-candidate
           if-no-files-found: error
           path: |
-            x-ray-report-studio/test-output/xrs-0.4.63/X-ray_Report_Studio_Windows_Setup.zip
-            x-ray-report-studio/test-output/xrs-0.4.63/SHA256SUMS.txt
+            x-ray-report-studio/test-output/xrs-${{ steps.release-channel.outputs.version }}/X-ray_Report_Studio_Windows_Setup.zip
+            x-ray-report-studio/test-output/xrs-${{ steps.release-channel.outputs.version }}/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         if: steps.release-channel.outputs.beta == 'true'
         with:
