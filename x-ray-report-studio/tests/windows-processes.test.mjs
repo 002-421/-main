@@ -11,6 +11,15 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { waitForNoProfileProcesses, hasOtherXrsProcess } = require('../electron/windows-processes.cjs');
 
+function waitForProcessClose(child, timeoutMs, label) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} did not exit within ${timeoutMs} ms.`)), timeoutMs);
+    child.once('close', code => { clearTimeout(timer); resolve(code); });
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+  });
+}
+
 test('profile process inspection waits for active processes and fails closed at timeout', async () => {
   let polls = 0;
   const states = [];
@@ -35,7 +44,16 @@ test('Windows CIM process query runs and confirms an idle synthetic install root
 });
 
 test('independent Electron updater waits for the real parent Electron process before profile backup', { skip: process.platform !== 'win32' }, async t => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'xrs-independent-worker-')); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'xrs-independent-worker-'));
+  const children = [];
+  t.after(async () => {
+    await Promise.all(children.map(async child => {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      child.kill();
+      await Promise.race([waitForProcessClose(child, 5000, 'Electron test process').catch(() => {}), new Promise(resolve => setTimeout(resolve, 5000))]);
+    }));
+    await fs.rm(root, { recursive: true, force: true });
+  });
   const testDir = path.dirname(fileURLToPath(import.meta.url));
   const electronExe = path.join(testDir, '..', 'node_modules', 'electron', 'dist', 'electron.exe');
   const parentApp = path.join(root, 'parent-app'), workerApp = path.join(root, 'worker-app');
@@ -81,13 +99,15 @@ test('independent Electron updater waits for the real parent Electron process be
   `;
   await fs.writeFile(workerEntrypoint, workerSource);
   const parent = spawn(electronExe, [parentApp, `--user-data-dir=${parentProfile}`], { cwd: parentApp, windowsHide: true, stdio: 'ignore' });
+  children.push(parent);
   let parentExit;
-  const parentClosed = new Promise(resolve => parent.once('close', code => { parentExit = code; resolve(); }));
+  const parentClosed = waitForProcessClose(parent, 15000, 'Parent Electron process').then(code => { parentExit = code; return code; });
   config.parentPid = parent.pid; await fs.writeFile(configFile, JSON.stringify(config));
   const worker = spawn(electronExe, [workerApp, `--user-data-dir=${path.join(root, 'WorkerProfile')}`], {
     cwd: workerApp, windowsHide: true, stdio: 'ignore',
     env: { ...process.env, XRS_WORKER_CONFIG: configFile, XRS_WORKER_RESULT: resultFile, XRS_WORKER_EVENTS: marker, XRS_PARENT_PID: String(parent.pid) },
   });
+  children.push(worker);
   const workerClosed = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Independent Electron worker did not finish within 30 seconds.')), 30000);
     worker.once('close', code => { clearTimeout(timer); resolve(code); });
