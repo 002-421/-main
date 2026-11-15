@@ -193,7 +193,7 @@ try{
  assert.ok(pasteDiagnostic.pasteEvents.some(event=>event.syntheticPayloadReceived),'renderer received the actual synthetic paste event');
  console.log(`PASS: prompt text supports partial editing, full replacement, and clipboard paste (${Date.now()-pasteStarted} ms).`);
 
- await page.locator('#settings').click();assert.equal(await page.locator('#dictionary-settings').textContent(),'Личный словарь');await page.locator('#dictionary-settings').click();assert.equal(await page.locator('[role="dialog"] h2').textContent(),'Личный словарь');assert.match(await page.locator('#personal-words').inputValue(),/нормометрии/);assert.match(await page.locator('#personal-words').inputValue(),/дорзальных/);await page.locator('[role="dialog"] [data-close]').first().click();
+ await page.locator('#settings').click();assert.equal(await page.locator('#dictionary-settings').textContent(),'Личный словарь');await page.locator('#dictionary-settings').click();assert.equal(await page.locator('[role="dialog"] h2').textContent(),'Личный словарь');assert.equal(await page.locator('#personal-words').inputValue(),'','built-in medical vocabulary is separate from the new personal dictionary');await page.locator('[role="dialog"] [data-close]').first().click();
  await page.locator('#settings').click();await page.locator('#doctor-name').fill('Иванова Мария Петровна');await page.locator('#apply-doctor-now').check();await page.locator('#save-settings').click();
  assert.equal(await field(doctorId).innerText(),'Иванова Мария Петровна');
  await page.locator('#settings').click();await page.locator('#saved-doctor-choice').selectOption({label:'Иванова Мария Петровна'});assert.equal(await page.locator('#doctor-name').inputValue(),'Иванова Мария Петровна');await page.locator('.dialog-overlay footer [data-close]').click();
@@ -211,7 +211,7 @@ try{
  assert.match(JSON.stringify(saved.imported.doc),/Петров Алексей Иванович/);
  const zip=unzipSync(saved.bytes),xml=strFromU8(zip['word/document.xml']);
  assert.match(xml,/Arial/);assert.match(xml,/w:top="2438"/);
- assert.doesNotMatch(xml,/template-unchanged|proof-spelling|proof-grammar|data-unchanged/);
+ assert.doesNotMatch(xml,/template-unchanged|proof-spelling|proof-grammar|data-unchanged|ai-review-underline|data-ai-review-ids/);
  console.log('PASS: real DOCX preserves report, source geometry and formatting, excludes review/proof decorations.');
 
  await page.locator('#copy-report').click();
@@ -318,14 +318,11 @@ try{
  const insertedField=page.locator('[data-template-field][data-hint="Описание участка"]').first();await insertedField.waitFor();
  await fillField(await insertedField.getAttribute('data-field-id'),'Иследование. Очаг очаг не выявлен.');
  assert.match(await insertedField.innerText(),/Иследование/);
- await page.locator('#check-now').click();
- const spelling=page.locator('.proof-spelling').filter({hasText:/^Иследование$/});await spelling.waitFor({timeout:30000});
- const proofStyle=await spelling.evaluate(el=>{const s=getComputedStyle(el);return {line:s.textDecorationLine,style:s.textDecorationStyle,color:s.textDecorationColor};});
- assert.equal(proofStyle.line,'underline');assert.equal(proofStyle.style,'wavy');assert.equal(proofStyle.color,'rgb(214, 40, 40)');
- await spelling.click();await page.locator('.proof-popup').waitFor();
- await page.locator('.proof-popup [data-correction]').filter({hasText:/^Исследование$/}).click();
- const grammar=page.locator('.proof-grammar').filter({hasText:/^Очаг очаг$/});await grammar.waitFor({timeout:30000});await grammar.click();await page.locator('.proof-popup [data-correction]').filter({hasText:/^Очаг$/}).click();
- assert.equal(await insertedField.innerText(),'Исследование. Очаг не выявлен.');
+ await page.locator('#ai-review-open').click();
+ await page.waitForFunction(()=>document.querySelector('#ai-review-status')?.textContent?.includes('Проверка недоступна'));
+ assert.equal(await page.locator('.ai-review-underline').count(),0,'ambiguous inserted content outside verified sections has no unsafe review ranges');
+ assert.equal(await insertedField.innerText(),'Иследование. Очаг очаг не выявлен.','ambiguous report review leaves the text intact');
+ await fillField(await insertedField.getAttribute('data-field-id'),'Исследование. Очаг не выявлен.');
  await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();
  assert.equal(await page.locator('#highlight-yellow').getAttribute('aria-pressed'),'true');assert.match(await page.locator('.toast').textContent(),/залит жёлтым/);assert.equal(await page.locator('.report-content').evaluate(el=>el.classList.contains('show-yellow-selection')),true);
  assert.ok((await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Исследование. Очаг не выявлен.')),'yellow text highlighter can be applied');

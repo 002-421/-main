@@ -35,7 +35,9 @@ function convert(issue: ProofIssue, blockId: ReviewBlockId, text: string): Findi
 
 export class LocalAIProvider implements AIProvider {
   private readonly checker: LocalChecker;
-  constructor(checker?: LocalChecker) {
+  private readonly getPersonalWords: () => string[];
+  constructor(checker?: LocalChecker, getPersonalWords: () => string[] = () => []) {
+    this.getPersonalWords = getPersonalWords;
     this.checker = checker ?? (async (text, personalWords, signal) => {
       const module = await import('./proofreading');
       signal?.throwIfAborted();
@@ -44,10 +46,11 @@ export class LocalAIProvider implements AIProvider {
   }
   async review(blocks: ReviewBlocks, signal?: AbortSignal): Promise<Finding[]> {
     const findings: Finding[] = [];
+    const personalWords = [...new Set(this.getPersonalWords().filter(word => typeof word === 'string'))];
     for (const blockId of ['description', 'conclusion'] as const) {
       signal?.throwIfAborted();
       const text = blocks[blockId];
-      for (const issue of await this.checker(text, [], signal)) {
+      for (const issue of await this.checker(text, personalWords, signal)) {
         const finding = convert(issue, blockId, text);
         if (finding) findings.push(finding);
       }

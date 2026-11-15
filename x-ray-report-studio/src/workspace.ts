@@ -11,7 +11,9 @@ import packageInfo from '../package.json' with { type: 'json' };
 import { canRedoReport, canUndoReport, configureReportHistoryDepth, getReportHistory, REPORT_HISTORY_DEPTHS, restoreReportHistory, runReportHistoryCommand, sanitizeReportHistory, setDefaultReportHistoryDepth, type ReportHistoryDepth, type StoredReportHistory } from './report-history';
 import { EditorState, Selection } from '@tiptap/pm/state';
 import { ReviewEngine, TrackChangesEngine, LocalAIProvider, reviewCategories, categoryGroup, type ReviewCategory } from './ai-review';
-import { applyReviewSuggestion, highlightReviewSuggestion } from './ai-review-editor';
+import { applyReviewSuggestion, isSafeReviewReplacement, resolveReviewRange } from './ai-review-editor';
+import { setAiReviewDecorations, setAiReviewFocusedSpan, setAiReviewKeyboardHandler } from './ai-review-decorations';
+import type { ReviewDecorationRange } from './ai-review-decorations';
 import { structurePreparedBuiltin } from './ai-review-structure';
 import { planManualMigration, createMigrationBackup, readMigrationBackup, migrationBackupKeys, type ManualBoundaries } from './ai-review-migration';
 import DOMPurify from 'dompurify';
@@ -22,7 +24,6 @@ import { areas, reportTemplates, reportBlocks, makeTemplateDocument, DOCTOR_FIEL
 import { builtinModules, moduleNode, compiler, validateDraft, validateTemplate, draftVersion, type RichNode } from './model';
 import { exportDocx, importOwnDocx, recoverDocx } from './docx';
 import { russianProofreadingLicense } from './proofreading';
-import { TEMPLATE_PERSONAL_WORDS } from './template-personal-words';
 import { calculate, formatCalculatorResult, parseCalculatorDisplay, type CalculatorOperation } from './calculator';
 import { buildReportFilename, buildReportTabName, extractFilenameFields, shortPatientName } from './report-filename';
 import { initializeReportFooter } from './report-footer';
@@ -77,7 +78,9 @@ settings.doctorStampPositions=Object.fromEntries(Object.entries(settings.doctorS
 if (settings.theme !== 'dark' && settings.theme !== 'light') settings.theme = 'light';
 if (!Number.isInteger(settings.zoom) || settings.zoom < 75 || settings.zoom > 150 || settings.zoom % 5 !== 0) settings.zoom = 100;
 const storedWords=read<unknown>(KEYS.dictionary,[]);
-let personalWords:string[] = [...new Set([...TEMPLATE_PERSONAL_WORDS,...(Array.isArray(storedWords)?storedWords.filter(w=>typeof w==='string'):[])])].slice(0,20000);
+const removedDictionaryWords=new Set(read<string[]>('xrs.dictionary.removed.v1',[]));
+const filterPersonalWords=(words:string[])=>words.filter(word=>!removedDictionaryWords.has(word.toLocaleLowerCase('ru')));
+let personalWords:string[] = filterPersonalWords([...new Set((Array.isArray(storedWords)?storedWords.filter(w=>typeof w==='string'):[]))]).slice(0,20000);
 let sharedDictionaryAvailable=false;
 let overrides:Record<string,RichNode> = {};
 for (const [id,doc] of Object.entries(read<Record<string,RichNode>>(KEYS.templates,{}))) {
@@ -219,9 +222,9 @@ function runHistoryCommand(direction:'undo'|'redo'){
  }catch{/* Some non-text selections do not expose a measurable caret. */}
 }
 document.addEventListener('keydown',event=>{const key=event as KeyboardEvent,target=key.target instanceof Element?key.target:null,editingOutsideReport=Boolean(target?.closest('input,textarea,select,[contenteditable="true"]')&&!target.closest('.report-content')),modified=key.ctrlKey||key.metaKey,undo=modified&&(key.code==='KeyZ'||key.key.toLowerCase()==='z')&&!key.shiftKey,redo=(key.ctrlKey&&(key.code==='KeyY'||key.key.toLowerCase()==='y'||key.shiftKey&&(key.code==='KeyZ'||key.key.toLowerCase()==='z')))||(key.metaKey&&key.shiftKey&&(key.code==='KeyZ'||key.key.toLowerCase()==='z'));if(key.isComposing||editingOutsideReport||(!undo&&!redo))return;key.preventDefault();key.stopPropagation();if((undo&&canUndoReport(editor.state))||(redo&&canRedoReport(editor.state)))runHistoryCommand(undo?'undo':'redo');},true);
-async function loadSharedDictionary(){if(!window.desktop)return;try{const stored=await window.desktop.dictionaryLoad();sharedDictionaryAvailable=stored.shared;personalWords=[...new Set([...personalWords,...stored.words])].slice(0,20000);localStorage.setItem(KEYS.dictionary,JSON.stringify(personalWords));if(personalWords.length)await window.desktop.dictionaryMergeSave(personalWords);refreshProofreading(editor);}catch{sharedDictionaryAvailable=false;}}
+async function loadSharedDictionary(){if(!window.desktop)return;try{const stored=await window.desktop.dictionaryLoad();sharedDictionaryAvailable=stored.shared;personalWords=filterPersonalWords([...new Set([...personalWords,...stored.words])]).slice(0,20000);localStorage.setItem(KEYS.dictionary,JSON.stringify(personalWords));if(personalWords.length)await window.desktop.dictionaryMergeSave(personalWords);refreshProofreading(editor);document.dispatchEvent(new Event('xrs-dictionary-changed'));}catch{sharedDictionaryAvailable=false;}}
 void loadSharedDictionary();
-setLiveProofreading(editor,settings.liveProof);
+setLiveProofreading(editor,false);
 let savedSelection=editor.state.selection;
 function scheduleViewSave(){if(templateMode)return;clearTimeout(timer);timer=setTimeout(saveLocal,450);}
 editor.on('selectionUpdate',()=>{ savedSelection=editor.state.selection;editor.view.dom.classList.remove('show-yellow-selection'); updateRibbon();scheduleViewSave(); });
@@ -229,7 +232,7 @@ $('#canvas').addEventListener('scroll',scheduleViewSave,{passive:true});
 editor.on('update',()=>{if(!suppress){changedSinceOpen=true;const active=openReports.find(r=>r.id===activeReportId);if(active){active.doc=editor.getJSON() as RichNode;active.templateId=activeTemplateId;active.dirty=true;}clearTimeout(timer);if(!templateMode){$('#save-state').textContent='Сохраняется…';timer=setTimeout(saveLocal,450);}else $('#save-state').textContent='Шаблон изменён';renderCounts();renderReportTabs();}});
 editor.on('transaction',updateRibbon);
 const json=()=>editor.getJSON() as RichNode;
-function restore(doc:RichNode,history:unknown,view?:unknown) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(doc));restoreReportHistory(editor.view,sanitizeReportHistory(history,settings.historyDepth));}finally{suppress=false;}restoreReportView(view);savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
+function restore(doc:RichNode,history:unknown,view?:unknown) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(doc));restoreReportHistory(editor.view,sanitizeReportHistory(history,settings.historyDepth));}finally{suppress=false;}restoreReportView(view);savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,false);refreshProofreading(editor);renderCounts(); }
 function toast(message:string,error=false) { $('.toast')?.remove();const t=document.createElement('div');t.className=`toast${error?' error':''}`;t.role=error?'alert':'status';t.textContent=message;document.body.append(t);setTimeout(()=>t.remove(),5000); }
 function readReportView(value:unknown):StoredReportView|undefined {if(!value||typeof value!=='object'||Array.isArray(value))return;const view=value as Record<string,unknown>;if(!view.selection||typeof view.selection!=='object'||Array.isArray(view.selection)||typeof view.scrollTop!=='number'||!Number.isFinite(view.scrollTop)||view.scrollTop<0||view.scrollTop>100000)return;return{selection:view.selection as Record<string,unknown>,scrollTop:view.scrollTop};}
 function restoreReportView(value:unknown){const view=readReportView(value);let selection:Selection|undefined;if(view){try{selection=Selection.fromJSON(editor.state.doc,view.selection);editor.view.dispatch(editor.state.tr.setSelection(selection).setMeta('addToHistory',false));}catch{/* Invalid or stale view state cannot affect the document or its history. */}}$('#canvas').scrollTop=view?.scrollTop??0;if(view&&selection)requestAnimationFrame(()=>{editor.view.focus();$('#canvas').scrollTop=view.scrollTop;});}
@@ -258,7 +261,7 @@ function saveLocal():boolean {
   $('#save-state').textContent='Сохранено на компьютере';return true;
  }catch{ $('#save-state').textContent='Не сохранено';toast('Не удалось сохранить локальный черновик. Сохраните документ Word.',true);return false; }
 }
-function restoreMigrationExactly(doc:RichNode) { const node=editor.schema.nodeFromJSON(prepareInlineDocumentBase(doc));node.check();suppress=true;try{editor.view.updateState(EditorState.create({schema:editor.schema,doc:node,plugins:editor.state.plugins}));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,settings.liveProof);refreshProofreading(editor);renderCounts(); }
+function restoreMigrationExactly(doc:RichNode) { const node=editor.schema.nodeFromJSON(prepareInlineDocumentBase(doc));node.check();suppress=true;try{editor.view.updateState(EditorState.create({schema:editor.schema,doc:node,plugins:editor.state.plugins}));}finally{suppress=false;}savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,false);refreshProofreading(editor);renderCounts(); }
 function profileForTemplate() { const area=reportTemplates.find(t=>t.id===activeTemplateId)?.areaId;return area==='head'?'brain':'custom'; }
 function reportTitle(id:string,doc:RichNode){const template=reportTemplates.find(t=>t.id===id);return template?titleWithStudySide(template.title,overrides[id]??template.doc,doc):'Исследование';}
 function renderCounts() {
@@ -316,7 +319,7 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
 // Experimental local prototype. Existing user documents are never migrated automatically.
 {
   const trigger=document.createElement('button');
-  trigger.className='btn';trigger.textContent='AI Review';trigger.id='ai-review-open';
+  trigger.className='btn';trigger.textContent='AI Review — Проверить повторно';trigger.id='ai-review-open';
   document.querySelector('.top-actions')?.append(trigger);
   const migrateButton=document.createElement('button');migrateButton.className='btn';migrateButton.id='ai-migrate-open';migrateButton.textContent='Границы протокола';document.querySelector('.top-actions')?.append(migrateButton);
   const savedMigrationMatches=(tabId:string,doc:RichNode)=>{try{const stored=JSON.parse(localStorage.getItem(KEYS.workspace)??'null');return stored?.activeId===tabId&&JSON.stringify(stored.reports?.find((r:OpenReport)=>r.id===tabId)?.doc)===JSON.stringify(doc);}catch{return false;}};
@@ -376,55 +379,97 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
   };
   migrateButton.onclick=showMigration;
   const tracks=new TrackChangesEngine();
-  trigger.onclick=()=>{
-    const available=new Set<ReviewCategory>(reviewCategories.map(([id])=>id));
-    const stored=read<unknown>('xrs.ai-review.categories.v1',[...available]);
-    const categories=new Set<ReviewCategory>((Array.isArray(stored)?stored:[...available]).filter((id):id is ReviewCategory=>available.has(id as ReviewCategory)));
-    const experimental=new Set<ReviewCategory>(['terminology','consistency','clinical']);
-    const choices=reviewCategories.map(([id,label])=>`<label><input type="checkbox" data-ai-category="${id}" ${categories.has(id)?'checked':''}> ${label}${experimental.has(id)?' <span data-ai-experimental="true">Экспериментальная проверка</span>':''}</label>`).join('');
-    const d=dialog('AI Review', `<label>Режим <select id="ai-mode"><option value="local">Локальная проверка</option><option value="cloud" disabled>Облачный ИИ (отключён)</option></select></label><fieldset><legend>Категории проверки</legend>${choices}</fieldset><p>Локальные правила ограничены и не подтверждают клиническую точность. Категории с пометкой «Экспериментальная проверка» не являются клинически валидированными. Медицинские замечания не исправляют документ автоматически; решение принимает врач.</p><div id="ai-results"></div>`, '<button class="btn" data-close>Закрыть</button><button class="btn" id="ai-cancel" disabled>Отменить проверку</button><button class="btn primary" id="ai-check">Проверить протокол</button>');
-    let currentCheck:AbortController|undefined;
-    const checkButton=d.querySelector<HTMLButtonElement>('#ai-check')!;
-    const cancelButton=d.querySelector<HTMLButtonElement>('#ai-cancel')!;
-    cancelButton.onclick=()=>currentCheck?.abort();
-    d.querySelector<HTMLButtonElement>('[data-close]')?.addEventListener('click',()=>currentCheck?.abort());
-    d.querySelectorAll<HTMLInputElement>('[data-ai-category]').forEach(input=>input.onchange=()=>{
-      const selected=[...d.querySelectorAll<HTMLInputElement>('[data-ai-category]:checked')].map(el=>el.dataset.aiCategory!);
-      try{localStorage.setItem('xrs.ai-review.categories.v1',JSON.stringify(selected));}catch{toast('Не удалось сохранить категории проверки.',true);}
-    });
-    checkButton.onclick=async()=>{
-      const output=d.querySelector<HTMLElement>('#ai-results')!;
-      output.textContent='Проверка…';
-      currentCheck?.abort();currentCheck=new AbortController();
-      const signal=currentCheck.signal;
-      checkButton.disabled=true;cancelButton.disabled=false;
-      try {
-        const reportId=activeReportId;
-        const snapshot=JSON.stringify(json());
-        const selected=new Set<ReviewCategory>([...d.querySelectorAll<HTMLInputElement>('[data-ai-category]:checked')].map(el=>el.dataset.aiCategory as ReviewCategory));
-        const result=await new ReviewEngine(new LocalAIProvider()).review(json(),selected,signal);
-        signal.throwIfAborted();
-        if(reportId!==activeReportId||snapshot!==JSON.stringify(json())){output.textContent='Документ изменился. Повторите проверку.';return;}
-        tracks.set(reportId,result.suggestions);
-        output.replaceChildren();
-        if(!result.suggestions.length)output.textContent='Замечаний не найдено.';
-        for(const item of result.suggestions){
-          const row=document.createElement('div');row.className='notice';
-          const title=document.createElement('p');title.textContent=`${reviewCategories.find(([id])=>id===categoryGroup(item.category))?.[1]??item.category}: ${item.explanation}`;
-          const excerpt=document.createElement('p');excerpt.textContent=`Фрагмент: ${item.original || '(позиция вставки)'} → ${item.proposed || '(без замены)'}`;
-          const safety=document.createElement('p');safety.textContent=`${item.meaningRisk?'Возможное изменение медицинского смысла; только ручная проверка.':'Медицинский смысл не проверен.'} Уверенность: ${item.confidence==='high'?'высокая для локального правила':'ограниченная'}.`;
-          const show=document.createElement('button');show.className='btn small';show.textContent='Показать в тексте';
-          show.onclick=()=>{if(activeReportId!==reportId){toast('Откройте вкладку проверенного документа.',true);return;}try{highlightReviewSuggestion(editor,item,result.blocks,reportId,activeReportId);}catch{toast('Фрагмент изменился или требует ручной проверки.',true);}};
-          const reject=document.createElement('button');reject.className='btn small';reject.textContent='Отклонить';
-          reject.onclick=()=>{try{tracks.reject(reportId,item.id);row.remove();}catch{toast('Предложение уже рассмотрено.',true);}};
-          const accept=document.createElement('button');accept.className='btn small';accept.textContent='Принять';accept.disabled=item.operation==='comment';
-          accept.onclick=()=>{if(activeReportId!==reportId){toast('Откройте вкладку проверенного документа.',true);return;}try{applyReviewSuggestion(editor,item,result.blocks,reportId,activeReportId);tracks.markAccepted(reportId,item.id);row.remove();}catch{toast('Правка устарела или затрагивает сложное форматирование. Проверьте текст вручную.',true);}};
-          row.append(title,excerpt,safety,show,accept,reject);output.append(row);
-        }
-      }catch (error) { output.textContent=signal.aborted?'Проверка отменена.':'Проверка заблокирована: границы блоков не подтверждены, возможны персональные данные или анализатор недоступен.'; }
-      finally { if(currentCheck?.signal===signal){currentCheck=undefined;checkButton.disabled=false;cancelButton.disabled=true;} }
-    };
+  const rejectedReviewKeys=new Map<string,Set<string>>();
+  const reviewRejectionKey=(item:import('./ai-review.ts').Suggestion,blocks:import('./ai-review.ts').ReviewBlocks)=>{
+    const text=blocks[item.blockId],before=text.slice(Math.max(0,item.from-32),item.from),after=text.slice(item.to,item.to+32);
+    return JSON.stringify([item.blockId,categoryGroup(item.category),item.from,item.to,item.original,before,after]);
   };
+  let findings:import('./ai-review.ts').Suggestion[]=[];
+  let reviewedBlocks:import('./ai-review.ts').ReviewBlocks|undefined;
+  let reviewedReport='';
+  let card:HTMLElement|undefined;
+  let closeTimer=0;
+  let cardPositionHandler:(()=>void)|undefined;
+  let cardResizeObserver:ResizeObserver|undefined;
+  const closeCard=()=>{window.clearTimeout(closeTimer);if(cardPositionHandler){window.removeEventListener('resize',cardPositionHandler);window.removeEventListener('scroll',cardPositionHandler,true);}cardResizeObserver?.disconnect();cardPositionHandler=undefined;cardResizeObserver=undefined;card?.remove();card=undefined;};
+  const renderDecorations=()=>{
+    if(!reviewedBlocks||reviewedReport!==activeReportId){setAiReviewDecorations(editor,[]);return;}
+    const ranges:ReviewDecorationRange[]=[];
+    for(const item of findings){try{const range=resolveReviewRange(editor,item,reviewedBlocks,reviewedReport,activeReportId);ranges.push({...range,id:item.id,category:item.category,original:item.original});}catch{/* stale locations are not decorated */}}
+    setAiReviewDecorations(editor,ranges);
+  };
+  const openCard=(target:HTMLElement)=>{
+    closeCard();
+    const ids=(target.dataset.aiReviewIds??'').split(',').filter(Boolean);
+    const items=findings.filter(item=>ids.includes(item.id)&&item.state==='pending');
+    if(!items.length)return;
+    const pop=document.createElement('section');card=pop;pop.className='ai-review-card';pop.setAttribute('role','region');pop.setAttribute('aria-label','Замечания AI Review');
+    for(const item of items){
+      const section=document.createElement('article');section.className='ai-review-card-item';
+      const title=document.createElement('strong');title.textContent=reviewCategories.find(([id])=>id===categoryGroup(item.category))?.[1]??item.category;
+      const explanation=document.createElement('p');explanation.textContent=item.explanation;
+      section.append(title,explanation);
+      if(item.related){const related=document.createElement('p');related.textContent=`Связанный фрагмент: ${item.related}`;section.append(related);}
+      const excerpt=document.createElement('small');excerpt.textContent=`Фрагмент: ${item.original||'позиция вставки'}`;section.append(excerpt);
+      if(item.proposed&&isSafeReviewReplacement(item)){const replace=document.createElement('button');replace.className='btn small primary';replace.textContent='Заменить';replace.onclick=()=>{
+        if(reviewedReport!==activeReportId||!reviewedBlocks){toast('Откройте документ, который проверяли.',true);return;}
+        try{applyReviewSuggestion(editor,item,reviewedBlocks,reviewedReport,activeReportId);tracks.markAccepted(reviewedReport,item.id);findings=[];reviewedBlocks=undefined;setAiReviewDecorations(editor,[]);closeCard();toast('Исправление применено.');}
+        catch{closeCard();toast('Текст изменился. Повторите проверку этого фрагмента.',true);}
+      };section.append(replace);}
+      if(item.operation==='comment'||!item.proposed||!isSafeReviewReplacement(item)){
+        const assess=document.createElement('p');assess.className='ai-review-safety';assess.textContent=item.operation==='comment'?'Предупреждение для оценки врачом. Текст не изменяется.':'Предложение может затрагивать медицинский смысл. Исправьте вручную после проверки.';section.append(assess);
+        if(item.operation==='comment'){const check=document.createElement('button');check.className='btn small';check.textContent='Проверить';check.onclick=()=>{try{if(!reviewedBlocks||reviewedReport!==activeReportId)throw new Error();const range=resolveReviewRange(editor,item,reviewedBlocks,reviewedReport,activeReportId);editor.commands.setTextSelection(range);editor.commands.focus();closeCard();toast('Фрагмент выделен для проверки. Текст не изменён.');}catch{closeCard();toast('Фрагмент устарел. Запустите проверку повторно.',true);}};section.append(check);}
+      }
+      const actions=document.createElement('div');actions.className='ai-review-card-actions';
+      const reject=document.createElement('button');reject.className='btn small';reject.textContent='Отклонить';reject.onclick=()=>{if(reviewedBlocks){const keys=rejectedReviewKeys.get(reviewedReport)??new Set<string>();keys.add(reviewRejectionKey(item,reviewedBlocks));rejectedReviewKeys.set(reviewedReport,keys);}tracks.reject(reviewedReport,item.id);findings=findings.filter(x=>x.id!==item.id);closeCard();renderDecorations();};actions.append(reject);
+      const remember=/^[а-яёa-z-]{2,80}$/iu.test(item.original.trim())&&(item.category==='spelling'||item.category==='terminology');
+      if(remember){const save=document.createElement('button');save.className='btn small';save.textContent='Запомнить термин';save.onclick=async()=>{const term=item.original.trim().toLocaleLowerCase('ru');if(personalWords.some(x=>x.toLocaleLowerCase('ru')===term)){toast('Термин уже есть в личном словаре.');return;}try{removedDictionaryWords.delete(term);localStorage.setItem('xrs.dictionary.removed.v1',JSON.stringify([...removedDictionaryWords]));const next=[...personalWords,term];let merged=next;if(window.desktop){const saved=await window.desktop.dictionaryMergeSave(next);merged=filterPersonalWords(saved.words);sharedDictionaryAvailable=saved.shared;}localStorage.setItem(KEYS.dictionary,JSON.stringify(merged));personalWords=merged;document.dispatchEvent(new Event('xrs-dictionary-changed'));refreshProofreading(editor);tracks.reject(reviewedReport,item.id);findings=findings.filter(x=>x.id!==item.id);closeCard();renderDecorations();toast('Термин добавлен в личный словарь. Удалить его можно в настройках словаря.');}catch{toast('Не удалось сохранить термин.',true);}};actions.append(save);}
+      section.append(actions);pop.append(section);
+    }
+    const dismiss=document.createElement('button');dismiss.className='ai-review-card-close';dismiss.type='button';dismiss.textContent='Закрыть';dismiss.onclick=closeCard;pop.append(dismiss);
+    pop.addEventListener('pointerenter',()=>window.clearTimeout(closeTimer));pop.addEventListener('pointerleave',()=>{closeTimer=window.setTimeout(closeCard,180);});
+    pop.addEventListener('keydown',event=>{if((event as KeyboardEvent).key==='Escape'){closeCard();target.focus();}});
+    document.body.append(pop);
+    const position=()=>{if(!target.isConnected){closeCard();return;}const r=target.getBoundingClientRect(),w=pop.offsetWidth,h=pop.offsetHeight,pad=10;const left=Math.max(pad,Math.min(r.left,window.innerWidth-w-pad));let top=r.bottom+h+pad<window.innerHeight?r.bottom+pad:r.top-h-pad;top=Math.max(pad,Math.min(top,window.innerHeight-h-pad));pop.style.left=`${left}px`;pop.style.top=`${top}px`;};
+    cardPositionHandler=position;window.addEventListener('resize',position);window.addEventListener('scroll',position,true);
+    if(typeof ResizeObserver!=='undefined'){cardResizeObserver=new ResizeObserver(position);cardResizeObserver.observe(target);cardResizeObserver.observe(pop);}
+    position();
+  };
+  const editorRoot=editor.view.dom;
+  editorRoot.addEventListener('pointerover',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(span)openCard(span);});
+  editorRoot.addEventListener('pointerout',event=>{const from=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]'),to=event.relatedTarget as Node|null;if(from&&(!to||(!from.contains(to)&&!card?.contains(to))))closeTimer=window.setTimeout(closeCard,180);});
+  editorRoot.addEventListener('click',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(span)openCard(span);});
+  editorRoot.addEventListener('focusin',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(span){setAiReviewFocusedSpan(span);openCard(span);}});
+  editorRoot.addEventListener('focusout',event=>{const to=(event as FocusEvent).relatedTarget as Node|null;if(!to||!editorRoot.contains(to))setAiReviewFocusedSpan(undefined);});
+  setAiReviewKeyboardHandler(span=>openCard(span));
+  document.addEventListener('keydown',event=>{const e=event as KeyboardEvent,target=e.target as HTMLElement;if(e.key==='Escape'&&card&&(editorRoot.contains(document.activeElement)||card.contains(target))){e.preventDefault();closeCard();}},true);
+  const status=document.createElement('small');status.id='ai-review-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');trigger.after(status);
+  let reviewTimer=0, reviewGeneration=0;
+  let reviewAbort:AbortController|undefined;
+  const runReview=async()=>{
+    clearTimeout(reviewTimer);reviewAbort?.abort();const abort=new AbortController();reviewAbort=abort;
+    const generation=++reviewGeneration,reportId=activeReportId,snapshot=JSON.stringify(json());
+    status.textContent='Проверка…';trigger.setAttribute('aria-busy','true');
+    try{
+      const result=await new ReviewEngine(new LocalAIProvider(undefined,()=>personalWords)).review(json(),new Set(reviewCategories.map(([id])=>id)),abort.signal);
+      if(abort.signal.aborted||generation!==reviewGeneration||reportId!==activeReportId||snapshot!==JSON.stringify(json()))return;
+      tracks.set(reportId,result.suggestions);const rejected=rejectedReviewKeys.get(reportId)??new Set<string>();
+      findings=result.suggestions.filter(item=>!rejected.has(reviewRejectionKey(item,result.blocks)));reviewedBlocks=result.blocks;reviewedReport=reportId;
+      renderDecorations();status.textContent=findings.length?`Замечаний: ${findings.length}`:'Замечаний не найдено';
+    }catch{if(!abort.signal.aborted)status.textContent='Проверка недоступна. Повторите проверку.';}
+    finally{if(generation===reviewGeneration)trigger.removeAttribute('aria-busy');}
+  };
+  const scheduleReview=()=>{
+    reviewAbort?.abort();reviewGeneration++;clearTimeout(reviewTimer);findings=[];reviewedBlocks=undefined;closeCard();setAiReviewDecorations(editor,[]);
+    status.textContent='';reviewTimer=window.setTimeout(()=>void runReview(),650);
+  };
+  editor.on('update',scheduleReview);
+  // setContent on tab changes can suppress update events; docChanged also catches it.
+  editor.on('transaction',({transaction})=>{if(transaction.docChanged)scheduleReview();});
+  trigger.onclick=()=>void runReview();
+  document.addEventListener('xrs-dictionary-changed',scheduleReview);
+  scheduleReview();
+
 }
 function calculatorDialog(){
  const keys=[
@@ -466,7 +511,8 @@ $('#next-field').onclick=nextField;
 $('#calculator').onclick=calculatorDialog;
 $('#sticky-note-open').onclick=openStickyNote;
 $('#review-unchanged').onclick=()=>{review=!review;setReviewHighlights(editor,review);$('#review-unchanged').classList.toggle('active',review);$('#review-unchanged').setAttribute('aria-pressed',String(review));renderCounts();if(review)toast('Подсвечены незаполненные поля и фрагменты, совпадающие с исходным шаблоном. Подсветка не попадает в Word и PDF.');};
-$('#proof-toggle').onclick=()=>{settings.liveProof=!settings.liveProof;setLiveProofreading(editor,settings.liveProof);$('#proof-toggle').classList.toggle('active',settings.liveProof);$('#proof-toggle').setAttribute('aria-pressed',String(settings.liveProof));persistSettings();};
+$('#proof-toggle').hidden=true;$('#check-now').hidden=true;
+$('#proof-toggle').onclick=()=>{settings.liveProof=!settings.liveProof;setLiveProofreading(editor,false);$('#proof-toggle').classList.toggle('active',settings.liveProof);$('#proof-toggle').setAttribute('aria-pressed',String(settings.liveProof));persistSettings();};
 $('#check-now').onclick=()=>refreshProofreading(editor);
 function applyZoom(save=true){const level=Number(($('#zoom') as HTMLInputElement).value);$('.paper').style.zoom=String(level/100);$('#zoom-value').textContent=`${level}%`;if(save){settings.zoom=level;persistSettings();}}
 ($('#zoom') as HTMLInputElement).value=String(settings.zoom);applyZoom(false);$('#zoom').oninput=()=>applyZoom();
@@ -512,13 +558,16 @@ async function checkForAppUpdates(){
    button.disabled=true;
    editor.setEditable(false);button.disabled=true;button.textContent='Установка обновления…';
    d.querySelector<HTMLElement>('#update-confirmation')!.hidden=true;
+   d.querySelector<HTMLElement>('#update-main')!.hidden=false;
    const progress=d.querySelector<HTMLElement>('#update-progress')!;progress.classList.remove('hidden');
+   d.querySelector<HTMLElement>('#update-progress-percent')!.textContent='';
+   d.querySelector<HTMLElement>('#update-progress-fill')!.classList.add('indeterminate');
    window.desktop!.onUpdateProgress(value=>{
     const label=d.querySelector<HTMLElement>('#update-progress-label')!,percent=d.querySelector<HTMLElement>('#update-progress-percent')!,detail=d.querySelector<HTMLElement>('#update-progress-detail')!,fill=d.querySelector<HTMLElement>('#update-progress-fill')!;
     const mb=(bytes:number)=>(bytes/1048576).toFixed(1)+' МБ';
     if(value.stage==='error'){label.textContent='Не удалось установить обновление';percent.textContent='';detail.textContent=value.phase?`Этап: ${value.phase}${value.code?` (${value.code})`:''}`:'Проверьте журнал обновлений';d.querySelector<HTMLElement>('#update-error-details')!.hidden=false;d.querySelector<HTMLElement>('#update-error-text')!.textContent=[value.message||'Причина не передана приложением.',value.logFile?`Журнал: ${value.logFile}`:''].filter(Boolean).join('\n');fill.classList.remove('indeterminate');fill.style.width='0';return;}
     if(value.stage==='downloading'){label.textContent='Загрузка пакета обновления';percent.textContent=value.percent===null?'':value.percent+'%';detail.textContent=value.total?`${mb(value.loaded)} из ${mb(value.total)}`:`Загружено ${mb(value.loaded)}`;fill.style.width=value.percent===null?'30%':value.percent+'%';fill.classList.toggle('indeterminate',value.percent===null);}
-    else{fill.classList.remove('indeterminate');fill.style.width='100%';percent.textContent='100%';label.textContent=value.stage==='verifying'?'Проверка файла':value.stage==='installing'?'Установка обновления':'Установка завершена';detail.textContent=value.stage==='verifying'?'Проверяется контрольная сумма':value.stage==='installing'?'Подготавливаются файлы приложения':'Готово';}
+    else{const done=value.stage==='installed';fill.classList.toggle('indeterminate',!done);fill.style.width=done?'100%':'30%';percent.textContent=done?'100%':'';label.textContent=value.stage==='verifying'?'Подготовка':value.stage==='installing'?'Установка':value.stage==='restarting'?'Перезапуск':done?'Установка завершена':'Подготовка';detail.textContent=value.stage==='verifying'?'Проверяется контрольная сумма':value.stage==='installing'?'Подготавливаются файлы приложения':done?'Готово':'Дождитесь завершения этапа';}
    });
    try{await window.desktop!.installUpdate();const version=await window.desktop!.getApplicationVersion();const label=document.querySelector('#application-version');if(label)label.textContent=version;toast(`Приложение обновлено до версии ${version}.`);closeDialog();}
    catch(error){installStarted=false;editor.setEditable(true);button.disabled=false;button.textContent='ОК';d.querySelector<HTMLElement>('#update-confirmation')!.hidden=true;d.querySelector<HTMLElement>('#update-main')!.hidden=false;footer.style.display='';d.querySelector<HTMLElement>('#update-progress-label')!.textContent='Не удалось установить обновление';d.querySelector<HTMLElement>('#update-progress-detail')!.textContent='Текущая версия оставлена без изменений';d.querySelector<HTMLElement>('#update-error-details')!.hidden=false;d.querySelector<HTMLElement>('#update-error-text')!.textContent=(error as Error).message||'Установка остановлена по неизвестной причине.';toast('Не удалось установить обновление. Текущая версия оставлена без изменений.',true);}
@@ -531,8 +580,8 @@ $('#toggle-theme').onclick=()=>{settings.theme=settings.theme==='dark'?'light':'
 
 function dictionaryDialog(){
  const storageInfo=window.desktop?(sharedDictionaryAvailable?'Словарь хранится отдельно от приложения в общей папке и доступен пользователям с правом записи. Он не удаляется при обновлении приложения.':'Общая папка недоступна: словарь сохранится в профиле Windows текущего пользователя.'):'Слова сохраняются в браузере на этом компьютере.';
- const d=dialog('Личный словарь',`<p>${esc(storageInfo)} Слова, которые встречаются в текущих шаблонах и не распознаются общим словарём, уже добавлены. При сохранении новые записи объединяются с общими, поэтому слова других пользователей сохраняются.</p><label>Русские и английские слова — по одному слову в строке<textarea id="personal-words" rows="10">${esc(personalWords.join('\n'))}</textarea></label><small>До 20 000 слов; кириллица, латиница и дефис.</small>`,'<button class="btn" data-close>Отмена</button><button class="btn primary" id="save-dictionary">Сохранить и объединить</button>');
- d.querySelector('#save-dictionary')!.addEventListener('click',async()=>{const words=[...new Set(($('#personal-words') as HTMLTextAreaElement).value.split(/\s+/).filter(Boolean).map(s=>s.toLocaleLowerCase('ru')))];if(words.length>20000||words.some(w=>!/^[а-яёa-z-]{2,80}$/i.test(w))){toast('Допустимо до 20 000 русских или английских слов из букв и дефисов.',true);return;}try{let merged=words;if(window.desktop){const result=await window.desktop.dictionaryMergeSave(words);merged=result.words;sharedDictionaryAvailable=result.shared;}localStorage.setItem(KEYS.dictionary,JSON.stringify(merged));personalWords=merged;closeDialog();refreshProofreading(editor);toast('Словарь сохранён и объединён с общими словами.');}catch{toast('Не удалось сохранить словарь. Проверьте доступ к папке общих документов.',true);}});
+ const d=dialog('Личный словарь',`<p>${esc(storageInfo)} Встроенные медицинские словари хранятся отдельно. Здесь можно добавить и удалить свои термины. Удаление применяется только к вашему личному словарю.</p><label>Русские и английские слова — по одному слову в строке<textarea id="personal-words" rows="10">${esc(personalWords.join('\n'))}</textarea></label><small>До 20 000 слов; кириллица, латиница и дефис.</small>`,'<button class="btn" data-close>Отмена</button><button class="btn primary" id="save-dictionary">Сохранить и объединить</button>');
+ d.querySelector('#save-dictionary')!.addEventListener('click',async()=>{const words=[...new Set(($('#personal-words') as HTMLTextAreaElement).value.split(/\s+/).filter(Boolean).map(s=>s.toLocaleLowerCase('ru')))];if(words.length>20000||words.some(w=>!/^[а-яёa-z-]{2,80}$/i.test(w))){toast('Допустимо до 20 000 русских или английских слов из букв и дефисов.',true);return;}try{for(const old of personalWords)if(!words.includes(old))removedDictionaryWords.add(old);for(const word of words)removedDictionaryWords.delete(word);localStorage.setItem('xrs.dictionary.removed.v1',JSON.stringify([...removedDictionaryWords]));let merged=words;if(window.desktop){const result=await window.desktop.dictionaryMergeSave(words);merged=filterPersonalWords(result.words);sharedDictionaryAvailable=result.shared;}localStorage.setItem(KEYS.dictionary,JSON.stringify(merged));personalWords=merged;document.dispatchEvent(new Event('xrs-dictionary-changed'));closeDialog();refreshProofreading(editor);toast('Словарь сохранён и объединён с общими словами.');}catch{toast('Не удалось сохранить словарь. Проверьте доступ к папке общих документов.',true);}});
 }
 
 document.querySelectorAll<HTMLElement>('[data-command]').forEach(b=>{b.onmousedown=e=>e.preventDefault();b.onclick=()=>{const c=editor.chain().focus(),name=b.dataset.command;if(name==='undo'){runHistoryCommand('undo');return;}if(name==='redo'){runHistoryCommand('redo');return;}if(name==='bold')c.toggleBold().run();else if(name==='italic')c.toggleItalic().run();else if(name==='underline')c.toggleUnderline().run();else if(name==='strike')c.toggleStrike().run();else if(name==='bulletList')c.toggleBulletList().run();else if(name==='orderedList')c.toggleOrderedList().run();};});

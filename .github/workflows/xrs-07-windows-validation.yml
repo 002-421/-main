@@ -2,7 +2,7 @@ name: XRS-07/XRS-08 Windows validation
 
 on:
   push:
-    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062, codex/xrs-updater-rollback-053]
+    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062, codex/xrs-updater-rollback-053, codex/xrs-ai-065]
   pull_request:
     paths:
       - 'x-ray-report-studio/**'
@@ -37,7 +37,7 @@ jobs:
           $isStable056 = $version -eq '0.4.56' -and $sourceRef -eq 'codex/xrs-056-stable-clean'
           $isUpdateHotfix = $sourceRef -eq 'codex/xrs-first-start-confirmation'
           $isUpdaterRecovery = $sourceRef -in @('codex/xrs-updater-recovery', 'codex/xrs-updater-062')
-          $isUpdaterRollback053 = $sourceRef -eq 'codex/xrs-updater-rollback-053'
+          $isUpdaterRollback053 = $sourceRef -in @('codex/xrs-updater-rollback-053', 'codex/xrs-ai-065')
           $isUpdaterCandidate060 = $version -eq '0.4.60' -and $isUpdaterRecovery
           Add-Content -Path $env:GITHUB_OUTPUT -Value "beta=$($isBeta.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "stable056=$($isStable056.ToString().ToLowerInvariant())" -Encoding utf8
@@ -169,6 +169,12 @@ jobs:
       - name: DOCX, PDF and Electron editor integration
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm run test:browser
+      - name: Offline AI contextual review acceptance
+        if: github.ref_name == 'codex/xrs-ai-065'
+        run: |
+          node tests/ai-review-browser.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/update-progress-browser.mjs
       - name: Per-document Undo and Redo history across tabs and restart
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm run test:history-browser
@@ -266,7 +272,7 @@ jobs:
         if: steps.release-channel.outputs.updaterRollback053 == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: xrs-${{ steps.release-channel.outputs.version }}-updater-rollback-053-windows-candidate
+          name: xrs-${{ steps.release-channel.outputs.version }}-windows-candidate
           if-no-files-found: error
           path: |
             x-ray-report-studio/test-output/xrs-${{ steps.release-channel.outputs.version }}/X-ray_Report_Studio_Windows_Setup.zip
