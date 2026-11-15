@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createRussianChecker } from '../src/proofreading-core.ts';
 import { LocalAIProvider } from '../src/local-ai-provider.ts';
 import { ReviewEngine, TrackChangesEngine } from '../src/ai-review.ts';
+import { TEMPLATE_PERSONAL_WORDS } from '../src/template-personal-words.ts';
 
 const aff = await readFile(new URL('../node_modules/dictionary-ru/index.aff', import.meta.url), 'utf8');
 const dic = await readFile(new URL('../node_modules/dictionary-ru/index.dic', import.meta.url), 'utf8');
@@ -26,6 +27,43 @@ test('medical terms, measurements and MRI sequences are preserved', async () => 
   const result=await provider.review({description:text,conclusion:'Секвестрация не выявлена.'});
   assert.equal(result.filter(s=>s.category==='spelling').length,0,JSON.stringify(result));
   assert.ok(result.every(s=>!/[0-9]|справа|слева/u.test(s.proposed)||s.operation==='comment'));
+});
+
+test('editor and AI Review use the same template and user word lists', async () => {
+  const text='Нерезко выражены дорзальные изменения при нормометрии. Ксенолигамент не изменён.';
+  const words=[...TEMPLATE_PERSONAL_WORDS,'ксенолигамент'];
+  const editorIssues=await checker(text,words);
+  const reviewProvider=new LocalAIProvider(checker,()=>words);
+  const reviewIssues=await reviewProvider.review({description:text,conclusion:'Без особенностей.'});
+  assert.deepEqual(editorIssues.filter(issue=>issue.kind==='spelling').map(issue=>issue.text),[]);
+  assert.deepEqual(reviewIssues.filter(issue=>issue.category==='spelling').map(issue=>issue.original),[]);
+});
+
+test('medical inflections are consistent in editor and AI Review while typos stay comments', async () => {
+  const valid='Гиподенсивная зона, гиперденсивного очага, межпозвонковым диском, парапанкреатической клетчаткой и чашечно-лоханочной системой.';
+  const misspelled='Гиперденсивнй очаг.';
+  const editorIssues=await checker(valid);
+  const reviewProvider=new LocalAIProvider(checker);
+  const reviewFindings=await reviewProvider.review({description:valid,conclusion:'Без особенностей.'});
+  assert.deepEqual(editorIssues.filter(issue=>issue.kind==='spelling').map(issue=>issue.text),[]);
+  assert.deepEqual(reviewFindings.filter(issue=>issue.category==='spelling').map(issue=>issue.original),[]);
+  const typoFindings=await reviewProvider.review({description:misspelled,conclusion:'Без особенностей.'});
+  const typo=typoFindings.find(issue=>issue.category==='spelling'&&issue.original==='Гиперденсивнй');
+  assert.ok(typo);
+  assert.equal(typo.operation,'comment');
+  assert.equal(typo.meaningRisk,true);
+});
+
+test('LocalAIProvider passes one stable personal-word snapshot to both allowed blocks', async () => {
+  const passed=[];
+  const words=['термин-пользователя'];
+  const recordingChecker=async(_text,personalWords)=>{passed.push(personalWords);return [];};
+  await new LocalAIProvider(recordingChecker,()=>words).review({description:'Описание',conclusion:'Заключение'});
+  assert.equal(passed.length,2);
+  assert.deepEqual(passed[0],words);
+  assert.deepEqual(passed[1],words);
+  assert.notEqual(passed[0],words);
+  assert.equal(passed[0],passed[1]);
 });
 
 test('meaning-sensitive suggestions are comments; safe spacing needs explicit acceptance', async () => {

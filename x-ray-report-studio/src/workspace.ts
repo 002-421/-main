@@ -402,7 +402,7 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
         const reportId=activeReportId;
         const snapshot=JSON.stringify(json());
         const selected=new Set<ReviewCategory>([...d.querySelectorAll<HTMLInputElement>('[data-ai-category]:checked')].map(el=>el.dataset.aiCategory as ReviewCategory));
-        const result=await new ReviewEngine(new LocalAIProvider()).review(json(),selected,signal);
+        const result=await new ReviewEngine(new LocalAIProvider(undefined,()=>personalWords)).review(json(),selected,signal);
         signal.throwIfAborted();
         if(reportId!==activeReportId||snapshot!==JSON.stringify(json())){output.textContent='Документ изменился. Повторите проверку.';return;}
         tracks.set(reportId,result.suggestions);

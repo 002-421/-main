@@ -1,5 +1,6 @@
 import nspell from 'nspell';
 import { morphologicalIssues } from './morphological-grammar.ts';
+import { loadMorphology, type MorphParse } from './morphology-loader.ts';
 import { medicalLexicon } from './medical-lexicon.ts';
 
 export type ProofIssue = {
@@ -43,17 +44,16 @@ const medicalAdjectives = `гиперинтенсивный гипоинтенс
 клиновидный пинеальный ретроселлярный холестеатомный
 желудочковый мозжечковый корковый подкорковый мосто-мозжечковый
 хиазмально-селлярный краниовертебральный околоносовый переднезадний
-нейроваскулярный невральный аксиальный корональный сагиттальный`.split(/\s+/);
+нейроваскулярный невральный аксиальный корональный сагиттальный
+гиподенсивный гиперденсивный межпозвонковый парапанкреатический
+чашечно-лоханочный`.split(/\s+/);
 
-function medicalWords(): Set<string> {
+function medicalWords(): { words: Set<string>; lemmaSources: Set<string> } {
   const words = new Set<string>();
-  const hard = ['ый', 'ая', 'ое', 'ые', 'ого', 'ому', 'ым', 'ом', 'ую', 'ой', 'ых', 'ыми'];
-  const soft = ['ий', 'яя', 'ее', 'ие', 'его', 'ему', 'им', 'ем', 'юю', 'ей', 'их', 'ими'];
-  for (const adjective of medicalAdjectives) {
-    const stem = adjective.slice(0, -2);
-    const endings = adjective.endsWith('ий') ? soft.map(e => /[щч]$/u.test(stem) ? e.replace('яя', 'ая').replace('юю', 'ую') : e) : hard;
-    for (const ending of endings) words.add(stem + ending);
-  }
+  const lemmaSources = new Set<string>([...medicalAdjectives, ...medicalLexicon]);
+  // Keep only curated lemmas here. Az below accepts inflections only when a
+  // trusted lemma parse regenerates the exact original token.
+  for (const adjective of medicalAdjectives) words.add(adjective);
   const nouns: Record<string, string[]> = {
     'ликвор': ['ликвора', 'ликвору', 'ликвором', 'ликворе'],
     'ликвородинамика': ['ликвородинамики', 'ликвородинамике', 'ликвородинамику', 'ликвородинамикой'],
@@ -148,10 +148,36 @@ function medicalWords(): Set<string> {
     'параовариальный': ['параовариальная', 'параовариальное', 'параовариальные', 'параовариального'],
   };
   for (const [base, forms] of Object.entries(nouns)) {
+    lemmaSources.add(base);
     words.add(base); forms.forEach(word => words.add(word));
   }
   for (const word of ['корково', 'перивентрикулярно', 'кортикально', 'юкстакортикально', 'инфратенториально', 'контрастирующийся', 'контрастирующаяся', 'контрастирующееся', 'контрастирующиеся', 'контрастирующегося', 'контрастирующейся', 'контрастирующихся', 'контрастирующемуся', 'контрастирующимися']) words.add(word);
-  return words;
+  return { words, lemmaSources };
+}
+
+const medicalMorphologyPos = new Set(['NOUN', 'ADJF', 'ADJS', 'PRTF', 'PRTS']);
+const medicalMorphologyParsers = new Set(['Dictionary', 'PrefixKnown', 'SuffixKnown', 'HyphenWords']);
+
+function normalizedLemma(parse: MorphParse): string | null {
+  const lemma = parse.normalize();
+  if (!lemma) return null;
+  return String(lemma).toLocaleLowerCase('ru-RU').replace(/ё/g, 'е');
+}
+
+function parseCanIdentifyLemma(parse: MorphParse, word: string, bestScore: number): boolean {
+  if (!medicalMorphologyParsers.has(parse.parser)
+    || !medicalMorphologyPos.has(String(parse.tag.POS ?? ''))
+    || parse.score <= 0
+    || parse.score < bestScore * 0.75) return false;
+  const lemma = parse.normalize();
+  if (!lemma) return false;
+  const tags: Record<string, string> = { POS: String(parse.tag.POS) };
+  for (const key of ['CAse', 'NMbr', 'GNdr', 'ANim', 'TEns', 'PErs', 'MOod', 'VOic', 'ASpc']) {
+    const value = parse.tag[key];
+    if (typeof value === 'string') tags[key] = value;
+  }
+  const regenerated = lemma.inflect(tags);
+  return !!regenerated && normalize(String(regenerated)) === normalize(word);
 }
 
 function matchCase(original: string, replacement: string) {
@@ -204,11 +230,48 @@ function grammarIssues(text: string): ProofIssue[] {
 export function createRussianChecker(aff: string, dic: string, englishAff = '', englishDic = '') {
   const spell = nspell(aff, dic);
   const latinSpell = englishAff && englishDic ? nspell(englishAff, englishDic) : null;
-  for (const word of [...medicalWords(), ...medicalLexicon]) spell.add(word);
+  const medical = medicalWords();
+  for (const word of medical.words) spell.add(word);
+  for (const word of medicalLexicon) spell.add(word);
   const spellingCache = new Map<string, { correct: boolean; suggestions: string[] }>();
+  const morphologyCache = new Map<string, boolean>();
+  let approvedMedicalLemmas: Promise<Set<string>> | undefined;
+
+  const getApprovedMedicalLemmas = (analyze: (word: string) => MorphParse[]) => approvedMedicalLemmas ??= Promise.resolve().then(() => {
+    const lemmas = new Set<string>();
+    for (const source of medical.lemmaSources) {
+      const parses = analyze(normalize(source));
+      const bestScore = Math.max(0, ...parses.map(parse => parse.score));
+      for (const parse of parses) {
+        if (!parseCanIdentifyLemma(parse, source, bestScore)) continue;
+        const lemma = normalizedLemma(parse);
+        if (lemma) lemmas.add(lemma);
+      }
+    }
+    return lemmas;
+  });
+
+  const isKnownMedicalInflection = async (word: string, analyze: (word: string) => MorphParse[]) => {
+    const key = normalize(word);
+    const cached = morphologyCache.get(key);
+    if (cached !== undefined) return cached;
+    const parses = analyze(key);
+    const bestScore = Math.max(0, ...parses.map(parse => parse.score));
+    const approved = await getApprovedMedicalLemmas(analyze);
+    const accepted = parses.some(parse => {
+      if (!parseCanIdentifyLemma(parse, word, bestScore)) return false;
+      const lemma = normalizedLemma(parse);
+      return lemma !== null && approved.has(lemma);
+    });
+    morphologyCache.set(key, accepted);
+    return accepted;
+  };
+
   return async function checkRussian(text: string, personalWords: string[] = [], signal?: AbortSignal): Promise<ProofIssue[]> {
     signal?.throwIfAborted();
     const issues = [...grammarIssues(text), ...await morphologicalIssues(text, signal)];
+    signal?.throwIfAborted();
+    const analyze = await loadMorphology();
     signal?.throwIfAborted();
     const personal = new Set(personalWords.filter(w => typeof w === 'string').map(normalize));
     let examined = 0;
@@ -230,7 +293,7 @@ export function createRussianChecker(aff: string, dic: string, englishAff = '', 
       if (++examined % 24 === 0) { await pause(); signal?.throwIfAborted(); }
       let result = spellingCache.get(word);
       if (!result) {
-        const isCorrect = correct(word);
+        const isCorrect = correct(word) || await isKnownMedicalInflection(word, analyze);
         // Expensive edit-distance suggestions are bounded per check. Unknown
         // names/long technical terms are still reported and can be allowed.
         const canSuggest = !isCorrect && word.length <= 28 && suggested < 40;

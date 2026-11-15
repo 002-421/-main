@@ -47,6 +47,24 @@ test('CT radiology terms and contrast-agent names are recognized without whiteli
   assert.ok(!TEMPLATE_PERSONAL_WORDS.includes('кальцинированые'), 'do not whitelist a source misspelling');
 });
 
+test('registered medical lemmas accept Az-confirmed case, gender and number forms', async () => {
+  const forms = [
+    'гиподенсивная', 'гиподенсивного', 'гиподенсивные',
+    'гиперденсивная', 'гиперденсивного', 'гиперденсивными',
+    'межпозвонкового', 'межпозвонковым', 'межпозвонковых',
+    'парапанкреатической', 'парапанкреатическое', 'парапанкреатическими',
+    'чашечно-лоханочной', 'чашечно-лоханочное', 'чашечно-лоханочных',
+  ];
+  const issues = await check(forms.join(' '));
+  assert.deepEqual(issues.filter(issue => issue.kind === 'spelling').map(issue => issue.text), []);
+});
+
+test('Az medical-lemma recognition does not whitelist nearby misspellings', async () => {
+  const misspellings = ['гиподенсивнй', 'гиперденсивнй', 'межпозвонковй', 'парапанкреатическй', 'чашечно-лоханочнй'];
+  const issues = await check(misspellings.join(' '));
+  assert.deepEqual(issues.filter(issue => issue.kind === 'spelling').map(issue => issue.text), misspellings);
+});
+
 test('Latin misspellings are underlined while common MRI abbreviations and English sequence names are accepted', async () => {
   const text = 'Мама мыла раму. safsaf T1 T2 DWI ADC FLAIR STIR diffusion-weighted.';
   const issues = await check(text);
