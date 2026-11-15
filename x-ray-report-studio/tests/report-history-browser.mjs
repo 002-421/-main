@@ -253,5 +253,7 @@ try{
  console.log('PASS: synthetic beginning/middle/end edits, Undo/Redo selection/caret/scroll, per-tab isolation and view restore, restart persistence, corrupt-history recovery, four history depths, and horizontally scrollable 1/4/5/12 report tabs.');
 }catch(error){
  await captureFailure(error);
+ const annotation=JSON.stringify({stage:diagnosticStage,message:error?.message||String(error)}).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A');
+ process.stdout.write(`::error title=Report history regression::${annotation}\n`);
  throw error;
 }finally{await app?.close().catch(()=>{});await rm(profile,{recursive:true,force:true});}

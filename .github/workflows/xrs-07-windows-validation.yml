@@ -176,8 +176,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tests/update-progress-browser.mjs
       - name: Per-document Undo and Redo history across tabs and restart
+        id: report-history-tests
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm run test:history-browser
+      - name: Preserve report history failure diagnostics
+        if: failure() && steps.report-history-tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-report-history-diagnostics-${{ github.run_id }}
+          path: |
+            x-ray-report-studio/test-output/report-history-failure.json
+            x-ray-report-studio/test-output/report-history-failure.png
+          if-no-files-found: warn
       - name: Word-oriented preview pagination with synthetic reports
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: node tests/preview-pagination-browser.mjs
