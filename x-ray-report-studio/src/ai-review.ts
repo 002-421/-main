@@ -114,7 +114,7 @@ export class ReviewEngine {
     const findings:Finding[]=[];
     if(categories.has('style')) findings.push(...new TemplateValidator().validate(blocks));
     if(categories.has('consistency')) findings.push(...new ConsistencyEngine().validate(blocks),...this.medical.consistency.validate(blocks));
-    if(categories.has('terminology')) findings.push(...this.medical.terminology.validate(blocks));
+    if(categories.has('terminology')) findings.push(...await this.medical.terminology.validate(blocks));
     if(categories.has('clinical')) findings.push(...this.medical.clinical.validate(blocks));
     if(['spelling','punctuation','style'].some(category=>categories.has(category as ReviewCategory)))findings.push(...await this.provider.review(blocks, signal));
     signal?.throwIfAborted();

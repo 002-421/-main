@@ -41,13 +41,13 @@ test('control: 1.2 cm and 12 mm are equivalent despite NBSP',()=>{
  const result=engines.consistency.validate({description:'КТ: В печени образование 1.2\u00a0см.',conclusion:'КТ: В печени образование 12\u00a0мм.'});
  assert.equal(result.length,0);
 });
-test('regression/development corpus: per-category diagnostic confusion matrix and metrics',()=>{
- const report={};for(const [category,engine] of Object.entries(engines)){let tp=0,fp=0,fn=0,tn=0;const mismatches=[];for(const item of corpus){const found=engine.validate(blocks(item)).length>0;const expected=item.expect.includes(category);if(found&&expected)tp++;else if(found)fp++;else if(expected)fn++;else tn++;if(found!==expected)mismatches.push(item.id);}report[category]={...score(tp,fp,fn,tn),mismatches};assert.equal(tp+fp+fn+tn,corpus.length,`${category}: confusion matrix must include every case`);}
+test('regression/development corpus: per-category diagnostic confusion matrix and metrics',async()=>{
+ const report={};for(const [category,engine] of Object.entries(engines)){let tp=0,fp=0,fn=0,tn=0;const mismatches=[];for(const item of corpus){const found=(await engine.validate(blocks(item))).length>0;const expected=item.expect.includes(category);if(found&&expected)tp++;else if(found)fp++;else if(expected)fn++;else tn++;if(found!==expected)mismatches.push(item.id);}report[category]={...score(tp,fp,fn,tn),mismatches};assert.equal(tp+fp+fn+tn,corpus.length,`${category}: confusion matrix must include every case`);}
  console.log('CLINICAL_REVIEW_METRICS',JSON.stringify({cases:corpus.length,report}));
  assert.ok(Object.values(report).every(x=>x.tp+x.fp+x.fn+x.tn===corpus.length));
 });
 test('undefined precision, recall and F1 remain undefined when there are no positive examples',()=>{
  assert.deepEqual(score(0,0,0,1),{tp:0,fp:0,fn:0,tn:1,precision:null,recall:null,f1:null});
 });
-test('all medical findings are comments without a proposed edit',()=>{for(const engine of Object.values(engines))for(const item of corpus)for(const finding of engine.validate(blocks(item))){assert.equal(finding.operation,'comment');assert.equal(finding.proposed,'');assert.equal(finding.meaningRisk,true);}});
-test('MRI/CT abbreviations are accepted and unknown terms do not become errors',()=>{const engine=engines.terminology;for(const item of corpus.filter(x=>['abbreviations','ct-abbreviations','unknown-term','terminology-unknown'].includes(x.id)))assert.deepEqual(engine.validate(blocks(item)),[],item.id);});
+test('all medical findings are comments without a proposed edit',async()=>{for(const engine of Object.values(engines))for(const item of corpus)for(const finding of await engine.validate(blocks(item))){assert.equal(finding.operation,'comment');assert.equal(finding.proposed,'');assert.equal(finding.meaningRisk,true);}});
+test('MRI/CT abbreviations are accepted and unknown terms do not become errors',async()=>{const engine=engines.terminology;for(const item of corpus.filter(x=>['abbreviations','ct-abbreviations','unknown-term','terminology-unknown'].includes(x.id)))assert.deepEqual(await engine.validate(blocks(item)),[],item.id);});

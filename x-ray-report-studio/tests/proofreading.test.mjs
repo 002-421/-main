@@ -160,3 +160,8 @@ test('joint space agreement catches the reported singular noun mismatch',async()
   assert.equal((await check(valid)).some(issue=>issue.id.startsWith('grammar.morph.noun-agreement')),false);
  }
 });
+
+test('066 medical forms share trusted morphology rather than per-form exceptions',async()=>{
+ const text='Гипофиз. Гипофиза. Гипофизу. Микрокиста. Микрокисты. Микрокист. Гемисфера. Гемисферы. Дорзальный. Дорзальных. Изоинтенсивный. Изоинтенсивные. Гиперинтенсивный. Гиперинтенсивные. Резидуальный. Резидуального. Микроангиопатия. Нерезко.';
+ assert.deepEqual((await check(text)).filter(i=>i.kind==='spelling'),[]);
+});

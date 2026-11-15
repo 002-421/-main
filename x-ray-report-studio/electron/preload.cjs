@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('desktop', {
+  dictionaryLoad: () => ipcRenderer.invoke('dictionary:load'),
+  dictionaryMergeSave: words => ipcRenderer.invoke('dictionary:merge-save', words),
   reportReady: details => ipcRenderer.send('app:ready', details),
   getApplicationVersion: () => ipcRenderer.invoke('app:version'),
   onWordSaved: callback => ipcRenderer.on('report:word-saved', (_event, url) => callback(url)),

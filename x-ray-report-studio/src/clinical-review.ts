@@ -1,4 +1,5 @@
 import type { Finding, ReviewBlocks, ReviewBlockId } from './ai-review.ts';
+import { loadMedicalWordRecognizer } from './medical-word-recognition.ts';
 import { medicalLexicon } from './medical-lexicon.ts';
 
 export type ImagingModality = 'MRI' | 'CT';
@@ -29,7 +30,8 @@ function mentions(text:string,modality:'MRI'|'CT'):Mention[]{
 }
 function modalityFor(blocks:ReviewBlocks):'MRI'|'CT'|null{const text=`${blocks.description}\n${blocks.conclusion}`;const mri=/(?<!\p{L})(?:МРТ|МР-томограмм|T1|T2|FLAIR|DWI|ADC|STIR)(?!\p{L})/iu.test(text);const ct=/(?<!\p{L})(?:КТ|МСКТ)(?!\p{L})/iu.test(text);return mri===ct?null:mri?'MRI':'CT';}
 export class MedicalTerminologyEngine {
-  validate(blocks:ReviewBlocks):Finding[]{
+  async validate(blocks:ReviewBlocks):Promise<Finding[]>{
+    const recognized=await loadMedicalWordRecognizer();
     const modality=modalityFor(blocks);if(!modality)return [];
     const output:Finding[]=[];
     const entries=imagingLexicons[modality];
@@ -46,7 +48,7 @@ export class MedicalTerminologyEngine {
     const typo=(word:string)=>{const limit=word.length>=13?2:1;let best=limit+1,candidates=new Set<string>();for(const [form,canonical] of known){const d=distance(word,form);if(d<best){best=d;candidates=new Set([canonical]);}else if(d===best)candidates.add(canonical);}return best<=limit&&candidates.size===1?[...candidates][0]:null;};
     for(const blockId of ['description','conclusion'] as const){const text=blocks[blockId];const seen=new Map<string,{form:string,start:number}>();
       for(const entry of imagingLexicons[modality])for(const variant of entry.variants)for(const m of text.matchAll(rx(variant))){const key=entry.canonical.toLocaleLowerCase('ru');const prev=seen.get(key);if(prev&&prev.form!==m[0]&&prev.form.toLocaleLowerCase('ru')!==m[0].toLocaleLowerCase('ru'))output.push(finding(blockId,text,m.index!,m.index!+m[0].length,'terminology',`Непоследовательное написание структуры: «${prev.form}» и «${m[0]}». Проверьте вручную.`));else seen.set(key,{form:m[0],start:m.index!});}
-      for(const match of text.matchAll(/[А-Яа-яЁё]+/gu)){const word=match[0];if(known.has(word.toLocaleLowerCase('ru-RU'))||word.length<8)continue;const candidate=typo(word);if(candidate)output.push(finding(blockId,text,match.index!,match.index!+word.length,'terminology',`Возможно, термин «${word}» является опечаткой зарегистрированного термина «${candidate}». Проверьте вручную.`));}
+      for(const match of text.matchAll(/[А-Яа-яЁё]+/gu)){const word=match[0];if(recognized(word)||known.has(word.toLocaleLowerCase('ru-RU'))||word.length<8)continue;const candidate=typo(word);if(candidate)output.push(finding(blockId,text,match.index!,match.index!+word.length,'terminology',`Возможно, термин «${word}» является опечаткой зарегистрированного термина «${candidate}». Проверьте вручную.`));}
     }
     // Unknown terms are deliberately not labeled as misspellings.
     return output;
