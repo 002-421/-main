@@ -37,6 +37,40 @@ async function readDiagnosticEvents(filename) {
   catch { return []; }
 }
 
+function makeWorkerSource({ root, workerModule, stateModule }) {
+  const candidateRoot = path.join(root, 'Install', 'App_0.4.59');
+  const candidateExecutable = path.join(candidateRoot, 'X-ray Report Studio.exe');
+  return `
+    const fs=require('node:fs/promises');const {app,shell}=require('electron');
+    const {runUpdateWorker}=require(${JSON.stringify(workerModule)});const {writeJsonAtomic}=require(${JSON.stringify(stateModule)});
+    const diag=async event=>fs.appendFile(process.env.XRS_WORKER_DIAGNOSTICS,JSON.stringify(event)+'\\n');
+    diag({stage:'electron-process-started'}).catch(()=>{});
+    app.whenReady().then(async()=>{try{await diag({stage:'electron-app-ready'});const c=JSON.parse(await fs.readFile(process.env.XRS_WORKER_CONFIG,'utf8'));c.parentPid=Number(process.env.XRS_PARENT_PID);
+      const events=[];const result=await runUpdateWorker(c,{app,shell,writeJsonAtomic,
+        waitForProfileIdle:async()=>{},createUserDataBackup:async()=>{try{process.kill(c.parentPid,0);throw new Error('parent Electron process is still running');}catch(e){if(e.message==='parent Electron process is still running')throw e;}
+          events.push('backup-after-parent-exit');await fs.writeFile(process.env.XRS_WORKER_EVENTS,JSON.stringify(events));return{files:1,bytes:20};},
+        installUpdateArchive:async()=>({root:${JSON.stringify(candidateRoot)},executable:${JSON.stringify(candidateExecutable)}}),
+        smokeTestInstalledApp:async()=>({ready:true,version:'0.4.59'}),writeShortcutAtomically:async o=>fs.writeFile(o.shortcutPath,o.target),
+        readShortcutTarget:async f=>fs.readFile(f,'utf8'),launchDetached:async()=>{events.push('candidate-launch');await fs.writeFile(process.env.XRS_WORKER_EVENTS,JSON.stringify(events));},
+        log:async event=>{const safe={};for(const key of ['event','phase','operation','processState','errorCode','recoveryAction'])if(typeof event[key]==='string')safe[key]=event[key];await diag(safe);}});
+      await fs.writeFile(process.env.XRS_WORKER_RESULT,JSON.stringify(result));
+    }catch(e){await diag({stage:'worker-top-level-error',errorCode:typeof e.code==='string'?e.code:'UNCLASSIFIED'});await fs.writeFile(process.env.XRS_WORKER_RESULT,JSON.stringify({error:e.message,code:e.code}));}finally{app.quit();}});
+  `;
+}
+
+test('generated Electron updater worker entrypoint passes Node syntax validation', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'xrs-worker-syntax-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const entrypoint = path.join(root, 'main.cjs');
+  const source = makeWorkerSource({
+    root,
+    workerModule: path.resolve('electron/update-worker.cjs'),
+    stateModule: path.resolve('electron/install-state.cjs'),
+  });
+  await fs.writeFile(entrypoint, source);
+  await execFileAsync(process.execPath, ['--check', entrypoint], { windowsHide: true });
+});
+
 test('profile process inspection waits for active processes and fails closed at timeout', async () => {
   let polls = 0;
   const states = [];
@@ -98,23 +132,9 @@ test('independent Electron updater waits for the real parent Electron process be
   const stateModule = path.resolve(testDir, '../electron/install-state.cjs');
   await fs.writeFile(path.join(workerApp, 'package.json'), JSON.stringify({ name: 'worker-fixture', version: '1.0.0', main: 'main.cjs' }));
   await fs.writeFile(configFile, JSON.stringify(config));
-  const workerSource = `
-    const fs=require('node:fs/promises');const {app,shell}=require('electron');
-    const {runUpdateWorker}=require(${JSON.stringify(workerModule)});const {writeJsonAtomic}=require(${JSON.stringify(stateModule)});
-    const diag=async event=>fs.appendFile(process.env.XRS_WORKER_DIAGNOSTICS,JSON.stringify(event)+'\\n');
-    diag({stage:'electron-process-started'}).catch(()=>{});
-    app.whenReady().then(async()=>{try{await diag({stage:'electron-app-ready'});const c=JSON.parse(await fs.readFile(process.env.XRS_WORKER_CONFIG,'utf8'));c.parentPid=Number(process.env.XRS_PARENT_PID);
-      const events=[];const result=await runUpdateWorker(c,{app,shell,writeJsonAtomic,
-        waitForProfileIdle:async()=>{},createUserDataBackup:async()=>{try{process.kill(c.parentPid,0);throw new Error('parent Electron process is still running');}catch(e){if(e.message==='parent Electron process is still running')throw e;}
-          events.push('backup-after-parent-exit');await fs.writeFile(process.env.XRS_WORKER_EVENTS,JSON.stringify(events));return{files:1,bytes:20};},
-        installUpdateArchive:async()=>({root:${JSON.stringify(path.join(root,'Install','App_0.4.59'))},executable:${JSON.stringify(path.join(root,'Install','App_0.4.59','X-ray Report Studio.exe'))}),
-        smokeTestInstalledApp:async()=>({ready:true,version:'0.4.59'}),writeShortcutAtomically:async o=>fs.writeFile(o.shortcutPath,o.target),
-        readShortcutTarget:async f=>fs.readFile(f,'utf8'),launchDetached:async()=>{events.push('candidate-launch');await fs.writeFile(process.env.XRS_WORKER_EVENTS,JSON.stringify(events));},
-        log:async event=>{const safe={};for(const key of ['event','phase','operation','processState','errorCode','recoveryAction'])if(typeof event[key]==='string')safe[key]=event[key];await diag(safe);}});
-      await fs.writeFile(process.env.XRS_WORKER_RESULT,JSON.stringify(result));
-    }catch(e){await diag({stage:'worker-top-level-error',errorCode:typeof e.code==='string'?e.code:'UNCLASSIFIED'});await fs.writeFile(process.env.XRS_WORKER_RESULT,JSON.stringify({error:e.message,code:e.code}));}finally{app.quit();}});
-  `;
+  const workerSource = makeWorkerSource({ root, workerModule, stateModule });
   await fs.writeFile(workerEntrypoint, workerSource);
+  await execFileAsync(process.execPath, ['--check', workerEntrypoint], { windowsHide: true });
   const parent = spawn(electronExe, [parentApp, `--user-data-dir=${parentProfile}`], { cwd: parentApp, windowsHide: true, stdio: 'ignore' });
   children.push(parent);
   let parentExit;
