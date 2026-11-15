@@ -22,7 +22,7 @@ test('medical engines run only for their independently selected categories',asyn
 });
 
 test('deduplicates only identical spans and operations within the consistency group',async()=>{
- const exactA=finding('side',0,3),exactB={...exactA,category:'consistency',explanation:'duplicate source'};
+ const exactA=finding('side',0,3),exactB={...exactA,category:'consistency'};
  const differentSpan=finding('level',0,5),differentFinding=finding('size',4,7);
  const engine=new ReviewEngine(new MockAIProvider(),{terminology:spyEngine(),consistency:spyEngine([exactA,exactB,differentSpan,differentFinding]),clinical:spyEngine()});
  const result=await engine.review(doc,new Set(['consistency']));assert.equal(result.suggestions.length,3);

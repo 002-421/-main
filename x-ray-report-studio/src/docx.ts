@@ -444,8 +444,8 @@ function parseWordParagraph(node: XmlElement): RichNode {
   const spacing = first(props ?? node, 'w:spacing'); if (spacing?.attrs['w:before']) attrs.spaceBeforePt = Number(spacing.attrs['w:before']) / 20; if (spacing?.attrs['w:after']) attrs.spaceAfterPt = Number(spacing.attrs['w:after']) / 20; if (spacing?.attrs['w:line'] && spacing.attrs['w:lineRule'] === 'auto') attrs.lineHeight = Number(spacing.attrs['w:line']) / 240;
   if (pStyle) attrs.sourceStyle = pStyle;
   const content: RichNode[] = [];
-  for (const child of node.children) {
-    if (typeof child === 'string' || child.name !== 'w:r') continue;
+  const runs=(element:XmlElement):XmlElement[]=>element.children.flatMap(child=>typeof child==='string'?[]:child.name==='w:r'?[child]:['w:hyperlink','w:sdt','w:sdtContent','w:ins','w:smartTag','w:fldSimple'].includes(child.name)?runs(child):[]);
+  for (const child of runs(node)) {
     const marks = parseWordMarks(child);
     for (const item of child.children) {
       if (typeof item === 'string') continue;

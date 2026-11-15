@@ -57,7 +57,7 @@ export class MedicalTerminologyEngine {
 const negated=(s:string)=>/(?:не\s+(?:выявлен\p{L}*|определя\p{L}*|визуализиру\p{L}*|обнаруж\p{L}*)|отсутств\p{L}*|без\s+(?:очаг\p{L}*|признак\p{L}*|патологическ\p{L}*))/iu.test(s);
 function clauses(text:string){const re=/(?:[^.!?\n]|\.(?=\d))+[.!?]?/gu;return [...text.matchAll(re)].map(m=>({text:m[0],start:m.index!}));}
 const entity=/(?<!\p{L})(?:очаг\p{L}*|образовани\p{L}*|грыж\p{L}*|протрузи\p{L}*|экструзи\p{L}*|консолидаци\p{L}*|узел\p{L}*|кист\p{L}*|опухол\p{L}*)(?!\p{L})/iu;
-const sidePattern=/(?<!\p{L})(?:справа|слева|прав(?:ый|ого|ому|ым|ом|ая|ой|ую|ое|ые|ых|ыми)|лев(?:ый|ого|ому|ым|ом|ая|ой|ую|ое|ые|ых|ыми))(?!\p{L})/giu;
+const sidePattern=/(?<!\p{L})(?:справа|слева|правосторонн\p{L}*|левосторонн\p{L}*|прав(?:ый|ого|ому|ым|ом|ая|ой|ую|ое|ые|ых|ыми)|лев(?:ый|ого|ому|ым|ом|ая|ой|ую|ое|ые|ых|ыми))(?!\p{L})/giu;
 const side=(s:string)=>{
   const entityMatches=[...s.matchAll(new RegExp(entity.source,'giu'))];
   if(entityMatches.length!==1)return '';
@@ -65,8 +65,8 @@ const side=(s:string)=>{
   return directions.size===1?[...directions][0]:'';
 };
 function dimensions(s:string){return [...s.normalize('NFC').matchAll(/(?<![\p{L}\d])\d+(?:[,.]\d+)?[\u0020\u00a0\u202f]*(?:мм|см)(?!\p{L})|(?<![\p{L}\d])\d+(?:[,.]\d+)?[\u0020\u00a0\u202f]*[×xх][\u0020\u00a0\u202f]*\d+(?:[,.]\d+)?(?:[\u0020\u00a0\u202f]*[×xх][\u0020\u00a0\u202f]*\d+(?:[,.]\d+)?)?[\u0020\u00a0\u202f]*(?:мм|см)?/giu)].map(m=>{const raw=m[0].replace(/[\u0020\u00a0\u202f]/gu,'').replace(/,/g,'.');const unit=/см/iu.test(raw)?10:1;return [...raw.matchAll(/\d+(?:\.\d+)?/gu)].map(n=>String(Number(n[0])*unit)).join('×')+'mm';});}
-const level=/\b(?:C[1-7]|Th(?:1[0-2]|[1-9])|L[1-5])\s*[-–]\s*(?:C[1-7]|Th(?:1[0-2]|[1-9])|L[1-5]|S1)\b/giu;
-function levels(s:string){return [...s.matchAll(level)].map(m=>m[0].toUpperCase().replace(/\s|–/g,'-'));}
+const level=/\b(C[1-7]|Th(?:1[0-2]|[1-9])|L[1-5])\s*[-–—/]\s*(C[1-7]|Th(?:1[0-2]|[1-9])|L[1-5]|S1|[1-7])\b/giu;
+function levels(s:string){return [...s.matchAll(level)].map(m=>{const left=m[1].toUpperCase();const right=/^\d$/.test(m[2])?left.replace(/\d+$/,'')+m[2]:m[2].toUpperCase();return `${left}-${right}`;});}
 const anatomy=/(?:лобн\w*|теменн\w*|височн\w*|затылочн\w*|мозжечк\w*|гипофиз\w*|печен\w*|селезенк\w*|легк\w*|почк\w*|плевр\w*|коленн\w*|плечев\w*)/iu;
 function entityKey(s:string){const e=entity.exec(s)?.[0]?.toLocaleLowerCase('ru')??'';const a=anatomy.exec(s)?.[0]?.toLocaleLowerCase('ru')??'';return `${e}:${a}:${side(s)}`;}
 const explicitAnatomyForms=new Map<string,string>();
@@ -98,6 +98,17 @@ export class ClinicalLogicEngine {
     const pathology=(s:string)=>{const m=/(грыж\p{L}*|протрузи\p{L}*|экструзи\p{L}*|очаг\p{L}*|образовани\p{L}*|кист\p{L}*|узел\p{L}*|консолидаци\p{L}*|опухол\p{L}*)/iu.exec(s);if(!m)return '';const v=m[0].toLocaleLowerCase('ru');return v.startsWith('грыж')?'грыжа':v.startsWith('протрузи')?'протрузия':v.startsWith('экструзи')?'экструзия':v.startsWith('очаг')?'очаг':v.startsWith('образовани')?'образование':v.startsWith('кист')?'киста':v.startsWith('узел')?'узел':v.startsWith('консолидаци')?'консолидация':'опухоль';};
     const explicit=(s:string)=>/(?:определя\p{L}*|выявля\p{L}*|визуализиру\p{L}*|обнаруж\p{L}*|имеется|налич\p{L}*)/iu.test(s)&&!negated(s);
     const desc=clauses(blocks.description),concl=clauses(blocks.conclusion);
+    for(const d of desc)for(const c of concl){
+      if(uncertain.test(`${d.text} ${c.text}`))continue;
+      const dl=levels(d.text),cl=levels(c.text);
+      if(dl.length>1||cl.length>1||(dl.length&&cl.length&&dl[0]!==cl[0]))continue;
+      const noStenosis=/позвоночн\p{L}* канал\p{L}*[^.!?]*не сужен/iu.test(d.text);
+      const hasStenosis=/стеноз\p{L}* позвоночн\p{L}* канал/iu.test(c.text)&&!negated(c.text);
+      const noHernia=/грыж\p{L}*[^.!?]*не выявлен/iu.test(d.text);
+      const hasExtrusion=/экструзи\p{L}*/iu.test(c.text)&&!negated(c.text);
+      if((noStenosis&&hasStenosis)||(noHernia&&hasExtrusion))out.push(finding('conclusion',blocks.conclusion,c.start,c.start+c.text.length,'clinical','Возможное противоречие: описание отрицает изменение, указанное в заключении.',d.text.trim()));
+    }
+
     for(const [blockId,text,cs] of [['description',blocks.description,desc],['conclusion',blocks.conclusion,concl]] as const){
       for(let i=0;i<cs.length;i++)for(let j=i+1;j<cs.length;j++){const x=cs[i],y=cs[j];if(!entity.test(x.text)||!entity.test(y.text)||uncertain.test(`${x.text} ${y.text}`))continue;const kx=entityKey(x.text),ky=entityKey(y.text);if(kx.split(':')[0]!==ky.split(':')[0]||kx.split(':')[1]!==ky.split(':')[1]||pathology(x.text)!==pathology(y.text))continue;if(negated(x.text)===negated(y.text))continue;out.push(finding(blockId,text,y.start,y.start+y.text.length,'clinical','Возможны несовместимые утверждения о наличии одной и той же находки.',x.text.trim()));}
     }

@@ -25,3 +25,5 @@ test('ambiguous cases, coordinated subjects, enumerations and participle objects
   'Большое окно открыто.','Новые исследования завершены.'
  ])assert.deepEqual(await morphologicalIssues(text),[],text);
 });
+
+test('medical participles can refer to an antecedent before a genitive modifier',async()=>{for(const text of ['Антелистез L4 позвонка, сопровождающийся деформацией дурального мешка.','Стеноз, сопровождающийся деформацией дурального мешка.','Отёк, сопровождающийся деформацией дурального мешка.'])assert.deepEqual(await morphologicalIssues(text),[],text);});

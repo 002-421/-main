@@ -30,3 +30,8 @@ test('blocking process diagnostics retain only PID and type without profile path
  assert.equal(JSON.stringify(event).includes('Doctor'),false);
  assert.equal(JSON.stringify(event).includes('patient text'),false);
 });
+
+test('renderer diagnostic frames exclude messages, code text, paths and secrets',()=>{
+ const value=sanitizeStartupLogEvent({event:'renderer-exception',errorType:'TypeError',frames:['12:34','SYNTHETIC PATIENT','file:///secret.ts:12:34'],message:'PRIVATE REPORT',stack:'PRIVATE REPORT'});
+ assert.deepEqual(value,{event:'renderer-exception',errorType:'TypeError',frames:['12:34']});
+});

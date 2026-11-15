@@ -1,3 +1,4 @@
+import { recoverParagraphBlocks } from './document-recovery';
 import './style.css';
 import { titleWithStudySide } from './report-side';
 import { justifyDescription } from './description-alignment';
@@ -46,6 +47,8 @@ declare global { interface Window { desktop?: {
   onUpdateProgress:(callback:(progress:{stage:string;loaded:number;total:number;percent:number|null;message?:string;phase?:string;code?:string;logFile?:string})=>void)=>void;
   clearUpdateProgress:()=>void;
   copyReport:(html:string,text:string)=>Promise<void>;
+  reportDiagnostic:(value:unknown)=>void;
+  openDiagnostics:()=>Promise<unknown>;
   dictionaryLoad:()=>Promise<{words:string[];shared:boolean}>;
   dictionaryMergeSave:(words:string[])=>Promise<{words:string[];shared:boolean}>;
 } } }
@@ -245,6 +248,7 @@ function readReportView(value:unknown):StoredReportView|undefined {if(!value||ty
 function restoreReportView(value:unknown){const view=readReportView(value);let selection:Selection|undefined;if(view){try{selection=Selection.fromJSON(editor.state.doc,view.selection);editor.view.dispatch(editor.state.tr.setSelection(selection).setMeta('addToHistory',false));}catch{/* Invalid or stale view state cannot affect the document or its history. */}}$('#canvas').scrollTop=view?.scrollTop??0;if(view&&selection)requestAnimationFrame(()=>{editor.view.focus();$('#canvas').scrollTop=view.scrollTop;});}
 function syncActiveReport(){const active=openReports.find(r=>r.id===activeReportId);if(active){active.doc=json();active.templateId=activeTemplateId;active.dirty=changedSinceOpen;historyByReport[active.id]={fingerprint:documentFingerprint(active.doc),history:getReportHistory(editor.state),view:{selection:editor.state.selection.toJSON() as Record<string,unknown>,scrollTop:$('#canvas').scrollTop}};}}
 function saveLocal():boolean {
+ if(Reflect.get(window,'xrsFatal'))return false;
  if(templateMode)return false;
  if(workspaceRecoveryBlocked){$('#save-state').textContent='Не сохранено';toast('Не удалось создать резервную копию повреждённого рабочего пространства. Сохраните документ в Word.',true);return false;}
  try{
@@ -718,7 +722,9 @@ $('#report-file').onchange=async event=>{
    if(imported){doc=imported.doc;warnings=imported.importWarnings??[];if(imported.templateId&&reportTemplates.some(t=>t.id===imported.templateId))templateId=imported.templateId;requiresReview ||= warnings.length>0;}
    else {const recovered=await recoverDocx(bytes);doc=recovered.doc;warnings=recovered.warnings;requiresReview=true;}
   }else doc=validateDraft(JSON.parse(await file.text())).doc;
-  const prepared=prepareInlineDocument(doc);editor.schema.nodeFromJSON(prepared).check();
+  const recoveredStructure=recoverParagraphBlocks(doc);
+  if(recoveredStructure.changed){requiresReview=true;warnings.push('Восстановлена несовместимая вложенность блоков в абзацах. Проверьте расположение изображений и таблиц в отдельной копии.');}
+  const prepared=prepareInlineDocument(recoveredStructure.doc);editor.schema.nodeFromJSON(prepared).check();
   const open=()=>{if(templateMode)return;activeTemplateId=templateId;selectedAreaId=reportTemplates.find(t=>t.id===templateId)!.areaId;renderTemplates();createReportTab(templateId,prepared);closeDialog();toast('Документ открыт в отдельной вкладке.');};
   if(!requiresReview){open();return;}
   const previewHost=document.createElement('div'),previewEditor=makeEditor(previewHost,prepared,()=>{});

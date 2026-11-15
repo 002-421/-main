@@ -99,7 +99,12 @@ function waitForRendererReady(timeoutMs = 20000) {
 function logStartup(event) {
   if (!startupLogFile) return startupLogQueue;
   const safe = sanitizeStartupLogEvent(event);
-  startupLogQueue = startupLogQueue.then(() => fs.appendFile(startupLogFile, `${JSON.stringify({ time: new Date().toISOString(), ...safe })}\n`, 'utf8')).catch(() => {});
+  startupLogQueue = startupLogQueue.then(async () => {
+    if(await fs.stat(startupLogFile).then(s=>s.size>1000000).catch(()=>false))await fs.rename(startupLogFile,startupLogFile+'.previous').catch(()=>{});
+    await fs.appendFile(startupLogFile, `${JSON.stringify({ time: new Date().toISOString(), ...safe })}\n`, 'utf8');
+    const logs=(await fs.readdir(path.dirname(startupLogFile))).filter(n=>/^startup-.*\.log(?:\.previous)?$/.test(n)).sort();
+    for(const name of logs.slice(0,-10))await fs.unlink(path.join(path.dirname(startupLogFile),name)).catch(()=>{});
+  }).catch(() => {});
   return startupLogQueue;
 }
 
@@ -484,6 +489,7 @@ app.whenReady().then(async () => {
     },
   });
   startupWatchdog = setTimeout(() => { if (!rendererReady) void showStartupFailure('Интерфейс не запустился за 30 секунд.'); }, 30000);
+  for(const event of ['minimize','restore','resize'])mainWindow.on(event,()=>void logStartup({event:'window-'+event}));
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
   mainWindow.webContents.on('did-finish-load', () => { void logStartup({ event: 'page-finished-loading' }); });
@@ -497,6 +503,7 @@ app.whenReady().then(async () => {
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     void logStartup({ event: 'renderer-process-gone', details });
     if (!rendererReady && !liveUpdateInProgress) void showStartupFailure('Процесс интерфейса приложения завершился при запуске.');
+    else if(!liveUpdateInProgress) void dialog.showMessageBox(mainWindow,{type:'error',message:'Процесс интерфейса завершился. Закройте и заново откройте XRS. Сохранённое рабочее пространство не удалено.',buttons:['Закрыть сообщение']});
   });
   mainWindow.webContents.on('will-prevent-unload', event => event.preventDefault());
   mainWindow.webContents.on('unresponsive', () => {
@@ -690,6 +697,8 @@ app.whenReady().then(async () => {
     if (typeof html !== 'string' || typeof text !== 'string' || html.length > 5_000_000 || text.length > 2_000_000) throw new Error('Слишком большой документ.');
     await clipboard.write([new ClipboardItem({ 'text/html': html, 'text/plain': text })]);
   });
+  ipcMain.on('diagnostics:event',(event,value)=>{requireMain(event);if(value?.event==='renderer-exception')void logStartup({event:'renderer-exception',errorType:value.errorType,frames:value.frames});});
+  ipcMain.handle('diagnostics:open',async event=>{requireMain(event);return shell.openPath(path.dirname(startupLogFile));});
   ipcMain.handle('dictionary:load', async event => {
     requireMain(event);
     const filename = await dictionaryPath();

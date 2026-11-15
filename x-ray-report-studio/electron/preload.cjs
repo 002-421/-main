@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('desktop', {
+  reportDiagnostic: value => ipcRenderer.send('diagnostics:event', value),
+  openDiagnostics: () => ipcRenderer.invoke('diagnostics:open'),
   dictionaryLoad: () => ipcRenderer.invoke('dictionary:load'),
   dictionaryMergeSave: words => ipcRenderer.invoke('dictionary:merge-save', words),
   reportReady: details => ipcRenderer.send('app:ready', details),

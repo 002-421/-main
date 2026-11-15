@@ -52,8 +52,10 @@ function sanitizeUpdateLogEvent(event) {
 
 function sanitizeStartupLogEvent(event) {
   const safe = copyPrimitiveFields(event, ['event', 'version', 'platform', 'hardwareAcceleration', 'gpuCompositing', 'directComposition', 'action', 'errorCode', 'isMainFrame', 'level', 'lineNumber', 'rendererReady']);
+  if(event?.event==='renderer-exception'){safe.errorType=['Error','TypeError','RangeError','SyntaxError','ReferenceError'].includes(event.errorType)?event.errorType:'Unknown';safe.frames=Array.isArray(event.frames)?event.frames.filter(x=>typeof x==='string'&&/^\d{1,8}:\d{1,8}$/.test(x)).slice(0,12):[];}
   if (event?.details && typeof event.details === 'object') {
-    safe.details = copyPrimitiveFields(event.details, ['appRoot', 'templateCount', 'textLength', 'bodyColor']);
+    safe.details = copyPrimitiveFields(event.details, ['exitCode', 'appRoot', 'templateCount', 'textLength', 'bodyColor']);
+    if(['clean-exit','abnormal-exit','killed','crashed','oom','launch-failed','integrity-failure'].includes(event.details.reason))safe.details.reason=event.details.reason;
     for (const key of ['viewport', 'shell']) if (event.details[key] && typeof event.details[key] === 'object')
       safe.details[key] = copyPrimitiveFields(event.details[key], key === 'viewport' ? ['width', 'height'] : ['width', 'height', 'display', 'visibility', 'opacity']);
   }

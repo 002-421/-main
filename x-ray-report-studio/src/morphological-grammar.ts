@@ -113,7 +113,7 @@ export async function morphologicalIssues(text:string,signal?:AbortSignal):Promi
           }
         }
         if(!correctedNoun)for(const adjective of adjectives){
-          const objectOfParticiple=modifier(adjective).some(p=>p.tag.PRTF&&p.tag.actv&&p.tag.tran)&&nounParses.some(n=>n.tag.accs);
+          const objectOfParticiple=modifier(adjective).some(p=>p.tag.PRTF)&&nounParses.some(n=>n.tag.accs||(/ся$/iu.test(adjective.word)&&(n.tag.ablt||n.tag.gent)));
           const substantivized=kinds(adjective,'NOUN').length>0&&nounParses.some(n=>n.tag.gent);
           if(!objectOfParticiple&&!substantivized&&!matches(modifier(adjective),nounParses))add(adjective,'modifier-agreement','Определение не согласовано с существительным по роду, числу или падежу.',forms(modifier(adjective),nounParses));
         }

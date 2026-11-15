@@ -173,7 +173,7 @@ jobs:
         if: github.ref_name == 'codex/xrs-ai-065' || github.ref_name == 'codex/xrs-ai-066'
         shell: pwsh
         run: |
-          foreach ($scenario in @('ai-review-browser', 'morphology-browser', 'dictionary-electron', 'update-progress-browser')) {
+          foreach ($scenario in @('ai-review-browser', 'morphology-browser', 'dictionary-electron', 'final-medical-browser', 'final-renderer-electron', 'update-progress-browser')) {
             Write-Host "Running $scenario"
             $result = & node "tests/$scenario.mjs" 2>&1
             $scenarioExit = $LASTEXITCODE

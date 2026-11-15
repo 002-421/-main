@@ -393,3 +393,9 @@ test('doctor stamp stays inside the physician column behind the footer without a
   assert.ok(xml.indexOf('wp:anchor')<xml.indexOf('Дата:'));
   assert.equal((xml.match(/<wp:anchor\b/g)||[]).length,1);
 });
+
+test('Word hyperlink and content-control run wrappers retain medical text during recovery',async()=>{
+ const source=await exported({type:'doc',content:[p('Исходный текст')]});
+ source.zip['word/document.xml']=strToU8('<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:hyperlink><w:r><w:t>Справа 6 мм L4–L5</w:t></w:r></w:hyperlink><w:sdt><w:sdtContent><w:r><w:t> Заключение: экструзия.</w:t></w:r></w:sdtContent></w:sdt></w:p></w:body></w:document>');
+ const recovered=await recoverDocx(zipSync(source.zip));const text=JSON.stringify(recovered.doc);assert.match(text,/Справа 6 мм L4–L5/);assert.match(text,/Заключение: экструзия/);assert.ok(recovered.warnings.length);
+});

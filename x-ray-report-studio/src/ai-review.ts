@@ -113,13 +113,13 @@ export class ReviewEngine {
     new PrivacyGuard().check(blocks);
     const findings:Finding[]=[];
     if(categories.has('style')) findings.push(...new TemplateValidator().validate(blocks));
-    if(categories.has('consistency')) findings.push(...new ConsistencyEngine().validate(blocks),...this.medical.consistency.validate(blocks));
+    if(categories.has('consistency')) findings.push(...this.medical.consistency.validate(blocks));
     if(categories.has('terminology')) findings.push(...await this.medical.terminology.validate(blocks));
     if(categories.has('clinical')) findings.push(...this.medical.clinical.validate(blocks));
     if(['spelling','punctuation','style'].some(category=>categories.has(category as ReviewCategory)))findings.push(...await this.provider.review(blocks, signal));
     signal?.throwIfAborted();
     const unique=new Map<string,Finding>();
-    for(const finding of findings){const group=categoryGroup(finding.category);if(!group||!categories.has(group)||!allowed.has(finding.blockId)||!Number.isInteger(finding.from)||!Number.isInteger(finding.to)||finding.from<0||finding.to>blocks[finding.blockId].length||finding.from>finding.to||blocks[finding.blockId].slice(finding.from,finding.to)!==finding.original)continue;const key=JSON.stringify([finding.blockId,finding.operation,group,finding.from,finding.to,finding.original,finding.proposed]);if(!unique.has(key))unique.set(key,finding);}
+    for(const finding of findings){const group=categoryGroup(finding.category);if(!group||!categories.has(group)||!allowed.has(finding.blockId)||!Number.isInteger(finding.from)||!Number.isInteger(finding.to)||finding.from<0||finding.to>blocks[finding.blockId].length||finding.from>finding.to||blocks[finding.blockId].slice(finding.from,finding.to)!==finding.original)continue;const key=JSON.stringify([finding.blockId,finding.operation,group,finding.from,finding.to,finding.original,finding.proposed,finding.explanation]);if(!unique.has(key))unique.set(key,finding);}
     const suggestions=[...unique.values()].map(f=>({ ...f, id: crypto.randomUUID(), state: 'pending' as const }));
     return { blocks, suggestions };
   }
