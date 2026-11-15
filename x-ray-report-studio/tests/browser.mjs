@@ -322,7 +322,12 @@ try{
  await page.waitForFunction(()=>document.querySelector('#ai-review-status')?.textContent?.includes('Проверка недоступна'));
  assert.equal(await page.locator('.ai-review-underline').count(),0,'ambiguous inserted content outside verified sections has no unsafe review ranges');
  assert.equal(await insertedField.innerText(),'Иследование. Очаг очаг не выявлен.','ambiguous report review leaves the text intact');
- await fillField(await insertedField.getAttribute('data-field-id'),'Исследование. Очаг не выявлен.');
+ // Correct manually inside the existing filled field; full-field replacement intentionally removes its template mark.
+ await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.setStart(el.firstChild,1);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
+ await page.keyboard.insertText('с');
+ await insertedField.evaluate(el=>{const text=el.firstChild,offset=text.textContent.indexOf('очаг ');if(offset<0)throw new Error('Synthetic repeated word missing');const range=document.createRange();range.setStart(text,offset);range.setEnd(text,offset+5);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
+ await page.keyboard.press('Backspace');
+ assert.equal(await insertedField.innerText(),'Исследование. Очаг не выявлен.');
  await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();
  assert.equal(await page.locator('#highlight-yellow').getAttribute('aria-pressed'),'true');assert.match(await page.locator('.toast').textContent(),/залит жёлтым/);assert.equal(await page.locator('.report-content').evaluate(el=>el.classList.contains('show-yellow-selection')),true);
  assert.ok((await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Исследование. Очаг не выявлен.')),'yellow text highlighter can be applied');
@@ -442,8 +447,8 @@ try{
   reportText:document.querySelector('.report-content')?.innerText,
   reportHTML:document.querySelector('.report-content')?.outerHTML,
   templateFields:[...document.querySelectorAll('.report-content [data-template-field]')].map(field=>({id:field.getAttribute('data-field-id'),text:field.textContent,filled:field.getAttribute('data-filled')})),
-  rendererErrors:errors,
- })).catch(captureError=>({syntheticTest:true,captureError:String(captureError),rendererErrors:errors}));
+ })).catch(captureError=>({syntheticTest:true,captureError:String(captureError)}));
+ failureDom.rendererErrors=errors;
  await writeFile(path.join(output,'v3-failed-dom.json'),JSON.stringify(failureDom,null,2));
  await writeFile(path.join(output,'v3-failed-dom.html'),`<!doctype html><meta charset="utf-8"><title>Synthetic Electron failure</title>${failureDom.reportHTML??'<p>report DOM unavailable</p>'}`);
  const annotationData=JSON.stringify({detail,activeReportId:failureDom.activeReportId,tabs:failureDom.tabs,fields:failureDom.templateFields,reportText:failureDom.reportText?.slice(0,4000),rendererErrors:failureDom.rendererErrors});
