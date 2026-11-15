@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   windows-editor:
@@ -21,6 +22,28 @@ jobs:
         working-directory: x-ray-report-studio
     steps:
       - uses: actions/checkout@v4
+      - name: Diagnose prior 0.4.66 unit failure from its actual log
+        if: github.ref_name == 'codex/xrs-ai-066'
+        shell: python
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          import io, os, re, urllib.request, zipfile
+          url='https://api.github.com/repos/002-421/-main/actions/runs/43732938624/logs'
+          try:
+              request=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GITHUB_TOKEN'],'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(request,timeout=90) as response: archive=zipfile.ZipFile(io.BytesIO(response.read()))
+              for name in archive.namelist():
+                  if 'Full unit suite' not in name: continue
+                  lines=archive.read(name).decode('utf-8','replace').splitlines()
+                  indices=[i for i,line in enumerate(lines) if re.search(r'not ok|✖|failing tests|AssertionError|ERR_ASSERTION',line)]
+                  selected=sorted({j for i in indices for j in range(max(0,i-2),min(len(lines),i+45))})
+                  detail='\n'.join(lines[j] for j in selected)[-25000:]
+                  if detail:
+                      escaped=detail.replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+                      print('::notice title=Historical unit failure::'+escaped)
+          except Exception as error:
+              print('::warning::Historical log retrieval unavailable: '+type(error).__name__)
       - uses: actions/setup-node@v4
         with:
           node-version: 24
