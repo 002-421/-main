@@ -7,6 +7,8 @@ const {compareVersions,isUpdateAvailable}=require('../electron/update-version.cj
 test('forward rollback release numbers are normal monotonic updates',()=>{
  assert.equal(compareVersions('0.4.55','0.4.54'),1);
  assert.equal(isUpdateAvailable('0.4.55','0.4.54'),true);
+ assert.equal(compareVersions('0.4.60','0.4.59'),1);
+ assert.equal(isUpdateAvailable('0.4.60','0.4.59'),true);
  assert.equal(isUpdateAvailable('0.4.53','0.4.54'),false);
  assert.equal(isUpdateAvailable('0.4.54','0.4.54'),false);
  assert.equal(isUpdateAvailable('0.4.x','0.4.54'),false);

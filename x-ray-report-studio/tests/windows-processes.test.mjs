@@ -38,7 +38,7 @@ async function readDiagnosticEvents(filename) {
 }
 
 function makeWorkerSource({ root, workerModule, stateModule }) {
-  const candidateRoot = path.join(root, 'Install', 'App_0.4.59');
+  const candidateRoot = path.join(root, 'Install', 'App_0.4.60');
   const candidateExecutable = path.join(candidateRoot, 'X-ray Report Studio.exe');
   return `
     const fs=require('node:fs/promises');const {app,shell}=require('electron');
@@ -50,7 +50,7 @@ function makeWorkerSource({ root, workerModule, stateModule }) {
         waitForProfileIdle:async()=>{},createUserDataBackup:async()=>{try{process.kill(c.parentPid,0);throw new Error('parent Electron process is still running');}catch(e){if(e.message==='parent Electron process is still running')throw e;}
           events.push('backup-after-parent-exit');await fs.writeFile(process.env.XRS_WORKER_EVENTS,JSON.stringify(events));return{files:1,bytes:20};},
         installUpdateArchive:async()=>({root:${JSON.stringify(candidateRoot)},executable:${JSON.stringify(candidateExecutable)}}),
-        smokeTestInstalledApp:async()=>({ready:true,version:'0.4.59'}),writeShortcutAtomically:async o=>fs.writeFile(o.shortcutPath,o.target),
+        smokeTestInstalledApp:async()=>({ready:true,version:'0.4.60'}),writeShortcutAtomically:async o=>fs.writeFile(o.shortcutPath,o.target),
         readShortcutTarget:async f=>fs.readFile(f,'utf8'),launchDetached:async()=>{events.push('candidate-launch');await fs.writeFile(process.env.XRS_WORKER_EVENTS,JSON.stringify(events));},
         log:async event=>{const safe={};for(const key of ['event','phase','operation','processState','errorCode','recoveryAction'])if(typeof event[key]==='string')safe[key]=event[key];await diag(safe);}});
       await fs.writeFile(process.env.XRS_WORKER_RESULT,JSON.stringify(result));
@@ -94,7 +94,7 @@ test('Windows CIM process query runs and confirms an idle synthetic install root
   }), false);
 });
 
-test('independent Electron updater waits for the real parent Electron process before profile backup', { skip: process.platform !== 'win32' }, async t => {
+test('independent Electron updater stages 0.4.60 from 0.4.59 after the real parent exits', { skip: process.platform !== 'win32' }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'xrs-independent-worker-'));
   const children = [];
   t.after(async () => {
@@ -104,8 +104,8 @@ test('independent Electron updater waits for the real parent Electron process be
   const testDir = path.dirname(fileURLToPath(import.meta.url));
   const electronExe = path.join(testDir, '..', 'node_modules', 'electron', 'dist', 'electron.exe');
   const parentApp = path.join(root, 'parent-app'), workerApp = path.join(root, 'worker-app');
-  const profile = path.join(root, 'Profile', 'MRI Report Studio'), installRoot = path.join(root, 'Install', 'App_0.4.58');
-  const cacheRoot = path.join(root, 'Cache'), archive = path.join(cacheRoot, 'XRS-0.4.59.zip');
+  const profile = path.join(root, 'Profile', 'MRI Report Studio'), installRoot = path.join(root, 'Install', 'App_0.4.59');
+  const cacheRoot = path.join(root, 'Cache'), archive = path.join(cacheRoot, 'XRS-0.4.60.zip');
   const marker = path.join(root, 'worker-events.json'), resultFile = path.join(root, 'worker-result.json');
   const diagnosticsFile = path.join(root, 'worker-diagnostics.jsonl'), parentReadyFile = path.join(root, 'parent-ready.json');
   const shortcutPath = path.join(root, 'Desktop', 'XRS.lnk'), logFile = path.join(profile, 'logs', 'update.log');
@@ -118,13 +118,13 @@ test('independent Electron updater waits for the real parent Electron process be
   await fs.writeFile(archive, 'synthetic verified archive');
   const sha256 = crypto.createHash('sha256').update(await fs.readFile(archive)).digest('hex');
   const installStateFile = path.join(profile, 'install-state.json'), dataSchemaFile = path.join(profile, 'data-schema.json');
-  await fs.writeFile(installStateFile, JSON.stringify({ status: 'stable', current: { version: '0.4.58', root: installRoot, executable: parentExe, dataSchemaVersion: 1 }, previous: null }));
+  await fs.writeFile(installStateFile, JSON.stringify({ status: 'stable', current: { version: '0.4.59', root: installRoot, executable: parentExe, dataSchemaVersion: 1 }, previous: null }));
   const config = {
     format: 'xrs-update-handoff', schemaVersion: 1, parentPid: 0, archive, cacheRoot, sha256,
-    version: '0.4.59', currentVersion: '0.4.58', currentRoot: installRoot, installationParent: path.dirname(installRoot),
+    version: '0.4.60', currentVersion: '0.4.59', currentRoot: installRoot, installationParent: path.dirname(installRoot),
     userDataDir: profile, sharedDictionaryFile: '', backupRoot: path.join(root, 'Backups'), allowedBackupRoot: root,
     installStateFile, dataSchemaFile, shortcutPath, logFile, resultFile,
-    handoffFile: path.join(cacheRoot, 'handoff.json'), previous: { version: '0.4.58', root: installRoot, executable: parentExe, dataSchemaVersion: 1 },
+    handoffFile: path.join(cacheRoot, 'handoff.json'), previous: { version: '0.4.59', root: installRoot, executable: parentExe, dataSchemaVersion: 1 },
   };
   const configFile = path.join(cacheRoot, 'handoff.json');
   const workerEntrypoint = path.join(workerApp, 'main.cjs');
@@ -185,7 +185,7 @@ test('independent Electron updater waits for the real parent Electron process be
     const stages = await readDiagnosticEvents(diagnosticsFile);
     throw new Error(`Electron worker exited with code ${workerExitCode} without writing its result (${error.code}); diagnostics: ${JSON.stringify(stages)}.`);
   }
-  assert.deepEqual(JSON.parse(workerResultText), { installed: true, version: '0.4.59' });
+  assert.deepEqual(JSON.parse(workerResultText), { installed: true, version: '0.4.60' });
   assert.deepEqual(JSON.parse(await fs.readFile(marker, 'utf8')), ['backup-after-parent-exit', 'candidate-launch']);
   assert.equal(await fs.readFile(path.join(profile, 'workspace.json'), 'utf8'), 'synthetic open document');
 });

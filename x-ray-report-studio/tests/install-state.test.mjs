@@ -52,6 +52,7 @@ test('0.4.59 can safely roll back to the confirmed 0.4.58 Stable data contract',
  assert.equal(applicationSupportsDataContract('0.4.57',CURRENT_DATA_CONTRACT,1),true);
  assert.equal(applicationSupportsDataContract('0.4.58',CURRENT_DATA_CONTRACT,1),true);
  assert.equal(applicationSupportsDataContract('0.4.59',CURRENT_DATA_CONTRACT,1),true);
+ assert.equal(applicationSupportsDataContract('0.4.60',CURRENT_DATA_CONTRACT,1),true);
  assert.equal(canRollback({installState,dataState:compatibleData,currentRoot}).available,true);
  assert.equal(canRollback({installState:{...installState,status:'pending-first-start'},dataState:compatibleData,currentRoot}).available,false);
 });

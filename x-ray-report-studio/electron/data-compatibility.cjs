@@ -17,6 +17,8 @@ const APPLICATION_DATA_CONTRACTS = Object.freeze({
   '0.4.57': Object.freeze([CURRENT_DATA_CONTRACT]),
   '0.4.58': Object.freeze([CURRENT_DATA_CONTRACT]),
   '0.4.59': Object.freeze([CURRENT_DATA_CONTRACT]),
+  // The 0.4.60 updater recovery release retains the same persisted profile contract.
+  '0.4.60': Object.freeze([CURRENT_DATA_CONTRACT]),
 });
 
 function applicationSupportsDataContract(applicationVersion, dataContract, schemaVersion = DATA_SCHEMA_VERSION) {

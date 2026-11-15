@@ -37,10 +37,12 @@ jobs:
           $isStable056 = $version -eq '0.4.56' -and $sourceRef -eq 'codex/xrs-056-stable-clean'
           $isUpdateHotfix = $sourceRef -eq 'codex/xrs-first-start-confirmation'
           $isUpdaterRecovery = $sourceRef -eq 'codex/xrs-updater-recovery'
+          $isUpdaterCandidate060 = $version -eq '0.4.60' -and $isUpdaterRecovery
           Add-Content -Path $env:GITHUB_OUTPUT -Value "beta=$($isBeta.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "stable056=$($isStable056.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updateHotfix=$($isUpdateHotfix.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updaterRecovery=$($isUpdaterRecovery.ToString().ToLowerInvariant())" -Encoding utf8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "updaterCandidate060=$($isUpdaterCandidate060.ToString().ToLowerInvariant())" -Encoding utf8
       - run: npm ci
       - name: Install pinned Electron runtime
         if: steps.release-channel.outputs.stable056 != 'true'
@@ -110,6 +112,49 @@ jobs:
           name: xrs-updater-recovery-windows-diagnostics-${{ github.run_id }}
           if-no-files-found: error
           path: ${{ runner.temp }}/xrs-updater-recovery-windows-tests.txt
+      - name: Build and verify unpublished Windows 0.4.60 candidate
+        if: steps.release-channel.outputs.updaterCandidate060 == 'true'
+        shell: pwsh
+        run: |
+          python scripts/package_windows.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/package_setup.py --candidate-output test-output/xrs-0.4.60
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify_setup_package.py --zip test-output/xrs-0.4.60/X-ray_Report_Studio_Windows_Setup.zip --source-electron electron --version 0.4.60
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $portable = 'release/X-ray_Report_Studio_Windows_x64.zip'
+          $setup = 'test-output/xrs-0.4.60/X-ray_Report_Studio_Windows_Setup.zip'
+          $portableCheck = @'
+          import json, zipfile
+          archive = zipfile.ZipFile(r'release/X-ray_Report_Studio_Windows_x64.zip')
+          assert archive.testzip() is None, 'portable ZIP integrity check failed'
+          names = set(archive.namelist())
+          root = 'X-ray Report Studio/'
+          required = [root + 'X-ray Report Studio.exe', root + 'resources/app/dist/index.html', root + 'resources/app/package.json', root + 'resources/app/electron/main.cjs', root + 'resources.pak', root + 'icudtl.dat']
+          missing = [name for name in required if name not in names]
+          assert not missing, 'portable ZIP is missing required runtime files: ' + ', '.join(missing)
+          package = json.loads(archive.read(root + 'resources/app/package.json'))
+          assert package.get('version') == '0.4.60', 'portable app version mismatch'
+          print('PORTABLE VERIFIED: version 0.4.60, Electron runtime and app payload present')
+          '@
+          python -c $portableCheck
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $portableHash = (Get-FileHash -Algorithm SHA256 $portable).Hash.ToLowerInvariant()
+          $setupHash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
+          Set-Content -Path 'test-output/xrs-0.4.60/SHA256SUMS.txt' -Value "$portableHash  X-ray_Report_Studio_Windows_x64.zip`n$setupHash  X-ray_Report_Studio_Windows_Setup.zip"
+          Write-Host "Portable ZIP SHA256: $portableHash"
+          Write-Host "Setup ZIP SHA256: $setupHash"
+          git diff --exit-code -- downloads/latest.json
+      - name: Upload unpublished Windows 0.4.60 candidate
+        if: steps.release-channel.outputs.updaterCandidate060 == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-0.4.60-windows-candidate
+          if-no-files-found: error
+          path: |
+            x-ray-report-studio/release/X-ray_Report_Studio_Windows_x64.zip
+            x-ray-report-studio/test-output/xrs-0.4.60/X-ray_Report_Studio_Windows_Setup.zip
+            x-ray-report-studio/test-output/xrs-0.4.60/SHA256SUMS.txt
       - name: Workspace recovery and tab isolation
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         shell: pwsh
