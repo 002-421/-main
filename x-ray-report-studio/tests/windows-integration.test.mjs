@@ -10,6 +10,11 @@ import { strToU8, zipSync } from 'fflate';
 import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
+const runElectronWorker = (executable, worker, options = {}) => execFileAsync(executable, [worker], {
+  timeout: 60_000,
+  windowsHide: true,
+  ...options,
+});
 const require = createRequire(import.meta.url);
 const { installUpdateArchive, writeShortcutAtomically } = require('../electron/update-install.cjs');
 const { createUserDataBackup, verifyUserDataBackup } = require('../electron/user-data-backup.cjs');
@@ -23,9 +28,8 @@ async function createWindowsShortcut(filename, { target, cwd, icon }) {
   const testDir = path.dirname(fileURLToPath(import.meta.url));
   const electronExe = path.join(testDir, '..', 'node_modules', 'electron', 'dist', 'electron.exe');
   const worker = path.join(testDir, 'windows-shortcut-worker.cjs');
-  await execFileAsync(electronExe, [worker], {
+  await runElectronWorker(electronExe, worker, {
     env: { ...process.env, XRS_SHORTCUT_PATH: filename, XRS_SHORTCUT_TARGET: target, XRS_SHORTCUT_CWD: cwd, XRS_SHORTCUT_ICON: icon },
-    windowsHide: true,
   });
   return true;
 }
@@ -71,7 +75,7 @@ test('Windows paths with spaces and Cyrillic keep old installs, atomically repla
   const testDir = path.dirname(fileURLToPath(import.meta.url));
   const electronExe = path.join(testDir, '..', 'node_modules', 'electron', 'dist', 'electron.exe');
   const worker = path.join(testDir, 'windows-shortcut-worker.cjs');
-  const { stdout } = await execFileAsync(electronExe, [worker], {
+  const { stdout } = await runElectronWorker(electronExe, worker, {
     env: { ...process.env, XRS_SHORTCUT_PATH: shortcut }, windowsHide: true,
   });
   const actualTarget = JSON.parse(stdout).target;
@@ -113,7 +117,7 @@ test('Windows .56 → .57 → .58 handoff and stale Stable-state recovery valida
     const testDir = path.dirname(fileURLToPath(import.meta.url));
     const electronExe = path.join(testDir, '..', 'node_modules', 'electron', 'dist', 'electron.exe');
     const worker = path.join(testDir, 'windows-shortcut-worker.cjs');
-    const { stdout } = await execFileAsync(electronExe, [worker], { env: { ...process.env, XRS_SHORTCUT_PATH: shortcut }, windowsHide: true });
+    const { stdout } = await runElectronWorker(electronExe, worker, { env: { ...process.env, XRS_SHORTCUT_PATH: shortcut } });
     return JSON.parse(stdout).target;
   };
   const canonicalTargetIs = async expected => {
