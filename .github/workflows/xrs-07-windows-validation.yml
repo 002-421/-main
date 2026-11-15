@@ -89,8 +89,27 @@ jobs:
         if: steps.release-channel.outputs.stable056 == 'true'
         run: node --test tests/update-channel.test.mjs tests/update-version.test.mjs tests/update-install.test.mjs tests/update-settings.test.mjs
       - name: Updater recovery and Windows process tests
+        id: updater-recovery-tests
         if: steps.release-channel.outputs.updaterRecovery == 'true'
-        run: node --test tests/update-worker.test.mjs tests/windows-processes.test.mjs tests/user-data-backup.test.mjs tests/update-install.test.mjs tests/log-safety.test.mjs tests/update-settings.test.mjs tests/update-confirmation.test.mjs tests/windows-integration.test.mjs
+        shell: pwsh
+        run: |
+          $diagnostic = Join-Path $env:RUNNER_TEMP 'xrs-updater-recovery-windows-tests.txt'
+          node --test tests/update-worker.test.mjs tests/windows-processes.test.mjs tests/user-data-backup.test.mjs tests/update-install.test.mjs tests/log-safety.test.mjs tests/update-settings.test.mjs tests/update-confirmation.test.mjs tests/windows-integration.test.mjs 2>&1 | Tee-Object -FilePath $diagnostic
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '## Updater recovery Windows test diagnostics' -Encoding utf8
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```text' -Encoding utf8
+            Get-Content -LiteralPath $diagnostic | Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding utf8
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```' -Encoding utf8
+            exit $testExit
+          }
+      - name: Upload updater recovery Windows diagnostics
+        if: always() && steps.updater-recovery-tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-updater-recovery-windows-diagnostics-${{ github.run_id }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/xrs-updater-recovery-windows-tests.txt
       - name: Workspace recovery and tab isolation
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         shell: pwsh
