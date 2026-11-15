@@ -11,8 +11,8 @@ try {
   const page=await browser.newPage(), external=[];
   page.on('request',request=>{if(!request.url().startsWith(`http://127.0.0.1:${server.address().port}/`))external.push(request.url());});
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await page.locator('#ai-review-open').waitFor();
-  assert.equal(await page.locator('[data-ai-category],#ai-mode,.ai-review-panel').count(),0,'no category controls or review panel');
+  await page.locator('#ai-review-status').waitFor({state:'attached'});
+  assert.equal(await page.locator('[data-ai-category],#ai-mode,.ai-review-panel,#ai-review-open,#proof-toggle,#check-now').count(),0,'no category controls or review panel');
   // The app persists the old report during beforeunload, so inject the synthetic
   // fixture into the next page's workspace read instead of racing that save.
   await page.addInitScript(()=>{
@@ -26,7 +26,7 @@ try {
     };
   });
   await page.reload();
-  await page.waitForFunction(()=>!document.querySelector('#ai-review-open')?.hasAttribute('aria-busy')&&Boolean(document.querySelector('#ai-review-status')?.textContent));
+  await page.waitForFunction(()=>!document.querySelector('#ai-review-status')?.hasAttribute('aria-busy')&&Boolean(document.querySelector('#ai-review-status')?.textContent));
   const marks=page.locator('.ai-review-underline').filter({hasText:'СИНТЕТИЧЕСКИЙ_МАРКЕР'});
   await marks.first().waitFor({state:'visible',timeout:5000});
   assert.equal(await page.locator('.ai-review-card').count(),0);
@@ -58,17 +58,15 @@ try {
   assert.equal(state.doc,storedDocBeforeReject,'review decorations and rejection do not persist into the report document');
   assert.ok(!state.doc.includes('ai-review-underline'));
   assert.ok(!state.keys.some(key=>key.includes('patient-name')));
-  await page.locator('#ai-review-open').click();
-  await page.waitForFunction(()=>!document.querySelector('#ai-review-open')?.hasAttribute('aria-busy')&&Boolean(document.querySelector('#ai-review-status')?.textContent));
+  await page.waitForFunction(()=>!document.querySelector('#ai-review-status')?.hasAttribute('aria-busy')&&Boolean(document.querySelector('#ai-review-status')?.textContent));
   assert.equal(await page.locator('.ai-review-underline').filter({hasText:'СИНТЕТИЧЕСКИЙ_МАРКЕР'}).count(),0,'rejected unchanged finding stays dismissed for this open document');
-  await page.locator('#ai-review-open').click();
-  await page.waitForFunction(()=>!document.querySelector('#ai-review-open')?.hasAttribute('aria-busy')&&Boolean(document.querySelector('#ai-review-status')?.textContent));
+  await page.waitForFunction(()=>!document.querySelector('#ai-review-status')?.hasAttribute('aria-busy')&&Boolean(document.querySelector('#ai-review-status')?.textContent));
   const firstTab=await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1')).activeId);
   await page.locator('[data-report-select="synthetic-tab-2"]').click();
   await page.locator('.ai-review-underline').filter({hasText:'СИНТЕТИЧЕСКИЙ_МАРКЕР'}).first().waitFor();
   assert.ok(await page.locator('.ai-review-underline').filter({hasText:'СИНТЕТИЧЕСКИЙ_МАРКЕР'}).count(),'other document has independent rejection state');
   await page.locator(`[data-report-select="${firstTab}"]`).click();
-  await page.waitForFunction(()=>Boolean(document.querySelector('#ai-review-status')?.textContent)&&!document.querySelector('#ai-review-open').hasAttribute('aria-busy'));
+  await page.waitForFunction(()=>Boolean(document.querySelector('#ai-review-status')?.textContent)&&!document.querySelector('#ai-review-status').hasAttribute('aria-busy'));
   assert.equal(await page.locator('.ai-review-underline').filter({hasText:'СИНТЕТИЧЕСКИЙ_МАРКЕР'}).count(),0,'rejection stays scoped to first document');
   const punctuation=page.locator('.ai-review-underline.ai-review-punctuation').first();
   await punctuation.waitFor({state:'visible',timeout:5000});
@@ -81,8 +79,7 @@ try {
   await page.keyboard.press('Control+y');
   assert.match(await page.locator('.report-content').innerText(),/Ошибкка ТЕСТ/,'Redo restores accepted spacing correction');
   await page.keyboard.press('Control+z');
-  await page.locator('#ai-review-open').click();
-  await page.waitForFunction(()=>!document.querySelector('#ai-review-open')?.hasAttribute('aria-busy')&&Boolean(document.querySelector('#ai-review-status')?.textContent));
+  await page.waitForFunction(()=>!document.querySelector('#ai-review-status')?.hasAttribute('aria-busy')&&Boolean(document.querySelector('#ai-review-status')?.textContent));
   const spelling=page.locator('.ai-review-underline.ai-review-spelling').filter({hasText:'Ошибкка'});
   await spelling.first().waitFor({state:'visible',timeout:5000});
   await spelling.first().click();
@@ -97,7 +94,7 @@ try {
   await page.locator('#save-dictionary').click();
   assert.ok(!(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-report-studio.dictionary.v1')||'[]').includes('ошибкка'))),'user can remove a remembered term');
   await page.reload();
-  await page.locator('#ai-review-open').waitFor();
+  await page.locator('#ai-review-status').waitFor({state:'attached'});
   assert.ok(!(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-report-studio.dictionary.v1')||'[]').includes('ошибкка'))),'dictionary deletion survives restart');
   await page.locator('[data-section-id="description"]').first().evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el.firstElementChild);range.collapse(false);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
   await page.keyboard.type(' Ошибкка', {delay:20});

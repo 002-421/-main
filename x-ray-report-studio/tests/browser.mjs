@@ -62,7 +62,7 @@ async function waitForCalculatorKeyboardFocus(){await page.waitForFunction(()=>{
 async function saveWord(name){
  const filePath=path.join(output,name);await rm(filePath,{force:true});
  await application.evaluate(({session},dest)=>session.defaultSession.once('will-download',(_event,item)=>item.setSavePath(dest)),filePath);
- await page.locator('#save-docx').click();
+ await page.locator('#save-menu-toggle').click();assert.equal(await page.locator('#save-menu-toggle').getAttribute('aria-expanded'),'true');assert.equal(await page.locator('#export-pdf').isVisible(),true);await page.locator('#save-docx').click();assert.equal(await page.locator('#save-menu-items').isVisible(),false);
  assert.ok(await page.locator('.paged-preview-frame iframe, .preview-page').count(),'paginated preview opens before Word export');
  await page.locator('#preview-save-word').click();
  if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
@@ -220,7 +220,7 @@ try{
  assert.match(clip.text,/Тестовый Пациент/);assert.match(clip.html,/Arial/);
  const pdfPath=path.join(output,'v3-native.pdf');
  await application.evaluate(({dialog},filePath)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath});},pdfPath);
- await page.locator('#export-pdf').click();await page.locator('#preview-save-pdf').click();if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
+ await page.locator('#save-menu-toggle').click();await page.locator('#export-pdf').click();await page.locator('#preview-save-pdf').click();if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
  await page.getByRole('status').filter({hasText:'PDF сохранён'}).waitFor({timeout:30000});
  assert.equal((await readFile(pdfPath)).subarray(0,5).toString(),'%PDF-');
  console.log('PASS: formatted clipboard and actual desktop PDF export.');
@@ -318,20 +318,20 @@ try{
  const insertedField=page.locator('[data-template-field][data-hint="Описание участка"]').first();await insertedField.waitFor();
  await fillField(await insertedField.getAttribute('data-field-id'),'Иследование. Очаг очаг не выявлен.');
  assert.match(await insertedField.innerText(),/Иследование/);
- await page.locator('#ai-review-open').click();
- await page.waitForFunction(()=>document.querySelector('#ai-review-status')?.textContent?.includes('Проверка недоступна'));
+ await page.waitForFunction(()=>document.querySelector('#ai-review-status')?.textContent?.includes('Не удалось определить границы'));
  assert.equal(await page.locator('.ai-review-underline').count(),0,'ambiguous inserted content outside verified sections has no unsafe review ranges');
  assert.equal(await insertedField.innerText(),'Иследование. Очаг очаг не выявлен.','ambiguous report review leaves the text intact');
- // Correct manually inside the existing filled field; full-field replacement intentionally removes its template mark.
- await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.setStart(el.firstChild,1);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
- await page.keyboard.insertText('с');
- await insertedField.evaluate(el=>{const text=el.firstChild,offset=text.textContent.indexOf('очаг ');if(offset<0)throw new Error('Synthetic repeated word missing');const range=document.createRange();range.setStart(text,offset);range.setEnd(text,offset+5);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
- await page.keyboard.press('Backspace');
- assert.equal(await insertedField.innerText(),'Исследование. Очаг не выявлен.');
+ assert.equal(await page.locator('#ai-migrate-open').isVisible(),true,'manual boundary help is offered for ambiguous sections');
+ await page.locator('#ai-migrate-open').click();
+ assert.equal(await page.locator('[role=dialog] h2').innerText(),'Границы AI Review');
+ await page.locator('[role=dialog] [data-close]').first().click();
+ assert.equal(await insertedField.innerText(),'Иследование. Очаг очаг не выявлен.','cancelling boundary help preserves the report');
+ await insertedField.click();await page.keyboard.press('End');await page.keyboard.insertText('!');
+ assert.match(await insertedField.innerText(),/!/, 'editing remains available after closing boundary help');await page.keyboard.press('Backspace');
  await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();
  assert.equal(await page.locator('#highlight-yellow').getAttribute('aria-pressed'),'true');assert.match(await page.locator('.toast').textContent(),/залит жёлтым/);assert.equal(await page.locator('.report-content').evaluate(el=>el.classList.contains('show-yellow-selection')),true);
- assert.ok((await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Исследование. Очаг не выявлен.')),'yellow text highlighter can be applied');
- await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();assert.ok(!(await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Исследование. Очаг не выявлен.')),'yellow text highlighter can be removed from the selected text');
+ assert.ok((await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')),'yellow text highlighter can be applied');
+ await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();assert.ok(!(await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')),'yellow text highlighter can be removed from the selected text');
  assert.match(await page.locator('.report-content strong').allTextContents().then(t=>t.join(' ')),/ЗАКЛЮЧЕНИЕ/);
  console.log('PASS: searchable previews and insertion, live spelling/grammar corrections and existing report formatting.');
  await insertedField.click();await page.keyboard.press('Control+End');
@@ -340,7 +340,7 @@ try{
  assert.equal(await repeated.count(),2);
  assert.notEqual(await repeated.nth(0).getAttribute('data-field-id'),await repeated.nth(1).getAttribute('data-field-id'));
  assert.equal(await repeated.nth(1).getAttribute('data-filled'),'false');
- assert.equal(await insertedField.innerText(),'Исследование. Очаг не выявлен.');
+ assert.equal(await insertedField.innerText(),'Иследование. Очаг очаг не выявлен.');
 
  await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
  await page.locator('#save-selection').click();await page.locator('#block-title').fill('Сохранённый формат');await page.locator('#block-tags').fill('формат');await page.locator('#confirm-block').click();

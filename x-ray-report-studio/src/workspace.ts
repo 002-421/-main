@@ -56,10 +56,12 @@ type Block = {id:string;title:string;areaId:string;tags:string;doc:RichNode;cust
 type OpenReport = {id:string;templateId:string;doc:RichNode;dirty:boolean};
 type StoredReportView = {selection:Record<string,unknown>;scrollTop:number};
 type StoredReportHistoryRecord = {fingerprint:string;history:StoredReportHistory;view?:StoredReportView};
-type Settings = {doctor:string;doctors:string[];logo:string;doctorStamps:Record<string,string>;doctorStampSizes:Record<string,{width:number;height:number}>;doctorStampHeights:Record<string,number>;doctorStampPositions:Record<string,{x:number;y:number}>;liveProof:boolean;theme:'light'|'dark';zoom:number;historyDepth:ReportHistoryDepth};
+type Settings = {doctor:string;doctors:string[];logo:string;doctorStamps:Record<string,string>;doctorStampSizes:Record<string,{width:number;height:number}>;doctorStampHeights:Record<string,number>;doctorStampPositions:Record<string,{x:number;y:number}>;theme:'light'|'dark';zoom:number;historyDepth:ReportHistoryDepth};
 const read = <T>(key:string,fallback:T):T => { try { return JSON.parse(localStorage.getItem(key) ?? 'null') ?? fallback; } catch { return fallback; } };
 function documentFingerprint(doc:RichNode):string { const value=JSON.stringify(doc);let hash=0x811c9dc5;for(let i=0;i<value.length;i++){hash^=value.charCodeAt(i);hash=Math.imul(hash,0x01000193);}return `${(hash>>>0).toString(16)}:${value.length}`; }
-let settings:Settings = {...{doctor:'',doctors:[],logo:'',doctorStamps:{},doctorStampSizes:{},doctorStampHeights:{},doctorStampPositions:{},liveProof:true,theme:'light',zoom:100,historyDepth:500 as ReportHistoryDepth},...read<Partial<Settings>>(KEYS.settings,{})};
+const storedSettings=read<Partial<Settings>&{liveProof?:boolean}>(KEYS.settings,{});
+const {liveProof:_legacyLiveProof,...currentSettings}=storedSettings;
+let settings:Settings = {...{doctor:'',doctors:[],logo:'',doctorStamps:{},doctorStampSizes:{},doctorStampHeights:{},doctorStampPositions:{},theme:'light',zoom:100,historyDepth:500 as ReportHistoryDepth},...currentSettings};
 delete (settings as Settings & {autoUpdate?:unknown;lastAutoUpdateCheckAt?:unknown}).autoUpdate;
 delete (settings as Settings & {autoUpdate?:unknown;lastAutoUpdateCheckAt?:unknown}).lastAutoUpdateCheckAt;
 if(!REPORT_HISTORY_DEPTHS.includes(settings.historyDepth))settings.historyDepth=500;
@@ -178,13 +180,13 @@ $('#app').innerHTML=`<div class="shell">
   <div class="side-bottom"><button id="settings">⚙ Врач и настройки</button><small>Локальная работа · версия <span id="application-version">${esc(packageInfo.version)}</span></small></div>
  </aside>
  <main class="main">
-  <header class="topbar"><div class="document-heading"><span class="eyebrow">Редактор описаний</span><strong id="document-name">Новое описание</strong><small id="save-state">Сохранено на компьютере</small></div><div class="top-actions"><button id="toggle-sidebar" class="btn icon-button" title="Показать меню">☰</button><button id="toggle-theme" class="btn" type="button" aria-pressed="false">☾ Тёмная тема</button><button id="new-report" class="btn">＋ Заключение</button><button id="open-report" class="btn">Открыть</button><button id="copy-report" class="btn">Копировать</button><button id="preview-report" class="btn">Предпросмотр</button><button id="save-docx" class="btn primary">Сохранить Word</button><button id="export-pdf" class="btn">PDF</button></div></header>
+  <header class="topbar"><div class="document-heading"><span class="eyebrow">Редактор описаний</span><strong id="document-name">Новое описание</strong><small id="save-state">Сохранено на компьютере</small></div><div class="top-actions"><button id="toggle-sidebar" class="btn icon-button" title="Показать меню">☰</button><button id="toggle-theme" class="btn" type="button" aria-pressed="false">☾ Тёмная тема</button><button id="new-report" class="btn">＋ Заключение</button><button id="open-report" class="btn">Открыть</button><button id="copy-report" class="btn">Копировать</button><button id="preview-report" class="btn">Предпросмотр</button><div class="save-menu"><button id="save-menu-toggle" class="btn primary" type="button" aria-expanded="false" aria-controls="save-menu-items">Сохранить</button><div id="save-menu-items" class="save-menu-items" hidden><button id="save-docx" class="btn" type="button">Word (.docx)</button><button id="export-pdf" class="btn" type="button">PDF (.pdf)</button></div></div></div></header>
   <nav id="report-tabs" class="report-tabs" aria-label="Открытые заключения"></nav>
   <div class="ribbon" role="toolbar" aria-label="Форматирование описания"><div class="tool-group"><button data-command="undo" title="Отменить (Ctrl+Z)">↶</button><button data-command="redo" title="Повторить (Ctrl+Y)">↷</button></div><div class="tool-group"><select id="font-family" aria-label="Шрифт"><option>DejaVu Sans</option><option selected>Arial</option><option>Times New Roman</option><option>Calibri</option></select><select id="font-size" aria-label="Размер шрифта">${[8,9,10,11,12,14,16,18,21,24].map(s=>`<option value="${s}" ${s===12?'selected':''}>${s}</option>`).join('')}</select></div><div class="tool-group"><button data-command="bold" title="Полужирный"><b>Ж</b></button><button data-command="italic" title="Курсив"><i>К</i></button><button data-command="underline" title="Подчёркнутый"><u>Ч</u></button><button data-command="strike" title="Зачёркнутый"><s>А</s></button><input type="color" id="text-color" title="Цвет текста" value="#172c40"><button id="highlight-yellow" title="Нанести жёлтую заливку на выделенный текст" aria-label="Жёлтая заливка текста" aria-pressed="false">🖍 Заливка</button></div><div class="tool-group"><button data-align="left" title="По левому краю">≡</button><button data-align="center" title="По центру">≡</button><button data-align="right" title="По правому краю">≡</button><button data-align="justify" title="По ширине">По ширине</button><button data-command="bulletList" title="Маркированный список">• ☰</button><button data-command="orderedList" title="Нумерованный список">1. ☰</button><button id="table-tools" title="Вставить или изменить таблицу">▦</button></div><div class="tool-group"><label class="line-height-control" for="line-height">Интервал <select id="line-height" aria-label="Межстрочный интервал"><option value="1">1</option><option value="1.05">1,05</option><option value="1.15">1,15</option><option value="1.2">1,2</option><option value="1.5">1,5</option><option value="2">2</option></select></label><button id="insert-field" title="Вставить редактируемое поле">＋ Поле</button><button id="insert-size" title="Размер (фронтальный/сагиттальный/вертикальный)">＋ Размер</button></div></div>
   <div id="template-banner" class="template-banner hidden"><div><strong>Редактирование шаблона</strong><small>Правки будут применяться к новым описаниям. Текущий документ сохранён.</small></div><div><button id="reset-template" class="btn">Исходный шаблон</button><button id="cancel-template" class="btn">Отмена</button><button id="save-template" class="btn primary">Сохранить шаблон</button></div></div>
-  <div class="document-tools"><div><button id="next-field" class="chip">Следующее поле <span id="empty-count"></span></button><button id="review-unchanged" class="chip" aria-pressed="false" title="Показать поля и фрагменты, оставшиеся как в шаблоне">Подсветить неизменённое</button><button id="sticky-note-open" class="chip" title="Открыть заметку">Заметка</button><button id="calculator" class="chip" title="Открыть калькулятор" aria-haspopup="dialog">Калькулятор</button></div><div><button id="proof-toggle" class="chip active" aria-pressed="true">✓ Проверка текста</button><button id="check-now" class="chip" title="Повторить проверку (F7)">Проверить сейчас</button><label class="zoom-control" title="Масштаб редактора"><span>Масштаб</span><input id="zoom" type="range" min="75" max="150" step="5" value="100" aria-label="Масштаб редактора"><output id="zoom-value">100%</output></label></div></div>
+  <div class="document-tools"><div><button id="next-field" class="chip">Следующее поле <span id="empty-count"></span></button><button id="review-unchanged" class="chip" aria-pressed="false" title="Показать поля и фрагменты, оставшиеся как в шаблоне">Подсветить неизменённое</button><button id="sticky-note-open" class="chip" title="Открыть заметку">Заметка</button><button id="calculator" class="chip" title="Открыть калькулятор" aria-haspopup="dialog">Калькулятор</button></div><div><label class="zoom-control" title="Масштаб редактора"><span>Масштаб</span><input id="zoom" type="range" min="75" max="150" step="5" value="100" aria-label="Масштаб редактора"><output id="zoom-value">100%</output></label></div></div>
   <div class="canvas" id="canvas"><div class="page-meta"><span id="template-name"></span><span>A4 · оформление исходного шаблона</span></div><article class="paper"><div id="editor"></div></article></div>
-  <footer class="statusbar"><span id="status-left">Данные сохраняются на этом компьютере</span><span id="proof-status">Проверка текста…</span><span id="word-count"></span></footer>
+  <footer class="statusbar"><span id="status-left">Данные сохраняются на этом компьютере</span><span id="word-count"></span></footer>
  </main></div><input type="file" id="report-file" accept=".docx,.json,.mri.json" hidden><input type="file" id="template-file" accept=".docx" hidden><input type="file" id="doctor-stamp-file" accept="image/png,image/jpeg,.jpg,.jpeg" hidden>`;
 
 function applyTheme() {
@@ -197,7 +199,7 @@ function applyTheme() {
 applyTheme();
 function renderBrand() { $('#brand-image').innerHTML='<span class="brand-text"><strong>X-ray <em>Report</em> Studio</strong></span>'; }
 renderBrand();
-const editor=makeEditor($('#editor'),initial,{getPersonalWords:()=>personalWords,onProofStatus:status=>{const el=document.querySelector('#proof-status');if(el)el.textContent=status.error?`Проверка: ${status.error}`:!status.enabled?'Проверка выключена':status.checking?'Проверка текста…':status.count?`Замечаний: ${status.count} · нажмите подчёркнутый текст`:'Орфография и базовая грамматика: замечаний нет';}});
+const editor=makeEditor($('#editor'),initial,{getPersonalWords:()=>personalWords});
 restoreReportHistory(editor.view,historyByReport[activeReportId]?.history);
 restoreReportView(historyByReport[activeReportId]?.view);
 function runHistoryCommand(direction:'undo'|'redo'){
@@ -318,10 +320,8 @@ function dialog(title:string,body:string,footer='') {closeDialog();const overlay
 function closeDialog(){$('.dialog-overlay')?.remove();}
 // Experimental local prototype. Existing user documents are never migrated automatically.
 {
-  const trigger=document.createElement('button');
-  trigger.className='btn';trigger.textContent='AI Review — Проверить повторно';trigger.id='ai-review-open';
-  document.querySelector('.top-actions')?.append(trigger);
-  const migrateButton=document.createElement('button');migrateButton.className='btn';migrateButton.id='ai-migrate-open';migrateButton.textContent='Границы протокола';document.querySelector('.top-actions')?.append(migrateButton);
+  const status=document.createElement('small');status.id='ai-review-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');document.querySelector('.document-heading')?.append(status);
+  const migrateButton=document.createElement('button');migrateButton.className='btn small';migrateButton.id='ai-migrate-open';migrateButton.textContent='Уточнить границы';migrateButton.hidden=true;status.after(migrateButton);
   const savedMigrationMatches=(tabId:string,doc:RichNode)=>{try{const stored=JSON.parse(localStorage.getItem(KEYS.workspace)??'null');return stored?.activeId===tabId&&JSON.stringify(stored.reports?.find((r:OpenReport)=>r.id===tabId)?.doc)===JSON.stringify(doc);}catch{return false;}};
   const showMigration=()=>{
     if(templateMode){toast('Завершите редактирование шаблона.',true);return;}
@@ -443,30 +443,28 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
   editorRoot.addEventListener('focusout',event=>{const to=(event as FocusEvent).relatedTarget as Node|null;if(!to||!editorRoot.contains(to))setAiReviewFocusedSpan(undefined);});
   setAiReviewKeyboardHandler(span=>openCard(span));
   document.addEventListener('keydown',event=>{const e=event as KeyboardEvent,target=e.target as HTMLElement;if(e.key==='Escape'&&card&&(editorRoot.contains(document.activeElement)||card.contains(target))){e.preventDefault();closeCard();}},true);
-  const status=document.createElement('small');status.id='ai-review-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');trigger.after(status);
   let reviewTimer=0, reviewGeneration=0;
   let reviewAbort:AbortController|undefined;
   const runReview=async()=>{
     clearTimeout(reviewTimer);reviewAbort?.abort();const abort=new AbortController();reviewAbort=abort;
     const generation=++reviewGeneration,reportId=activeReportId,snapshot=JSON.stringify(json());
-    status.textContent='Проверка…';trigger.setAttribute('aria-busy','true');
+    status.textContent='Проверка…';status.setAttribute('aria-busy','true');migrateButton.hidden=true;
     try{
       const result=await new ReviewEngine(new LocalAIProvider(undefined,()=>personalWords)).review(json(),new Set(reviewCategories.map(([id])=>id)),abort.signal);
       if(abort.signal.aborted||generation!==reviewGeneration||reportId!==activeReportId||snapshot!==JSON.stringify(json()))return;
       tracks.set(reportId,result.suggestions);const rejected=rejectedReviewKeys.get(reportId)??new Set<string>();
       findings=result.suggestions.filter(item=>!rejected.has(reviewRejectionKey(item,result.blocks)));reviewedBlocks=result.blocks;reviewedReport=reportId;
       renderDecorations();status.textContent=findings.length?`Замечаний: ${findings.length}`:'Замечаний не найдено';
-    }catch{if(!abort.signal.aborted)status.textContent='Проверка недоступна. Повторите проверку.';}
-    finally{if(generation===reviewGeneration)trigger.removeAttribute('aria-busy');}
+    }catch(error){if(!abort.signal.aborted){const boundaries=/границ|структур|формат документа|пустой разрешённый блок/i.test((error as Error)?.message??'');status.textContent=boundaries?'Не удалось определить границы протокола.':'Проверка недоступна.';migrateButton.hidden=!boundaries;}}
+    finally{if(generation===reviewGeneration)status.removeAttribute('aria-busy');}
   };
   const scheduleReview=()=>{
     reviewAbort?.abort();reviewGeneration++;clearTimeout(reviewTimer);findings=[];reviewedBlocks=undefined;closeCard();setAiReviewDecorations(editor,[]);
-    status.textContent='';reviewTimer=window.setTimeout(()=>void runReview(),650);
+    status.textContent='';migrateButton.hidden=true;reviewTimer=window.setTimeout(()=>void runReview(),650);
   };
   editor.on('update',scheduleReview);
   // setContent on tab changes can suppress update events; docChanged also catches it.
   editor.on('transaction',({transaction})=>{if(transaction.docChanged)scheduleReview();});
-  trigger.onclick=()=>void runReview();
   document.addEventListener('xrs-dictionary-changed',scheduleReview);
   scheduleReview();
 
@@ -511,9 +509,6 @@ $('#next-field').onclick=nextField;
 $('#calculator').onclick=calculatorDialog;
 $('#sticky-note-open').onclick=openStickyNote;
 $('#review-unchanged').onclick=()=>{review=!review;setReviewHighlights(editor,review);$('#review-unchanged').classList.toggle('active',review);$('#review-unchanged').setAttribute('aria-pressed',String(review));renderCounts();if(review)toast('Подсвечены незаполненные поля и фрагменты, совпадающие с исходным шаблоном. Подсветка не попадает в Word и PDF.');};
-$('#proof-toggle').hidden=true;$('#check-now').hidden=true;
-$('#proof-toggle').onclick=()=>{settings.liveProof=!settings.liveProof;setLiveProofreading(editor,false);$('#proof-toggle').classList.toggle('active',settings.liveProof);$('#proof-toggle').setAttribute('aria-pressed',String(settings.liveProof));persistSettings();};
-$('#check-now').onclick=()=>refreshProofreading(editor);
 function applyZoom(save=true){const level=Number(($('#zoom') as HTMLInputElement).value);$('.paper').style.zoom=String(level/100);$('#zoom-value').textContent=`${level}%`;if(save){settings.zoom=level;persistSettings();}}
 ($('#zoom') as HTMLInputElement).value=String(settings.zoom);applyZoom(false);$('#zoom').oninput=()=>applyZoom();
 $('#insert-size').onmousedown=e=>e.preventDefault();
@@ -621,7 +616,12 @@ window.desktop?.onWordSaved?.(url=>{const pending=pendingWordSaves.get(url);if(p
 function download(blob:Blob,name:string,savedReport?:{id:string;snapshot:string}){const url=URL.createObjectURL(blob),a=document.createElement('a');if(savedReport&&window.desktop)pendingWordSaves.set(url,savedReport);a.href=url;a.download=name;a.click();if(savedReport&&!window.desktop)markReportExported(savedReport.id,savedReport.snapshot);setTimeout(()=>{URL.revokeObjectURL(url);pendingWordSaves.delete(url);},300000);}
 function confirmYellowExport(continueExport:()=>void){if(!hasYellowFields(json()))return true;const d=dialog('В описании осталась жёлтая заливка','<p class="yellow-export-warning-text">Остались незаполненные поля или фрагменты с жёлтой заливкой. Они попадут в сохранённый документ.</p><p>Проверьте описание или сохраните текущий вариант.</p>','<button class="btn" data-close>Вернуться к описанию</button><button class="btn primary" id="continue-yellow-export">Сохранить всё равно</button>');d.querySelector('.dialog')!.classList.add('yellow-export-warning');d.querySelector('#continue-yellow-export')!.addEventListener('click',()=>{closeDialog();continueExport();});return false;}
 async function saveWord(confirmed=false){if(!confirmed&&!confirmYellowExport(()=>void saveWord(true)))return;const button=$('#save-docx') as HTMLButtonElement;if(button.disabled)return;button.disabled=true;try{if(!templateMode)saveLocal();const savedReport={id:activeReportId,snapshot:JSON.stringify(json())};const doc=exportDocument(),name=filename('.docx');const fonts=await embeddedFonts();const blob=await exportDocx(doc,{profile:profileForTemplate(),templateId:activeTemplateId,fonts,kind:templateMode?'template':'report'});download(blob,name,savedReport);toast('Документ Word подготовлен для сохранения.');}catch(e){toast(`Не удалось сохранить Word: ${(e as Error).message}`,true);}finally{button.disabled=false;}}
-$('#save-docx').onclick=previewReport;$('#open-report').onclick=()=>($('#report-file') as HTMLInputElement).click();
+const saveMenu=$('#save-menu-items');const saveMenuToggle=$('#save-menu-toggle');
+function closeSaveMenu(){saveMenu.hidden=true;saveMenuToggle.setAttribute('aria-expanded','false');}
+saveMenuToggle.onclick=()=>{saveMenu.hidden=!saveMenu.hidden;saveMenuToggle.setAttribute('aria-expanded',String(!saveMenu.hidden));};
+document.addEventListener('click',event=>{if(!(event.target as HTMLElement).closest('.save-menu'))closeSaveMenu();});
+saveMenu.addEventListener('keydown',event=>{if(event.key==='Escape'){closeSaveMenu();saveMenuToggle.focus();event.stopPropagation();}});
+$('#save-docx').onclick=()=>{closeSaveMenu();previewReport();};$('#open-report').onclick=()=>($('#report-file') as HTMLInputElement).click();
 $('#export-template-docx').onclick=async()=>{
  if(templateMode){toast('Сначала завершите редактирование текущего шаблона.',true);return;}
  try{
@@ -731,10 +731,10 @@ async function printPDF(confirmed=false){
  const cleanupExport=mountExportEditor();
  try{if(window.desktop){const r=await window.desktop.exportPDF(filename('.pdf'));if(!r.canceled){markReportExported(savedReport.id,savedReport.snapshot);toast('PDF сохранён.');}}else{const printStyle=document.createElement('style');printStyle.textContent=`@media print{@page{size:A4;margin:43mm 18mm 27mm;@bottom-center{content:"Данное заключение не является диагнозом и должно быть интерпретировано лечащим врачом на основании клинико-лабораторных данных и других диагностических исследований\\A Исследование выполнено на томографе, указанном в протоколе";white-space:pre-line;text-align:center;font:8px Arial,sans-serif;color:#64748b}@bottom-right{content:counter(page);font:9pt Arial,sans-serif;color:#000}}}`;document.head.append(printStyle);const old=document.title;document.title=filename('');try{window.print();}finally{document.title=old;printStyle.remove();}}}catch(e){toast(`Не удалось сохранить PDF: ${(e as Error).message}`,true);}finally{cleanupExport();}}
 function requestPdfExport(){void printPDF();}
-$('#export-pdf').onclick=previewReport;
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeDialog();clearProofPopup();$('.sidebar').classList.remove('open');}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();if(templateMode)finishTemplate(true);else previewReport();}if(e.key==='F7'){e.preventDefault();refreshProofreading(editor);}if(e.key==='F2'){e.preventDefault();nextField();}});
+$('#export-pdf').onclick=()=>{closeSaveMenu();previewReport();};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeSaveMenu();closeDialog();clearProofPopup();$('.sidebar').classList.remove('open');}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();if(templateMode)finishTemplate(true);else previewReport();}if(e.key==='F2'){e.preventDefault();nextField();}});
 window.addEventListener('beforeunload',()=>{if(!templateMode)saveLocal();});
 ($('#modality-select') as HTMLSelectElement).value=modalityForTemplate();renderTemplates();renderBlocks();renderCounts();renderReportTabs();
-$('#proof-toggle').classList.toggle('active',settings.liveProof);$('#proof-toggle').setAttribute('aria-pressed',String(settings.liveProof));
+
 if(recoveryError)toast('Предыдущий черновик не удалось восстановить. Можно открыть сохранённый Word.',true);
 const readyShell=document.querySelector<HTMLElement>('#app .shell');const readyStyle=readyShell?getComputedStyle(readyShell):null;const readyBounds=readyShell?.getBoundingClientRect();const refreshApplicationVersion=()=>void window.desktop?.getApplicationVersion().then(version=>{const versionLabel=document.querySelector('#application-version');if(versionLabel)versionLabel.textContent=version;}).catch(()=>{});window.desktop?.reportReady({appRoot:Boolean(readyShell),templateCount:reportTemplates.length,viewport:{width:innerWidth,height:innerHeight},shell:{width:Math.round(readyBounds?.width??0),height:Math.round(readyBounds?.height??0),display:readyStyle?.display??'missing',visibility:readyStyle?.visibility??'missing',opacity:readyStyle?.opacity??'missing'},bodyColor:getComputedStyle(document.body).backgroundColor,textLength:document.body.innerText.length});refreshApplicationVersion();setTimeout(refreshApplicationVersion,1500);setTimeout(refreshApplicationVersion,3500);

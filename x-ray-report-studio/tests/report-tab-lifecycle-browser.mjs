@@ -31,7 +31,7 @@ try {
   async function exportDocx() {
     const before = await activeId();
     const download = page.waitForEvent('download');
-    await page.locator('#save-docx').click();
+    await page.locator('#save-menu-toggle').click();await page.locator('#save-docx').click();
     await page.locator('#preview-save-word').click();
     if (await page.locator('#continue-yellow-export').count()) await page.locator('#continue-yellow-export').click();
     const file = await download;

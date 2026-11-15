@@ -25,7 +25,7 @@ try {
  const inserted=await page.locator('.report-content').innerText();
  for(const label of ['фронтальный','сагиттальный','вертикальный'])assert.ok(inserted.includes(label),label);
  assert.equal(await page.locator('.report-content mark[data-color="#ffff00"]').count(),1);
- await page.locator('#save-docx').click();await page.locator('#preview-save-word').click();
+ await page.locator('#save-menu-toggle').click();await page.locator('#save-docx').click();await page.locator('#preview-save-word').click();
  await page.locator('.yellow-export-warning').waitFor();
  assert.ok(await page.locator('.yellow-export-warning-text').evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=24));
  const downloadEvent=page.waitForEvent('download');await page.locator('#continue-yellow-export').click();
@@ -42,7 +42,7 @@ try {
  await page.locator('.report-content').fill('Вид исследования: МРТ левого голеностопного сустава');
  await page.waitForFunction(()=>document.querySelector('#document-name').textContent==='ГС лев');
  assert.match(await page.locator('.report-tab.active .report-tab-select').innerText(),/ГС лев/);
- await page.locator('#save-docx').click();const sidedDownloadEvent=page.waitForEvent('download');await page.locator('#preview-save-word').click();
+ await page.locator('#save-menu-toggle').click();await page.locator('#save-docx').click();const sidedDownloadEvent=page.waitForEvent('download');await page.locator('#preview-save-word').click();
  const sidedDownload=await sidedDownloadEvent;assert.match(sidedDownload.suggestedFilename(),/ГС лев/);
  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
  console.log('PASS: offline browser whole-text morphology and correction, no external requests.');
