@@ -171,14 +171,19 @@ jobs:
         run: npm run test:browser
       - name: Offline AI contextual review acceptance
         if: github.ref_name == 'codex/xrs-ai-065' || github.ref_name == 'codex/xrs-ai-066'
+        shell: pwsh
         run: |
-          node tests/ai-review-browser.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests/morphology-browser.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests/dictionary-electron.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests/update-progress-browser.mjs
+          foreach ($scenario in @('ai-review-browser', 'morphology-browser', 'dictionary-electron', 'update-progress-browser')) {
+            Write-Host "Running $scenario"
+            $result = & node "tests/$scenario.mjs" 2>&1
+            $scenarioExit = $LASTEXITCODE
+            $result | ForEach-Object { Write-Host $_ }
+            if ($scenarioExit -ne 0) {
+              $diagnostic = ($result | Out-String).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+              Write-Host "::error title=$scenario::$diagnostic"
+              exit $scenarioExit
+            }
+          }
       - name: Per-document Undo and Redo history across tabs and restart
         id: report-history-tests
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
