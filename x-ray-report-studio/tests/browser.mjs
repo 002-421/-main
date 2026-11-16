@@ -21,7 +21,16 @@ await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0]?.
 page.on('pageerror',error=>errors.push(error.message));
 const patientId='head-gm.patient', doctorId='HEAD.BASE.2.FIELD.0043';
 const field=id=>page.locator(`[data-template-field][data-field-id="${id}"]`);
-async function selectField(id){await field(id).first().evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});}
+async function selectField(id){
+ const target=field(id).first();
+ await target.click();
+ const text=await target.innerText();
+ await target.evaluate(async el=>{const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);document.dispatchEvent(new Event('selectionchange'));await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
+ // Let ProseMirror's selection observer process the selected field before
+ // synthetic text input; otherwise it can use the prior field's cursor.
+ const actual=await target.evaluate(el=>{const selection=getSelection();return selection?.rangeCount&&selection.getRangeAt(0).intersectsNode(el)?selection.toString():'';});
+ assert.equal(actual,text,`${id}: selection covers the intended field`);
+}
 async function fillField(id,text){
  await selectField(id);
  const before=await page.evaluate(id=>{const el=document.querySelector(`[data-template-field][data-field-id="${id}"]`),selection=getSelection(),selected=selection?.toString()??'';return{fieldLength:el?.innerText?.length,filled:el?.getAttribute('data-filled'),selectedLength:selected.length,selectionMatchesField:selected===el?.innerText,anchorOffset:selection?.anchorOffset,focusOffset:selection?.focusOffset,anchorInsideField:!!selection?.anchorNode&&el?.contains(selection.anchorNode),focusInsideField:!!selection?.focusNode&&el?.contains(selection.focusNode)};},id);
