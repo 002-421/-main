@@ -23,7 +23,7 @@ try{
  execFileSync('curl.exe',['-fL','--retry','2','-o',published,'https://github.com/002-421/-main/raw/refs/heads/codex/mri-report-studio/x-ray-report-studio/downloads/X-ray_Report_Studio_Windows_Setup-0.4.68.zip'],{stdio:'ignore'});
  const old=await fs.readFile(published);assert.equal(hash(old),'be5db6bf78619b7cc5f5a99622af291c135522aaeeb7ca48579bf5a036083ea7');
  const oldDir=await runtime('0.4.68',old);await manifest('0.4.69',candidate);
- let page=await launch(oldDir);await page.locator('#document-name').fill('Synthetic retained draft');
+ let page=await launch(oldDir);await page.locator('[data-section-id="description"] p').first().click();await page.keyboard.press('Home');await page.keyboard.insertText('Synthetic retained draft. ');
  await page.waitForTimeout(1000);
  const failure=await page.evaluate(async()=>{try{return await window.desktop.installUpdate();}catch(e){return String(e);}});
  assert.match(failure,/UPDATE_FAILED/);
@@ -33,21 +33,21 @@ try{
  console.log('PASS reproduced .68 → .69: actual old main throws ReferenceError before extraction; old EXE/profile retained. This path remains BLOCKED in installed .68.');
  await app.close();app=null;
  const fixedDir=await runtime('0.4.69',candidate);page=await launch(fixedDir);
- assert.equal(await page.locator('#document-name').inputValue(),'Synthetic retained draft');
+ assert.ok((await page.locator('.report-content').innerText()).includes('Synthetic retained draft.'));
  // A future version exists only in synthetic test payload; never published.
  const entries=unzipSync(candidate);const p='X-ray Report Studio Setup/app/package.json';const pkg=JSON.parse(new TextDecoder().decode(entries[p]));pkg.version='0.4.70';entries[p]=strToU8(JSON.stringify(pkg));entries['X-ray Report Studio Setup/app/xrs-test-mode.json']=strToU8(marker);const next=Buffer.from(zipSync(entries));
  await manifest('0.4.70',next,'0'.repeat(64));
  const bad=await page.evaluate(async()=>{try{return await window.desktop.installUpdate();}catch(e){return String(e);}});assert.match(bad,/SHA-256|контрольн|checksum/iu);
- assert.equal(await page.locator('#document-name').inputValue(),'Synthetic retained draft');
+ assert.ok((await page.locator('.report-content').innerText()).includes('Synthetic retained draft.'));
  await manifest('0.4.70',next);
  // Registration of app:ready follows async installation; wait for the IPC outcome.
  await page.evaluate(()=>{void window.desktop.installUpdate().catch(()=>{});});
  await page.waitForFunction(()=>window.desktop.getApplicationVersion().then(v=>v==='0.4.70'),null,{timeout:60000});
  await page.waitForTimeout(2500);
- await page.locator('.report-content').waitFor();assert.equal(await page.locator('#document-name').inputValue(),'Synthetic retained draft');
+ await page.locator('.report-content').waitFor();assert.ok((await page.locator('.report-content').innerText()).includes('Synthetic retained draft.'));
  const state=JSON.parse(await fs.readFile(path.join(root,'Profile/install-state.json'),'utf8'));assert.equal(state.current.version,'0.4.70');assert.equal(state.previous.version,'0.4.69');
  const target=await app.evaluate(({shell},link)=>shell.readShortcutLink(link).target,path.join(root,'Shortcuts/X-ray Report Studio.lnk'));assert.equal((await fs.realpath(target)).toLowerCase(),(await fs.realpath(state.current.executable)).toLowerCase());
- await app.close();app=null;page=await launch(state.current.root);assert.equal(await app.evaluate(({app})=>app.getVersion()),'0.4.70');assert.equal(await page.locator('#document-name').inputValue(),'Synthetic retained draft');
+ await app.close();app=null;page=await launch(state.current.root);assert.equal(await app.evaluate(({app})=>app.getVersion()),'0.4.70');assert.ok((await page.locator('.report-content').innerText()).includes('Synthetic retained draft.'));
  await page.waitForFunction(()=>window.desktop.getApplicationVersion().then(v=>v==='0.4.70'));
  const healthy=JSON.parse(await fs.readFile(path.join(root,'Profile/install-state.json'),'utf8'));assert.equal(healthy.status,'stable');
  console.log('PASS recovered .69: real IPC installer, SHA rejection, real ZIP extraction, live UI, shortcut, restart/new EXE, stable state and retained workspace.');
