@@ -67,6 +67,28 @@ const side=(s:string)=>{
 function dimensions(s:string){return [...s.normalize('NFC').matchAll(/(?<![\p{L}\d])\d+(?:[,.]\d+)?[\u0020\u00a0\u202f]*(?:мм|см)(?!\p{L})|(?<![\p{L}\d])\d+(?:[,.]\d+)?[\u0020\u00a0\u202f]*[×xх][\u0020\u00a0\u202f]*\d+(?:[,.]\d+)?(?:[\u0020\u00a0\u202f]*[×xх][\u0020\u00a0\u202f]*\d+(?:[,.]\d+)?)?[\u0020\u00a0\u202f]*(?:мм|см)?/giu)].map(m=>{const raw=m[0].replace(/[\u0020\u00a0\u202f]/gu,'').replace(/,/g,'.');const unit=/см/iu.test(raw)?10:1;return [...raw.matchAll(/\d+(?:\.\d+)?/gu)].map(n=>String(Number(n[0])*unit)).join('×')+'mm';});}
 const level=/\b(C[1-7]|Th(?:1[0-2]|[1-9])|L[1-5])\s*[-–—/]\s*(C[1-7]|Th(?:1[0-2]|[1-9])|L[1-5]|S1|[1-7])\b/giu;
 function levels(s:string){return [...s.matchAll(level)].map(m=>{const left=m[1].toUpperCase();const right=/^\d$/.test(m[2])?left.replace(/\d+$/,'')+m[2]:m[2].toUpperCase();return `${left}-${right}`;});}
+type SpineFinding={kind:string;level:string;side:string;start:number;end:number;clause:string};
+function spineFindings(text:string):SpineFinding[]{
+  const result:SpineFinding[]=[];
+  for(const clause of clauses(text)){
+    if(negated(clause.text)||/не исключа|вероятн|возможн/iu.test(clause.text))continue;
+    const types=[...clause.text.matchAll(/(?<!\p{L})(экструзи\p{L}*|протрузи\p{L}*|стеноз\p{L}*)(?!\p{L})/giu)];
+    const sites=[...clause.text.matchAll(level)];
+    if(!types.length||!sites.length)continue;
+    for(let i=0;i<types.length;i++){
+      const type=types[i],next=types[i+1]?.index??clause.text.length,previous=types[i-1]?.index??-1;
+      const before=sites.filter(site=>site.index!<type.index!&&site.index!>previous);
+      const after=sites.filter(site=>site.index!>type.index!&&site.index!<next);
+      const beforeNear=before.at(-1);
+      const assigned=beforeNear&&(!after.length||type.index!-beforeNear.index!<after[0].index!-type.index!)?before:after;
+      const kind=/^экструзи/iu.test(type[0])?'extrusion':/^протрузи/iu.test(type[0])?'protrusion':'stenosis';
+      for(const site of assigned){const normalized=levels(site[0])[0];if(!normalized)continue;
+        result.push({kind,level:normalized,side:side(clause.text),start:clause.start+site.index!,end:clause.start+site.index!+site[0].length,clause:clause.text.trim()});
+      }
+    }
+  }
+  return result;
+}
 const anatomy=/(?:лобн\w*|теменн\w*|височн\w*|затылочн\w*|мозжечк\w*|гипофиз\w*|печен\w*|селезенк\w*|легк\w*|почк\w*|плевр\w*|коленн\w*|плечев\w*)/iu;
 function entityKey(s:string){const e=entity.exec(s)?.[0]?.toLocaleLowerCase('ru')??'';const a=anatomy.exec(s)?.[0]?.toLocaleLowerCase('ru')??'';return `${e}:${a}:${side(s)}`;}
 const explicitAnatomyForms=new Map<string,string>();
@@ -82,6 +104,17 @@ const anatomicalIdentity=(text:string)=>{
 };
 export class ClinicalConsistencyEngine {
   validate(blocks:ReviewBlocks):Finding[]{const out:Finding[]=[];const a=clauses(blocks.description),b=clauses(blocks.conclusion);
+    const described=spineFindings(blocks.description),concluded=spineFindings(blocks.conclusion);
+    for(const found of concluded){
+      if(described.some(x=>x.kind===found.kind&&x.level===found.level))continue;
+      if(!described.length)continue;
+      out.push(finding('conclusion',blocks.conclusion,found.start,found.end,'consistency',`В заключении указана ${found.kind==='extrusion'?'экструзия':found.kind==='protrusion'?'протрузия':'стеноз'} ${found.level}, отсутствующая в описании. Проверьте уровень и тип изменения.`,(described.find(x=>x.kind===found.kind)??described[0]).clause));
+    }
+    for(const found of described){
+      if(concluded.some(x=>x.kind===found.kind&&x.level===found.level))continue;
+      const related=concluded.find(x=>x.kind===found.kind)??concluded[0];if(!related)continue;
+      out.push(finding('conclusion',blocks.conclusion,related.start,related.end,'consistency',`В описании присутствует ${found.kind==='extrusion'?'экструзия':found.kind==='protrusion'?'протрузия':'стеноз'} ${found.level}, не отражённая в заключении. Проверьте уровень и тип изменения.`,found.clause));
+    }
     for(const left of a){if(!entity.test(left.text))continue;const key=entityKey(left.text).split(':').slice(0,2).join(':');const leftCandidates=a.filter(item=>entity.test(item.text)&&entityKey(item.text).split(':').slice(0,2).join(':')===key);const related=b.filter(right=>entity.test(right.text)&&entityKey(right.text).split(':').slice(0,2).join(':')===key);if(leftCandidates.length!==1||related.length!==1)continue;
       for(const right of related){const ls=side(left.text),rs=side(right.text);if(ls&&rs&&((/прав|справа/u.test(ls))!==(/прав|справа/u.test(rs))))out.push(finding('conclusion',blocks.conclusion,right.start,right.start+right.text.length,'consistency','Возможное расхождение стороны для сходной находки.',left.text.trim()));
         const ll=levels(left.text),rl=levels(right.text);if(!negated(left.text)&&!negated(right.text)&&ll.length===1&&rl.length===1&&ll[0]!==rl[0])out.push(finding('conclusion',blocks.conclusion,right.start,right.start+right.text.length,'consistency','Возможное расхождение уровня позвоночника.',left.text.trim()));

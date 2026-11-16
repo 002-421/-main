@@ -3,6 +3,7 @@ import { _electron } from 'playwright-core';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import packageInfo from '../package.json' with {type:'json'};
 
 // Exercise a packaged Electron runtime, the real preload, real IPC and real disk IO.
 // All profile and shared-dictionary paths are synthetic and isolated.
@@ -20,7 +21,7 @@ async function launch(){
  page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));
  await page.locator('.report-content').waitFor();
  assert.equal(await app.evaluate(({app})=>app.isPackaged),true);
- assert.equal(await app.evaluate(({app})=>app.getVersion()),'0.4.66');
+ assert.equal(await app.evaluate(({app})=>app.getVersion()),packageInfo.version);
 }
 try{
  await launch();

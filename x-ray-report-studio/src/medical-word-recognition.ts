@@ -39,6 +39,7 @@ function medicalWords(): { words: Set<string>; lemmaSources: Set<string> } {
   // trusted lemma parse regenerates the exact original token.
   for (const adjective of medicalAdjectives) words.add(adjective);
   const nouns: Record<string, string[]> = {
+    'гипофиз': ['гипофиза', 'гипофизу', 'гипофизом', 'гипофизе'],
     'ликвор': ['ликвора', 'ликвору', 'ликвором', 'ликворе'],
     'ликвородинамика': ['ликвородинамики', 'ликвородинамике', 'ликвородинамику', 'ликвородинамикой'],
     'перфузия': ['перфузии', 'перфузию', 'перфузией'],

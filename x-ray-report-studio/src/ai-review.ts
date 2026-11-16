@@ -10,6 +10,7 @@ export type Suggestion = {
   from: number; to: number; state: 'pending' | 'accepted' | 'rejected';
   confidence?: 'high' | 'limited'; meaningRisk?: boolean;
   related?: string;
+  candidates?: string[];
 };
 export type Finding = Omit<Suggestion, 'id' | 'state'>;
 export const reviewCategories = [

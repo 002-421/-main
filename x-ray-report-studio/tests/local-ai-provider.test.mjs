@@ -69,7 +69,7 @@ test('LocalAIProvider passes one stable personal-word snapshot to both allowed b
 test('meaning-sensitive suggestions are comments; safe spacing needs explicit acceptance', async () => {
   const blocks={description:'Очаг  справа 5 мм.',conclusion:'Без особенностей.'};
   const findings=await provider.review(blocks);
-  assert.ok(findings.some(f=>f.meaningRisk&&f.operation==='comment'));
+  assert.ok(findings.some(f=>f.category==='punctuation'&&f.operation==='replace'), 'spacing remains an explicit, safe action');
   const safe=await new ReviewEngine(provider).review(doc('Протокол  выполнен.'));
   const edit=safe.suggestions.find(s=>s.original==='  '&&s.operation==='replace');
   assert.ok(edit);

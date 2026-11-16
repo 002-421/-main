@@ -112,6 +112,7 @@ html .sticky-note,html[data-theme="dark"] .sticky-note{background:#fff;color:#00
 html[data-theme="dark"] .ai-review-panel,html[data-theme="dark"] .ai-review-card{--surface:#1c2936;--text:#e7eef5;--muted:#aab9c8;--border:#405161;box-shadow:0 10px 32px #0008}
 @media(max-width:520px){.ai-review-panel fieldset{grid-template-columns:1fr}.ai-review-panel,.ai-review-card{width:calc(100vw - 20px);max-height:60vh}}
 @media print{.ai-review-underline{border:0!important;text-decoration:none!important}.ai-review-panel,.ai-review-card{display:none!important}}
+@media(max-width:1350px){.topbar{height:auto;min-height:88px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}.top-actions{flex-wrap:wrap;justify-content:flex-end}}
 
 .save-menu{position:relative}.save-menu-items{position:absolute;right:0;top:calc(100% + 6px);z-index:150;display:grid;gap:4px;padding:6px;background:var(--surface,#fff);border:1px solid var(--border);border-radius:7px;box-shadow:0 6px 20px #0003}.save-menu-items[hidden]{display:none}.save-menu-items .btn{justify-content:flex-start}html[data-theme="dark"] .save-menu-items{background:#1c2936}
 

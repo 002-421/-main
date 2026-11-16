@@ -62,6 +62,7 @@ export async function morphologicalIssues(text:string,signal?:AbortSignal):Promi
   const nextPredicate=(index:number)=>{
     for(let j=index+1;j<tokens.length&&j<=index+5;j++){
       if(!joined(tokens[j-1],tokens[j]))break;
+      if(tokens[j].word.toLocaleLowerCase('ru')==='относительно')continue;
       const current=predicates(tokens[j]);
       const following=tokens[j+1];
       const adverbial=current.some(p=>p.tag.ADJS&&p.tag.neut)&&/о$/i.test(tokens[j].word)&&tokens.slice(j+1,j+4).some((candidate,offset)=>{

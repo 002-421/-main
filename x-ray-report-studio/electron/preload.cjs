@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld('desktop', {
   },
   clearUpdateProgress: () => ipcRenderer.removeAllListeners('updates:progress'),
   copyReport: (html, text) => ipcRenderer.invoke('report:copy', html, text),
+  copyPlainText: text => ipcRenderer.invoke('report:copy-plain', text),
 });

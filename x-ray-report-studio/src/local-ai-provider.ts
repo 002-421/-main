@@ -22,14 +22,18 @@ function convert(issue: ProofIssue, blockId: ReviewBlockId, text: string): Findi
   const context = text.slice(Math.max(0, issue.start - 18), Math.min(text.length, issue.end + 18));
   // Even one Hunspell candidate is a spelling guess, not a medically verified
   // replacement. Keep it visible, but require the physician to edit manually.
-  const risk = issue.kind === 'spelling' || meaningSensitive(context, proposed) || rule === 'repeat' || rule === 'punctuation-repeat' || rule === 'morph';
-  const operation = !risk && proposed && proposed !== issue.text ? 'replace' : 'comment';
+  const spacingOnly = ['spaces','before-punctuation','after-punctuation'].includes(rule)
+    && issue.text.replace(/[\p{L}\p{N}]/gu,'')!==proposed.replace(/[\p{L}\p{N}]/gu,'')
+    && issue.text.replace(/[^\p{L}\p{N}]/gu,'')===proposed.replace(/[^\p{L}\p{N}]/gu,'');
+  const risk = issue.kind === 'spelling' || (!spacingOnly && meaningSensitive(context, proposed)) || rule === 'repeat' || rule === 'punctuation-repeat' || rule === 'morph';
+  const operation = !risk && issue.suggestions.length && proposed !== issue.text ? (proposed ? 'replace' : 'delete') : 'comment';
   return {
     operation, blockId, original: issue.text, proposed,
     explanation: issue.message, category, priority: 'low',
     from: issue.start, to: issue.end,
     confidence: issue.kind === 'grammar' && punctuationRules.has(rule) && !risk ? 'high' : 'limited',
     meaningRisk: risk,
+    candidates: issue.kind==='spelling'?issue.suggestions.slice(0,3):undefined,
   };
 }
 

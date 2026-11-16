@@ -2,7 +2,7 @@ name: XRS-07/XRS-08 Windows validation
 
 on:
   push:
-    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062, codex/xrs-updater-rollback-053, codex/xrs-ai-065, codex/xrs-ai-066]
+    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062, codex/xrs-updater-rollback-053, codex/xrs-ai-065, codex/xrs-ai-066, codex/xrs-ai-067]
   pull_request:
     paths:
       - 'x-ray-report-studio/**'
@@ -62,7 +62,7 @@ jobs:
           $isStable056 = $version -eq '0.4.56' -and $sourceRef -eq 'codex/xrs-056-stable-clean'
           $isUpdateHotfix = $sourceRef -eq 'codex/xrs-first-start-confirmation'
           $isUpdaterRecovery = $sourceRef -in @('codex/xrs-updater-recovery', 'codex/xrs-updater-062')
-          $isUpdaterRollback053 = $sourceRef -in @('codex/xrs-updater-rollback-053', 'codex/xrs-ai-065', 'codex/xrs-ai-066')
+          $isUpdaterRollback053 = $sourceRef -in @('codex/xrs-updater-rollback-053', 'codex/xrs-ai-065', 'codex/xrs-ai-066', 'codex/xrs-ai-067')
           $isUpdaterCandidate060 = $version -eq '0.4.60' -and $isUpdaterRecovery
           Add-Content -Path $env:GITHUB_OUTPUT -Value "beta=$($isBeta.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "stable056=$($isStable056.ToString().ToLowerInvariant())" -Encoding utf8

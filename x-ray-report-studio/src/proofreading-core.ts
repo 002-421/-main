@@ -38,12 +38,15 @@ function grammarIssues(text: string): ProofIssue[] {
   runs(/(?<![А-Яа-яЁё])([А-Яа-яЁё]{2,})([ \t]+)\1(?![А-Яа-яЁё])/giu, m => {
     add('repeat', m.index!, m.index! + m[0].length, 'Возможно, слово случайно повторено.', [m[1]]);
   });
-  runs(/(?<=[\p{L}\p{N}])[ \t]{2,}(?=[\p{L}\p{N}])/gu, m => {
-    add('spaces', m.index!, m.index! + m[0].length, 'Несколько пробелов между словами.', [' ']);
+  runs(/(?<=[\p{L}\p{N}])[ \u00a0]{2,}(?=[\p{L}\p{N}])/gu, m => {
+    add('spaces', m.index!, m.index! + m[0].length, 'Несколько пробелов между словами.', [m[0].includes('\u00a0')?'\u00a0':' ']);
   });
-  runs(/[ \t]+[,;:.!?]/gu, m => {
+  runs(/[ \u00a0]+[,;:.!?]/gu, m => {
     add('before-punctuation', m.index!, m.index! + m[0].length, 'Перед этим знаком препинания пробел обычно не нужен.', [m[0].trimStart()]);
   });
+  runs(/\([ \u00a0]+/gu,m=>add('spaces',m.index!+1,m.index!+m[0].length,'Лишний пробел после открывающей скобки.',['']));
+  runs(/[ \u00a0]+\)/gu,m=>add('spaces',m.index!,m.index!+m[0].length-1,'Лишний пробел перед закрывающей скобкой.',['']));
+  runs(/[,;:.!?][ \u00a0]{2,}(?=\p{L})/gu,m=>add('spaces',m.index!+1,m.index!+m[0].length,'Повторные пробелы после знака препинания.',[m[0].includes('\u00a0')?'\u00a0':' ']));
   runs(/[,;:!?](?=[А-Яа-яЁё])/gu, m => {
     add('after-punctuation', m.index!, m.index! + 1, 'После знака препинания нужен пробел.', [m[0] + ' ']);
   });

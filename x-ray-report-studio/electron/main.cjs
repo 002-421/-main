@@ -697,6 +697,11 @@ app.whenReady().then(async () => {
     if (typeof html !== 'string' || typeof text !== 'string' || html.length > 5_000_000 || text.length > 2_000_000) throw new Error('Слишком большой документ.');
     await clipboard.write([new ClipboardItem({ 'text/html': html, 'text/plain': text })]);
   });
+  ipcMain.handle('report:copy-plain', async (event, text) => {
+    requireMain(event);
+    if (typeof text !== 'string' || text.length > 2_000_000) throw new Error('Слишком большой документ.');
+    clipboard.writeText(text);
+  });
   ipcMain.on('diagnostics:event',(event,value)=>{requireMain(event);if(value?.event==='renderer-exception')void logStartup({event:'renderer-exception',errorType:value.errorType,frames:value.frames});});
   ipcMain.handle('diagnostics:open',async event=>{requireMain(event);return shell.openPath(path.dirname(startupLogFile));});
   ipcMain.handle('dictionary:load', async event => {

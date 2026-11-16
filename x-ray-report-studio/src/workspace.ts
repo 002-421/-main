@@ -1,4 +1,5 @@
 import { recoverParagraphBlocks } from './document-recovery';
+import { medicalTextForCopy, personalDataWarnings } from './safe-medical-copy';
 import './style.css';
 import { titleWithStudySide } from './report-side';
 import { justifyDescription } from './description-alignment';
@@ -47,6 +48,7 @@ declare global { interface Window { desktop?: {
   onUpdateProgress:(callback:(progress:{stage:string;loaded:number;total:number;percent:number|null;message?:string;phase?:string;code?:string;logFile?:string})=>void)=>void;
   clearUpdateProgress:()=>void;
   copyReport:(html:string,text:string)=>Promise<void>;
+  copyPlainText:(text:string)=>Promise<void>;
   reportDiagnostic:(value:unknown)=>void;
   openDiagnostics:()=>Promise<unknown>;
   dictionaryLoad:()=>Promise<{words:string[];shared:boolean}>;
@@ -183,7 +185,7 @@ $('#app').innerHTML=`<div class="shell">
   <div class="side-bottom"><button id="settings">⚙ Врач и настройки</button><small>Локальная работа · версия <span id="application-version">${esc(packageInfo.version)}</span></small></div>
  </aside>
  <main class="main">
-  <header class="topbar"><div class="document-heading"><span class="eyebrow">Редактор описаний</span><strong id="document-name">Новое описание</strong><small id="save-state">Сохранено на компьютере</small></div><div class="top-actions"><button id="toggle-sidebar" class="btn icon-button" title="Показать меню">☰</button><button id="toggle-theme" class="btn" type="button" aria-pressed="false">☾ Тёмная тема</button><button id="new-report" class="btn">＋ Заключение</button><button id="open-report" class="btn">Открыть</button><button id="copy-report" class="btn">Копировать</button><button id="preview-report" class="btn">Предпросмотр</button><div class="save-menu"><button id="save-menu-toggle" class="btn primary" type="button" aria-expanded="false" aria-controls="save-menu-items">Сохранить</button><div id="save-menu-items" class="save-menu-items" hidden><button id="save-docx" class="btn" type="button">Word (.docx)</button><button id="export-pdf" class="btn" type="button">PDF (.pdf)</button></div></div></div></header>
+  <header class="topbar"><div class="document-heading"><span class="eyebrow">Редактор описаний</span><strong id="document-name">Новое описание</strong><small id="save-state">Сохранено на компьютере</small></div><div class="top-actions"><button id="toggle-sidebar" class="btn icon-button" title="Показать меню">☰</button><button id="toggle-theme" class="btn" type="button" aria-pressed="false">☾ Тёмная тема</button><button id="new-report" class="btn">＋ Заключение</button><button id="open-report" class="btn">Открыть</button><button id="copy-report" class="btn">Копировать</button><button id="preview-report" class="btn">Предпросмотр</button><button id="copy-for-ai" class="btn" type="button">Копировать для ИИ</button><div class="save-menu"><button id="save-menu-toggle" class="btn primary" type="button" aria-expanded="false" aria-controls="save-menu-items">Сохранить</button><div id="save-menu-items" class="save-menu-items" hidden><button id="save-docx" class="btn" type="button">Word (.docx)</button><button id="export-pdf" class="btn" type="button">PDF (.pdf)</button></div></div></div></header>
   <nav id="report-tabs" class="report-tabs" aria-label="Открытые заключения"></nav>
   <div class="ribbon" role="toolbar" aria-label="Форматирование описания"><div class="tool-group"><button data-command="undo" title="Отменить (Ctrl+Z)">↶</button><button data-command="redo" title="Повторить (Ctrl+Y)">↷</button></div><div class="tool-group"><select id="font-family" aria-label="Шрифт"><option>DejaVu Sans</option><option selected>Arial</option><option>Times New Roman</option><option>Calibri</option></select><select id="font-size" aria-label="Размер шрифта">${[8,9,10,11,12,14,16,18,21,24].map(s=>`<option value="${s}" ${s===12?'selected':''}>${s}</option>`).join('')}</select></div><div class="tool-group"><button data-command="bold" title="Полужирный"><b>Ж</b></button><button data-command="italic" title="Курсив"><i>К</i></button><button data-command="underline" title="Подчёркнутый"><u>Ч</u></button><button data-command="strike" title="Зачёркнутый"><s>А</s></button><input type="color" id="text-color" title="Цвет текста" value="#172c40"><button id="highlight-yellow" title="Нанести жёлтую заливку на выделенный текст" aria-label="Жёлтая заливка текста" aria-pressed="false">🖍 Заливка</button></div><div class="tool-group"><button data-align="left" title="По левому краю">≡</button><button data-align="center" title="По центру">≡</button><button data-align="right" title="По правому краю">≡</button><button data-align="justify" title="По ширине">По ширине</button><button data-command="bulletList" title="Маркированный список">• ☰</button><button data-command="orderedList" title="Нумерованный список">1. ☰</button><button id="table-tools" title="Вставить или изменить таблицу">▦</button></div><div class="tool-group"><label class="line-height-control" for="line-height">Интервал <select id="line-height" aria-label="Межстрочный интервал"><option value="1">1</option><option value="1.05">1,05</option><option value="1.15">1,15</option><option value="1.2">1,2</option><option value="1.5">1,5</option><option value="2">2</option></select></label><button id="insert-field" title="Вставить редактируемое поле">＋ Поле</button><button id="insert-size" title="Размер (фронтальный/сагиттальный/вертикальный)">＋ Размер</button></div></div>
   <div id="template-banner" class="template-banner hidden"><div><strong>Редактирование шаблона</strong><small>Правки будут применяться к новым описаниям. Текущий документ сохранён.</small></div><div><button id="reset-template" class="btn">Исходный шаблон</button><button id="cancel-template" class="btn">Отмена</button><button id="save-template" class="btn primary">Сохранить шаблон</button></div></div>
@@ -397,22 +399,21 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
   let reviewedBlocks:import('./ai-review.ts').ReviewBlocks|undefined;
   let reviewedReport='';
   let card:HTMLElement|undefined;
-  let closeTimer=0;
   let cardPositionHandler:(()=>void)|undefined;
   let cardResizeObserver:ResizeObserver|undefined;
-  const closeCard=()=>{window.clearTimeout(closeTimer);if(cardPositionHandler){window.removeEventListener('resize',cardPositionHandler);window.removeEventListener('scroll',cardPositionHandler,true);}cardResizeObserver?.disconnect();cardPositionHandler=undefined;cardResizeObserver=undefined;card?.remove();card=undefined;};
+  const closeCard=()=>{if(cardPositionHandler){window.removeEventListener('resize',cardPositionHandler);window.removeEventListener('scroll',cardPositionHandler,true);}cardResizeObserver?.disconnect();cardPositionHandler=undefined;cardResizeObserver=undefined;card?.remove();card=undefined;};
   const renderDecorations=()=>{
     if(!reviewedBlocks||reviewedReport!==activeReportId){setAiReviewDecorations(editor,[]);return;}
     const ranges:ReviewDecorationRange[]=[];
     for(const item of findings){try{const range=resolveReviewRange(editor,item,reviewedBlocks,reviewedReport,activeReportId);ranges.push({...range,id:item.id,category:item.category,original:item.original});}catch{/* stale locations are not decorated */}}
     setAiReviewDecorations(editor,ranges);
   };
-  const openCard=(target:HTMLElement)=>{
+  const openCard=(target:HTMLElement,point?:{x:number;y:number})=>{
     closeCard();
     const ids=(target.dataset.aiReviewIds??'').split(',').filter(Boolean);
     const items=findings.filter(item=>ids.includes(item.id)&&item.state==='pending');
     if(!items.length)return;
-    const pop=document.createElement('section');card=pop;pop.className='ai-review-card';pop.setAttribute('role','region');pop.setAttribute('aria-label','Замечания AI Review');
+    const pop=document.createElement('section');card=pop;pop.className='ai-review-card';pop.setAttribute('role','menu');pop.setAttribute('aria-label','Замечания AI Review');
     for(const item of items){
       const section=document.createElement('article');section.className='ai-review-card-item';
       const title=document.createElement('strong');title.textContent=reviewCategories.find(([id])=>id===categoryGroup(item.category))?.[1]??item.category;
@@ -420,12 +421,19 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
       section.append(title,explanation);
       if(item.related){const related=document.createElement('p');related.textContent=`Связанный фрагмент: ${item.related}`;section.append(related);}
       const excerpt=document.createElement('small');excerpt.textContent=`Фрагмент: ${item.original||'позиция вставки'}`;section.append(excerpt);
-      if(item.proposed&&isSafeReviewReplacement(item)){const replace=document.createElement('button');replace.className='btn small primary';replace.textContent='Заменить';replace.onclick=()=>{
+      if((item.operation==='delete'||item.proposed)&&isSafeReviewReplacement(item)){const replace=document.createElement('button');replace.className='btn small primary';replace.textContent=item.operation==='delete'?'Удалить лишний пробел':'Заменить';replace.onclick=()=>{
         if(reviewedReport!==activeReportId||!reviewedBlocks){toast('Откройте документ, который проверяли.',true);return;}
         try{applyReviewSuggestion(editor,item,reviewedBlocks,reviewedReport,activeReportId);tracks.markAccepted(reviewedReport,item.id);findings=[];reviewedBlocks=undefined;setAiReviewDecorations(editor,[]);closeCard();toast('Исправление применено.');}
         catch{closeCard();toast('Текст изменился. Повторите проверку этого фрагмента.',true);}
       };section.append(replace);}
-      if(item.operation==='comment'||!item.proposed||!isSafeReviewReplacement(item)){
+      if(item.category==='spelling')for(const candidate of item.candidates??[]){
+        const chosen={...item,operation:'replace' as const,proposed:candidate,meaningRisk:false,confidence:'high' as const};
+        if(!isSafeReviewReplacement(chosen))continue;
+        const replace=document.createElement('button');replace.className='btn small';replace.textContent=candidate;
+        replace.onclick=()=>{if(reviewedReport!==activeReportId||!reviewedBlocks)return;try{applyReviewSuggestion(editor,chosen,reviewedBlocks,reviewedReport,activeReportId);tracks.markAccepted(reviewedReport,item.id);findings=[];reviewedBlocks=undefined;setAiReviewDecorations(editor,[]);closeCard();toast('Исправление применено.');}catch{closeCard();toast('Текст изменился. Повторите проверку.',true);}};
+        section.append(replace);
+      }
+      if(item.operation==='comment'||(item.operation!=='delete'&&!item.proposed)||!isSafeReviewReplacement(item)){
         const assess=document.createElement('p');assess.className='ai-review-safety';assess.textContent=item.operation==='comment'?'Предупреждение для оценки врачом. Текст не изменяется.':'Предложение может затрагивать медицинский смысл. Исправьте вручную после проверки.';section.append(assess);
       }
       const actions=document.createElement('div');actions.className='ai-review-card-actions';
@@ -435,21 +443,20 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
       section.append(actions);pop.append(section);
     }
     const dismiss=document.createElement('button');dismiss.className='ai-review-card-close';dismiss.type='button';dismiss.textContent='Закрыть';dismiss.onclick=closeCard;pop.append(dismiss);
-    pop.addEventListener('pointerenter',()=>window.clearTimeout(closeTimer));pop.addEventListener('pointerleave',()=>{closeTimer=window.setTimeout(closeCard,180);});
     pop.addEventListener('keydown',event=>{if((event as KeyboardEvent).key==='Escape'){closeCard();target.focus();}});
     document.body.append(pop);
-    const position=()=>{if(!target.isConnected){closeCard();return;}const r=target.getBoundingClientRect(),w=pop.offsetWidth,h=pop.offsetHeight,pad=10;const left=Math.max(pad,Math.min(r.left,window.innerWidth-w-pad));let top=r.bottom+h+pad<window.innerHeight?r.bottom+pad:r.top-h-pad;top=Math.max(pad,Math.min(top,window.innerHeight-h-pad));pop.style.left=`${left}px`;pop.style.top=`${top}px`;};
+    const position=()=>{if(!target.isConnected){closeCard();return;}const r=target.getBoundingClientRect(),w=pop.offsetWidth,h=pop.offsetHeight,pad=10;const left=Math.max(pad,Math.min(point?.x??r.left,window.innerWidth-w-pad));let top=point?.y??r.bottom+pad;if(top+h+pad>window.innerHeight)top=(point?.y??r.top)-h-pad;top=Math.max(pad,Math.min(top,window.innerHeight-h-pad));pop.style.left=`${left}px`;pop.style.top=`${top}px`;};
     cardPositionHandler=position;window.addEventListener('resize',position);window.addEventListener('scroll',position,true);
     if(typeof ResizeObserver!=='undefined'){cardResizeObserver=new ResizeObserver(position);cardResizeObserver.observe(target);cardResizeObserver.observe(pop);}
     position();
   };
   const editorRoot=editor.view.dom;
-  editorRoot.addEventListener('pointerover',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(span)openCard(span);});
-  editorRoot.addEventListener('pointerout',event=>{const from=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]'),to=event.relatedTarget as Node|null;if(from&&(!to||(!from.contains(to)&&!card?.contains(to))))closeTimer=window.setTimeout(closeCard,180);});
-  editorRoot.addEventListener('click',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(span)openCard(span);});
-  editorRoot.addEventListener('focusin',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(span){setAiReviewFocusedSpan(span);openCard(span);}});
+  editorRoot.addEventListener('contextmenu',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(!span)return;event.preventDefault();openCard(span,{x:event.clientX,y:event.clientY});});
+  editorRoot.addEventListener('focusin',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(span)setAiReviewFocusedSpan(span);});
   editorRoot.addEventListener('focusout',event=>{const to=(event as FocusEvent).relatedTarget as Node|null;if(!to||!editorRoot.contains(to))setAiReviewFocusedSpan(undefined);});
   setAiReviewKeyboardHandler(span=>openCard(span));
+  document.addEventListener('pointerdown',event=>{if(card&&!card.contains(event.target as Node))closeCard();},true);
+  document.addEventListener('keydown',event=>{if(card&&(event.key.length===1||event.key==='Backspace'||event.key==='Delete')&&editorRoot.contains(event.target as Node)&&!event.altKey&&!event.ctrlKey&&!event.metaKey)closeCard();},true);
   document.addEventListener('keydown',event=>{const e=event as KeyboardEvent,target=e.target as HTMLElement;if(e.key==='Escape'&&card&&(editorRoot.contains(document.activeElement)||card.contains(target))){e.preventDefault();closeCard();}},true);
   let reviewTimer=0, reviewGeneration=0;
   let reviewAbort:AbortController|undefined;
@@ -463,7 +470,7 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
       tracks.set(reportId,result.suggestions);const rejected=rejectedReviewKeys.get(reportId)??new Set<string>();
       findings=result.suggestions.filter(item=>!rejected.has(reviewRejectionKey(item,result.blocks))&&!(['spelling','terminology'].includes(item.category)&&personalWords.includes(item.original.toLocaleLowerCase('ru-RU'))));reviewedBlocks=result.blocks;reviewedReport=reportId;
       renderDecorations();status.textContent=findings.length?`Замечаний: ${findings.length}`:'Замечаний не найдено';
-    }catch(error){if(!abort.signal.aborted){const boundaries=/границ|структур|формат документа|пустой разрешённый блок/i.test((error as Error)?.message??'');status.textContent=boundaries?'Не удалось определить границы протокола.':'Проверка недоступна.';migrateButton.hidden=!boundaries;}}
+    }catch(error){if(!abort.signal.aborted){const boundaries=/границ|структур|формат документа|пустой разрешённый блок/i.test((error as Error)?.message??'');status.textContent=boundaries?'Необходимо уточнить границы описания и заключения.':'Проверка недоступна.';migrateButton.hidden=!boundaries;}}
     finally{if(generation===reviewGeneration)status.removeAttribute('aria-busy');}
   };
   const scheduleReview=()=>{
@@ -603,8 +610,8 @@ function embeddedFonts(){
   return fontDataPromise??=Promise.all([regularFont,boldFont,italicFont,boldItalicFont].map(load)).then(([data,bold,italic,boldItalic])=>[{name:'DejaVu Sans',data,bold,italic,boldItalic}]);
 }
 function clearProofPopup(){$('.proof-popup')?.remove();}
-function proofPopup(event:MouseEvent){const target=(event.target as HTMLElement).closest<HTMLElement>('[data-proof-id]');if(!target)return;if(event.type==='contextmenu')event.preventDefault();const pos=editor.view.posAtCoords({left:event.clientX,top:event.clientY});if(!pos)return;const hit=getLiveProofIssueAtPosition(editor,pos.pos);if(!hit)return;clearProofPopup();const doc=editor.state.doc;const popup=document.createElement('div');popup.className='proof-popup';popup.setAttribute('role','dialog');popup.innerHTML=`<small>${hit.issue.kind==='spelling'?'Орфография':'Грамматика и пунктуация'}</small><p>${esc(hit.issue.message)}</p><div>${hit.issue.suggestions.map((s,i)=>`<button class="btn small" data-correction="${i}">${esc(s)}</button>`).join('')||'<span>Отредактируйте слово вручную.</span>'}</div>${hit.issue.kind==='spelling'?'<button class="btn small" id="allow-word">Добавить в словарь</button>':''}<button class="close-popup" aria-label="Закрыть">×</button>`;document.body.append(popup);popup.style.left=`${Math.min(event.clientX,window.innerWidth-340)}px`;popup.style.top=`${Math.min(event.clientY+14,window.innerHeight-popup.offsetHeight-12)}px`;popup.querySelector('.close-popup')!.addEventListener('click',clearProofPopup);popup.querySelectorAll<HTMLElement>('[data-correction]').forEach(b=>b.onclick=()=>{if(!doc.eq(editor.state.doc)){clearProofPopup();refreshProofreading(editor);return;}editor.view.dispatch(editor.state.tr.insertText(hit.issue.suggestions[Number(b.dataset.correction)],hit.from,hit.to));clearProofPopup();refreshProofreading(editor);});popup.querySelector('#allow-word')?.addEventListener('click',()=>{const words=[...new Set([...personalWords,hit.issue.text.toLocaleLowerCase('ru')])];try{localStorage.setItem(KEYS.dictionary,JSON.stringify(words));personalWords=words;clearProofPopup();refreshProofreading(editor);}catch{toast('Не удалось сохранить слово.',true);}});}
-editor.view.dom.addEventListener('click',proofPopup);editor.view.dom.addEventListener('contextmenu',proofPopup);
+function proofPopup(event:MouseEvent){if((event.target as HTMLElement).closest('[data-ai-review-ids]'))return;const target=(event.target as HTMLElement).closest<HTMLElement>('[data-proof-id]');if(!target)return;if(event.type==='contextmenu')event.preventDefault();const pos=editor.view.posAtCoords({left:event.clientX,top:event.clientY});if(!pos)return;const hit=getLiveProofIssueAtPosition(editor,pos.pos);if(!hit)return;clearProofPopup();const doc=editor.state.doc;const popup=document.createElement('div');popup.className='proof-popup';popup.setAttribute('role','dialog');popup.innerHTML=`<small>${hit.issue.kind==='spelling'?'Орфография':'Грамматика и пунктуация'}</small><p>${esc(hit.issue.message)}</p><div>${hit.issue.suggestions.map((s,i)=>`<button class="btn small" data-correction="${i}">${esc(s)}</button>`).join('')||'<span>Отредактируйте слово вручную.</span>'}</div>${hit.issue.kind==='spelling'?'<button class="btn small" id="allow-word">Добавить в словарь</button>':''}<button class="close-popup" aria-label="Закрыть">×</button>`;document.body.append(popup);popup.style.left=`${Math.min(event.clientX,window.innerWidth-340)}px`;popup.style.top=`${Math.min(event.clientY+14,window.innerHeight-popup.offsetHeight-12)}px`;popup.querySelector('.close-popup')!.addEventListener('click',clearProofPopup);popup.querySelectorAll<HTMLElement>('[data-correction]').forEach(b=>b.onclick=()=>{if(!doc.eq(editor.state.doc)){clearProofPopup();refreshProofreading(editor);return;}editor.view.dispatch(editor.state.tr.insertText(hit.issue.suggestions[Number(b.dataset.correction)],hit.from,hit.to));clearProofPopup();refreshProofreading(editor);});popup.querySelector('#allow-word')?.addEventListener('click',()=>{const words=[...new Set([...personalWords,hit.issue.text.toLocaleLowerCase('ru')])];try{localStorage.setItem(KEYS.dictionary,JSON.stringify(words));personalWords=words;clearProofPopup();refreshProofreading(editor);}catch{toast('Не удалось сохранить слово.',true);}});}
+editor.view.dom.addEventListener('contextmenu',proofPopup);
 document.addEventListener('mousedown',e=>{if(!(e.target as HTMLElement).closest('.proof-popup,[data-proof-id]'))clearProofPopup();});
 
 function filename(suffix:string){
@@ -733,6 +740,14 @@ $('#report-file').onchange=async event=>{
   const preview=dialog('Проверка протокола Word',body,'<button class="btn" data-close>Отмена</button><button class="btn primary" id="confirm-recovered-report">Открыть в новой вкладке</button>');
   preview.querySelector('.dialog')!.classList.add('wide-preview');preview.querySelector('#confirm-recovered-report')!.addEventListener('click',open);
  }catch(error){toast(`Не удалось открыть документ: ${(error as Error).message}`,true);}
+};
+$('#copy-for-ai').onclick=()=>{
+  let initial:string;try{initial=medicalTextForCopy(json());}catch(error){toast((error as Error).message,true);return;}
+  const preview=dialog('Копировать медицинский текст для ИИ',`<p>Проверьте текст и удалите персональные данные. Автоматическая проверка не гарантирует полного обезличивания. Никакие данные не отправляются из XRS.</p><textarea id="ai-copy-text" rows="16" spellcheck="false" style="width:100%;box-sizing:border-box">${esc(initial)}</textarea><p id="ai-copy-warning" role="status"></p><label><input id="ai-copy-confirm" type="checkbox"> Я проверил(а) текст и разрешаю поместить его в буфер обмена</label>`,'<button class="btn" data-close>Отмена</button><button class="btn primary" id="ai-copy-commit" type="button">Копировать текст</button>');
+  const field=preview.querySelector<HTMLTextAreaElement>('#ai-copy-text')!,warning=preview.querySelector<HTMLElement>('#ai-copy-warning')!,confirm=preview.querySelector<HTMLInputElement>('#ai-copy-confirm')!;
+  const check=()=>{const found=personalDataWarnings(field.value);warning.textContent=found.length?`Потенциальные персональные данные: ${found.join(', ')}. Удалите их перед копированием.`:'Проверьте текст вручную: автоматическое обезличивание может пропустить данные.';return found.length===0;};
+  field.addEventListener('input',()=>{confirm.checked=false;check();});check();
+  preview.querySelector('#ai-copy-commit')!.addEventListener('click',async()=>{if(!check()||!confirm.checked){toast('Удалите найденные персональные данные и подтвердите проверку.',true);return;}try{if(window.desktop)await window.desktop.copyPlainText(field.value);else await navigator.clipboard.writeText(field.value);closeDialog();toast('Проверенный текст скопирован без форматирования.');}catch{toast('Буфер обмена недоступен. Текст не скопирован.',true);}});
 };
 $('#copy-report').onclick=async()=>{const box=document.createElement('div');box.innerHTML=DOMPurify.sanitize(editor.getHTML());box.querySelectorAll<HTMLElement>('[data-template-field]').forEach(el=>{el.style.backgroundColor=el.classList.contains('is-empty')?'#fff0a4':'transparent';});const html=`<html><body><style>body{font-family:Arial,sans-serif;font-size:12pt;line-height:1.05}p{margin:0 0 5pt}table{border-collapse:collapse}td,th{border:1px solid #bbb;padding:4px}</style>${box.innerHTML}</body></html>`;try{if(window.desktop)await window.desktop.copyReport(html,editor.getText());else await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([editor.getText()],{type:'text/plain'})})]);toast('Описание скопировано с форматированием.');}catch{toast('Выделите текст и скопируйте его сочетанием Ctrl+C.',true);}};
 async function printPDF(confirmed=false){
