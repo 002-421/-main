@@ -206,10 +206,12 @@ jobs:
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm run test:browser
       - name: Offline AI contextual review acceptance
-        if: github.ref_name == 'codex/xrs-ai-065' || github.ref_name == 'codex/xrs-ai-066'
+        if: github.ref_name == 'codex/xrs-ai-065' || github.ref_name == 'codex/xrs-ai-066' || github.ref_name == 'codex/xrs-ai-067'
         shell: pwsh
         run: |
-          foreach ($scenario in @('ai-review-browser', 'morphology-browser', 'dictionary-electron', 'final-medical-browser', 'final-renderer-electron', 'update-progress-browser')) {
+          $scenarios = @('ai-review-browser', 'morphology-browser', 'dictionary-electron', 'final-medical-browser', 'final-renderer-electron', 'update-progress-browser')
+          if ($env:GITHUB_REF_NAME -eq 'codex/xrs-ai-067') { $scenarios += 'ai-067-electron.test' }
+          foreach ($scenario in $scenarios) {
             Write-Host "Running $scenario"
             $result = & node "tests/$scenario.mjs" 2>&1
             $scenarioExit = $LASTEXITCODE
