@@ -120,8 +120,8 @@ jobs:
           $testExit = $LASTEXITCODE
           $result | ForEach-Object { Write-Host $_ }
           if ($testExit -ne 0) {
-            $tail = ($result | Select-Object -Last 200 | Out-String)
-            if ($tail.Length -gt 30000) { $tail = $tail.Substring($tail.Length - 30000) }
+            $tail = ($result | Select-Object -Last 40 | Out-String)
+            if ($tail.Length -gt 6000) { $tail = $tail.Substring($tail.Length - 6000) }
             $diagnostic = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
             Write-Host "::error title=Unit failure::$diagnostic"
             exit $testExit
