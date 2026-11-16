@@ -2,7 +2,7 @@ name: XRS-07/XRS-08 Windows validation
 
 on:
   push:
-    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062, codex/xrs-updater-rollback-053, codex/xrs-updater-068, codex/xrs-ai-065, codex/xrs-ai-066, codex/xrs-ai-067]
+    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062, codex/xrs-updater-rollback-053, codex/xrs-updater-068, codex/xrs-ai-069, codex/xrs-ai-065, codex/xrs-ai-066, codex/xrs-ai-067]
   pull_request:
     paths:
       - 'x-ray-report-studio/**'
@@ -62,7 +62,7 @@ jobs:
           $isStable056 = $version -eq '0.4.56' -and $sourceRef -eq 'codex/xrs-056-stable-clean'
           $isUpdateHotfix = $sourceRef -eq 'codex/xrs-first-start-confirmation'
           $isUpdaterRecovery = $sourceRef -in @('codex/xrs-updater-recovery', 'codex/xrs-updater-062', 'codex/xrs-updater-068')
-          $isUpdaterRollback053 = $sourceRef -in @('codex/xrs-updater-rollback-053', 'codex/xrs-updater-068', 'codex/xrs-ai-065', 'codex/xrs-ai-066', 'codex/xrs-ai-067')
+          $isUpdaterRollback053 = $sourceRef -in @('codex/xrs-updater-rollback-053', 'codex/xrs-updater-068', 'codex/xrs-ai-065', 'codex/xrs-ai-066', 'codex/xrs-ai-067', 'codex/xrs-ai-069')
           $isUpdaterCandidate060 = $version -eq '0.4.60' -and $isUpdaterRecovery
           Add-Content -Path $env:GITHUB_OUTPUT -Value "beta=$($isBeta.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "stable056=$($isStable056.ToString().ToLowerInvariant())" -Encoding utf8
@@ -206,11 +206,11 @@ jobs:
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm run test:browser
       - name: Offline AI contextual review acceptance
-        if: github.ref_name == 'codex/xrs-ai-065' || github.ref_name == 'codex/xrs-ai-066' || github.ref_name == 'codex/xrs-ai-067'
+        if: github.ref_name == 'codex/xrs-ai-065' || github.ref_name == 'codex/xrs-ai-066' || github.ref_name == 'codex/xrs-ai-067' || github.ref_name == 'codex/xrs-ai-069'
         shell: pwsh
         run: |
           $scenarios = @('ai-review-browser', 'morphology-browser', 'dictionary-electron', 'final-medical-browser', 'final-renderer-electron', 'update-progress-browser')
-          if ($env:GITHUB_REF_NAME -eq 'codex/xrs-ai-067') { $scenarios += 'ai-067-electron' }
+          if ($env:GITHUB_REF_NAME -in @('codex/xrs-ai-067', 'codex/xrs-ai-069')) { $scenarios += 'ai-067-electron' }
           foreach ($scenario in $scenarios) {
             Write-Host "Running $scenario"
             $result = & node "tests/$scenario.mjs" 2>&1
@@ -320,6 +320,9 @@ jobs:
           Set-Content -Path (Join-Path $output 'SHA256SUMS.txt') -Value "$hash  X-ray_Report_Studio_Windows_Setup.zip" -NoNewline
           Write-Host "Unpublished updater candidate $version Setup ZIP SHA256: $hash"
           git diff --exit-code -- downloads/latest.json
+      - name: Real packaged updater regression and clipboard on Windows
+        if: github.ref_name == 'codex/xrs-ai-069'
+        run: node tests/updater-069-electron.mjs
       - name: Parse packaged Install.ps1 with Windows PowerShell 5.1
         if: steps.release-channel.outputs.updaterRollback053 == 'true'
         shell: powershell

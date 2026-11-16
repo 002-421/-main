@@ -5,7 +5,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { fileURLToPath } = require('node:url');
-const { verifySha256, writeShortcutAtomically } = require('./update-install.cjs');
+const { installUpdateArchive, verifySha256, writeShortcutAtomically } = require('./update-install.cjs');
 const { activateRendererUpdate, isUsableRenderer } = require('./live-update.cjs');
 const {
   CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema,
