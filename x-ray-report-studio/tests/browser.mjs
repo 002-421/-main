@@ -342,7 +342,7 @@ try{
  await fillField(await insertedField.getAttribute('data-field-id'),'Иследование. Очаг очаг не выявлен.');
  assert.match(await insertedField.innerText(),/Иследование/);
  await page.waitForFunction(()=>document.querySelector('#ai-review-status')?.textContent?.includes('Необходимо уточнить границы описания и заключения'));
- assert.equal(await page.locator('.ai-review-underline').count(),0,'ambiguous inserted content outside verified sections has no unsafe review ranges');
+ assert.equal(await page.locator('.ai-review-consistency,.ai-review-clinical').count(),0,'ambiguous boundaries disable clinical comparisons while local proofreading remains available');
  assert.equal(await insertedField.innerText(),'Иследование. Очаг очаг не выявлен.','ambiguous report review leaves the text intact');
  assert.equal(await page.locator('#ai-migrate-open').isVisible(),true,'manual boundary help is offered for ambiguous sections');
  await page.locator('#ai-migrate-open').click();

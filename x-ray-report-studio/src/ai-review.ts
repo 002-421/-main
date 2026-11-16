@@ -1,8 +1,8 @@
 import type { RichNode } from './model';
 import { MedicalTerminologyEngine, ClinicalConsistencyEngine, ClinicalLogicEngine } from './clinical-review.ts';
 
-export type ReviewBlockId = 'description' | 'conclusion';
-export type ReviewBlocks = Record<ReviewBlockId, string>;
+export type ReviewBlockId = string;
+export type ReviewBlocks = Record<string, string>;
 export type Operation = 'replace' | 'insert' | 'delete' | 'comment';
 export type Suggestion = {
   id: string; operation: Operation; blockId: ReviewBlockId; original: string;
@@ -51,6 +51,28 @@ export class ReportBlockExtractor {
     if (!description || !conclusion) throw new Error('Пустой разрешённый блок');
     return { description, conclusion };
   }
+}
+
+/** Paragraph keys use ProseMirror positions; masked identifiers keep offsets intact. */
+export function proofreadingBlocks(doc: RichNode): ReviewBlocks {
+  const blocks: ReviewBlocks = {};
+  const size = (n: RichNode): number => n.type === 'text' ? (n.text ?? '').length : n.content ? 2 + n.content.reduce((sum, child) => sum + size(child), 0) : 1;
+  const walk = (n: RichNode, pos: number) => {
+    if (['paragraph','heading'].includes(n.type)) {
+      let text = '';
+      for (const child of n.content ?? []) {
+        const value = child.type === 'text' ? child.text ?? '' : child.type === 'hardBreak' ? '\n' : ' ';
+        const field = child.marks?.find(m => m.type === 'templateField');
+        const identifier = field && /patient|doctor|physician|birthdate|reportdate|number|FIELD\.0043/i.test(String(field.attrs?.id)) || !!field && /Ф\.?\s*И\.?\s*О|дата рождения|номер исследования|Фамилия/iu.test(String(field.attrs?.hint));
+        text += identifier ? ' '.repeat(value.length) : value;
+      }
+      if (text.trim()) blocks[`paragraph@${pos}`] = text;
+      return;
+    }
+    let offset = n.type === 'doc' ? 0 : pos + 1;
+    for (const child of n.content ?? []) { walk(child, offset); offset += size(child); }
+  };
+  walk(doc, 0); return blocks;
 }
 
 export class PrivacyGuard {
@@ -108,21 +130,25 @@ export class ReviewEngine {
   private readonly provider: AIProvider;
   private readonly medical: { terminology: Pick<MedicalTerminologyEngine,'validate'>; consistency: Pick<ClinicalConsistencyEngine,'validate'>; clinical: Pick<ClinicalLogicEngine,'validate'> };
   constructor(provider: AIProvider = new MockAIProvider(), medical = { terminology:new MedicalTerminologyEngine(), consistency:new ClinicalConsistencyEngine(), clinical:new ClinicalLogicEngine() }) { this.provider = provider; this.medical = medical; }
-  async review(doc: RichNode, categories: ReadonlySet<ReviewCategory> = new Set(reviewCategories.map(([id]) => id)), signal?: AbortSignal): Promise<{ blocks: ReviewBlocks; suggestions: Suggestion[] }> {
+  async review(doc: RichNode, categories: ReadonlySet<ReviewCategory> = new Set(reviewCategories.map(([id]) => id)), signal?: AbortSignal): Promise<{ blocks: ReviewBlocks; suggestions: Suggestion[]; boundaryWarning?: boolean }> {
     signal?.throwIfAborted();
-    const blocks = new ReportBlockExtractor().extract(doc);
-    new PrivacyGuard().check(blocks);
+    let blocks: ReviewBlocks;
+    let boundaryWarning = false;
+    try { blocks = new ReportBlockExtractor().extract(doc); }
+    catch { blocks = {description:'', conclusion:''}; boundaryWarning = true; }
+    if (!boundaryWarning) new PrivacyGuard().check(blocks);
     const findings:Finding[]=[];
-    if(categories.has('style')) findings.push(...new TemplateValidator().validate(blocks));
-    if(categories.has('consistency')) findings.push(...this.medical.consistency.validate(blocks));
-    if(categories.has('terminology')) findings.push(...await this.medical.terminology.validate(blocks));
-    if(categories.has('clinical')) findings.push(...this.medical.clinical.validate(blocks));
-    if(['spelling','punctuation','style'].some(category=>categories.has(category as ReviewCategory)))findings.push(...await this.provider.review(blocks, signal));
+    if(!boundaryWarning && categories.has('style')) findings.push(...new TemplateValidator().validate(blocks));
+    if(!boundaryWarning && categories.has('consistency')) findings.push(...this.medical.consistency.validate(blocks));
+    if(!boundaryWarning && categories.has('terminology')) findings.push(...await this.medical.terminology.validate(blocks));
+    if(!boundaryWarning && categories.has('clinical')) findings.push(...this.medical.clinical.validate(blocks));
+    if(['spelling','punctuation','style'].some(category=>categories.has(category as ReviewCategory)))findings.push(...await this.provider.review(proofreadingBlocks(doc), signal));
     signal?.throwIfAborted();
+    Object.assign(blocks, proofreadingBlocks(doc));
     const unique=new Map<string,Finding>();
-    for(const finding of findings){const group=categoryGroup(finding.category);if(!group||!categories.has(group)||!allowed.has(finding.blockId)||!Number.isInteger(finding.from)||!Number.isInteger(finding.to)||finding.from<0||finding.to>blocks[finding.blockId].length||finding.from>finding.to||blocks[finding.blockId].slice(finding.from,finding.to)!==finding.original)continue;const key=JSON.stringify([finding.blockId,finding.operation,group,finding.from,finding.to,finding.original,finding.proposed,finding.explanation]);if(!unique.has(key))unique.set(key,finding);}
+    for(const finding of findings){const group=categoryGroup(finding.category);if(!group||!categories.has(group)||!(finding.blockId in blocks)||!Number.isInteger(finding.from)||!Number.isInteger(finding.to)||finding.from<0||finding.to>blocks[finding.blockId].length||finding.from>finding.to||blocks[finding.blockId].slice(finding.from,finding.to)!==finding.original)continue;const key=JSON.stringify([finding.blockId,finding.operation,group,finding.from,finding.to,finding.original,finding.proposed,finding.explanation]);if(!unique.has(key))unique.set(key,finding);}
     const suggestions=[...unique.values()].map(f=>({ ...f, id: crypto.randomUUID(), state: 'pending' as const }));
-    return { blocks, suggestions };
+    return { blocks, suggestions, ...(boundaryWarning ? {boundaryWarning:true} : {}) };
   }
 }
 
@@ -134,7 +160,7 @@ export class TrackChangesEngine {
   markAccepted(tabId: string, id: string): void { const item=this.get(tabId,id); if(item.state!=='pending')throw new Error('Правка уже рассмотрена'); item.state='accepted'; }
   accept(tabId: string, id: string, blocks: ReviewBlocks): ReviewBlocks {
     const suggestion = this.get(tabId, id);
-    if (suggestion.state !== 'pending' || !allowed.has(suggestion.blockId)) throw new Error('Правка недоступна');
+    if (suggestion.state !== 'pending' || !(suggestion.blockId in blocks)) throw new Error('Правка недоступна');
     const text = blocks[suggestion.blockId];
     if (!Number.isInteger(suggestion.from) || !Number.isInteger(suggestion.to) || suggestion.from < 0 || suggestion.to > text.length || suggestion.from > suggestion.to || text.slice(suggestion.from, suggestion.to) !== suggestion.original) throw new Error('Правка устарела');
     if (suggestion.operation === 'comment') throw new Error('Замечание не меняет текст');

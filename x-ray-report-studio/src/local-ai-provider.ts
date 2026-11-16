@@ -51,7 +51,7 @@ export class LocalAIProvider implements AIProvider {
   async review(blocks: ReviewBlocks, signal?: AbortSignal): Promise<Finding[]> {
     const findings: Finding[] = [];
     const personalWords = [...new Set(this.getPersonalWords().filter(word => typeof word === 'string'))];
-    for (const blockId of ['description', 'conclusion'] as const) {
+    for (const blockId of Object.keys(blocks)) {
       signal?.throwIfAborted();
       const text = blocks[blockId];
       for (const issue of await this.checker(text, personalWords, signal)) {

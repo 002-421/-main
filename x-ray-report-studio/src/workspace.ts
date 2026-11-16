@@ -469,7 +469,7 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
       if(abort.signal.aborted||generation!==reviewGeneration||reportId!==activeReportId||snapshot!==JSON.stringify(json()))return;
       tracks.set(reportId,result.suggestions);const rejected=rejectedReviewKeys.get(reportId)??new Set<string>();
       findings=result.suggestions.filter(item=>!rejected.has(reviewRejectionKey(item,result.blocks))&&!(['spelling','terminology'].includes(item.category)&&personalWords.includes(item.original.toLocaleLowerCase('ru-RU'))));reviewedBlocks=result.blocks;reviewedReport=reportId;
-      renderDecorations();status.textContent=findings.length?`Замечаний: ${findings.length}`:'Замечаний не найдено';
+      renderDecorations();status.textContent=result.boundaryWarning?'Необходимо уточнить границы описания и заключения.':findings.length?`Замечаний: ${findings.length}`:'Замечаний не найдено';migrateButton.hidden=!result.boundaryWarning;
     }catch(error){if(!abort.signal.aborted){const boundaries=/границ|структур|формат документа|пустой разрешённый блок/i.test((error as Error)?.message??'');status.textContent=boundaries?'Необходимо уточнить границы описания и заключения.':'Проверка недоступна.';migrateButton.hidden=!boundaries;}}
     finally{if(generation===reviewGeneration)status.removeAttribute('aria-busy');}
   };

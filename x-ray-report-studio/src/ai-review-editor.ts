@@ -1,13 +1,24 @@
 import type { Editor } from '@tiptap/core';
 import { TextSelection } from '@tiptap/pm/state';
 import type { ReviewBlocks, Suggestion } from './ai-review.ts';
-import { reviewPlain } from './ai-review.ts';
+import { reviewPlain, proofreadingBlocks } from './ai-review.ts';
 import type { RichNode } from './model';
 
 /** Map a reviewed substring within one text-only block, across any number of marked text runs. */
 export function resolveReviewRange(editor: Editor, suggestion: Suggestion, blocks: ReviewBlocks, expectedTabId?: string, activeTabId?: string): { from: number; to: number } {
   if (expectedTabId && expectedTabId !== activeTabId) throw new Error('Открыта другая вкладка');
   const doc = editor.state.doc;
+  if (suggestion.blockId.startsWith('paragraph@')) {
+    const pos = Number(suggestion.blockId.slice(10)), node = doc.nodeAt(pos);
+    if (!node?.isTextblock) throw new Error('Структура блока изменилась');
+    const from = pos + 1 + suggestion.from, to = pos + 1 + suggestion.to;
+    // Masked personal fields are never findings; verify the entire unmasked
+    // paragraph snapshot and exact source substring before applying an edit.
+    const snapshot = blocks[suggestion.blockId];
+    const current = proofreadingBlocks(doc.toJSON() as RichNode)[suggestion.blockId];
+    if (snapshot !== current || doc.textBetween(from,to) !== suggestion.original) throw new Error('Правка устарела');
+    return {from,to};
+  }
   const sections: { node: typeof doc; pos: number }[] = [];
   doc.forEach((node, pos) => { if (node.type.name === 'reportSection' && node.attrs.id === suggestion.blockId) sections.push({ node, pos }); });
   if (sections.length !== 1) throw new Error('Структура блока изменилась');

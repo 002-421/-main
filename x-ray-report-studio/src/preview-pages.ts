@@ -43,13 +43,40 @@ export function paginateBrowserPreview(html: string, doc: RichNode): string {
   measure.style.fontFamily = layout.fontFamily;
   scratch.append(measure);
   document.body.append(scratch);
-  const contentHeight = (layout.heightMm - layout.topMm - layout.bottomMm) * 96 / 25.4;
+  const footerProbe = document.createElement('div');
+  footerProbe.className = 'preview-word-footer';
+  footerProbe.textContent = DISCLAIMER_TEXT;
+  footerProbe.append(document.createElement('div'), document.createElement('div'));
+  footerProbe.children[0].textContent = EQUIPMENT_TEXT;
+  footerProbe.children[1].className = 'preview-word-page-number';
+  footerProbe.children[1].textContent = '1';
+  scratch.append(footerProbe);
+  const scale = scratch.getBoundingClientRect().width / scratch.offsetWidth || 1;
+  const footerReserve = 6.5 * 96 / 25.4 + footerProbe.getBoundingClientRect().height / scale + 3 * 96 / 25.4;
+  const bottom = Math.max(layout.bottomMm * 96 / 25.4, footerReserve);
+  const contentHeight = (layout.heightMm - layout.topMm) * 96 / 25.4 - bottom;
+  const effectiveCss = css + `;--preview-bottom:${bottom}px`;
+
   const pages: HTMLElement[] = [];
-  const makePage = () => { const paper = document.createElement('article'); paper.className = 'export-preview-paper'; paper.style.cssText = css; const content = document.createElement('div'); content.className = 'report-content'; content.style.fontFamily = layout.fontFamily; paper.append(content); pages.push(paper); return content; };
+  const makePage = () => { const paper = document.createElement('article'); paper.className = 'export-preview-paper'; paper.style.cssText = effectiveCss; const content = document.createElement('div'); content.className = 'report-content'; content.style.fontFamily = layout.fontFamily; paper.append(content); pages.push(paper); return content; };
   let target = makePage();
-  const measuredHeight = () => measure.getBoundingClientRect().height;
-  const fits = (node: HTMLElement) => { measure.append(node); const fits = measuredHeight() <= contentHeight + 0.5; node.remove(); return fits; };
-  const append = (node: HTMLElement) => { measure.append(node.cloneNode(true)); target.append(node); };
+  const measuredHeight = () => {
+    const top = measure.getBoundingClientRect().top;
+    return Math.max(measure.getBoundingClientRect().height, ...[...measure.querySelectorAll('*')].map(n => n.getBoundingClientRect().bottom - top)) / scale;
+  };
+  const fits = (node: HTMLElement) => { measure.append(node); const fits = measuredHeight() <= contentHeight - 0.5; node.remove(); return fits; };
+  const append = (node: HTMLElement) => {
+    const copy = node.cloneNode(true) as HTMLElement;
+    measure.append(copy);
+    // An indivisible oversized object (image/table row/word) must stay visible
+    // inside A4. Shrink only its preview; never clip or change the document.
+    if (!target.children.length && measuredHeight() > contentHeight) {
+      const ratio = Math.max(0.01, (contentHeight - 2) / measuredHeight());
+      node.style.zoom = copy.style.zoom = String(ratio);
+      node.setAttribute('data-preview-scaled', 'true');
+    }
+    target.append(node);
+  };
   const paragraphPart = (original: HTMLElement, start: number, end: number, total: number): HTMLElement => {
     const part = original.cloneNode(false) as HTMLElement;
     part.removeAttribute('data-page-break-before');
@@ -100,7 +127,7 @@ export function paginateBrowserPreview(html: string, doc: RichNode): string {
           if (start < text.length) { target = makePage(); measure.replaceChildren(); }
         }
       } else append(block);
-      if (measuredHeight() > contentHeight + 0.5) target.parentElement?.setAttribute('data-preview-overflow', 'true');
+      if (measuredHeight() > contentHeight - 0.5) target.parentElement?.setAttribute('data-preview-overflow', 'true');
     }
   } finally { scratch.remove(); }
   const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);

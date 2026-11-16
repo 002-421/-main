@@ -74,10 +74,10 @@ test('meaning-sensitive suggestions are comments; safe spacing needs explicit ac
   const edit=safe.suggestions.find(s=>s.original==='  '&&s.operation==='replace');
   assert.ok(edit);
   const tracks=new TrackChangesEngine();tracks.set('one',[edit]);tracks.set('two',[edit]);
-  const original={description:'Протокол  выполнен.',conclusion:'Без особенностей.'};
-  assert.equal(tracks.accept('one',edit.id,original).description,'Протокол выполнен.');
+  const original=safe.blocks;
+  assert.equal(tracks.accept('one',edit.id,original)[edit.blockId],'Протокол выполнен.');
   assert.equal(original.description,'Протокол  выполнен.');
-  assert.throws(()=>tracks.accept('two',edit.id,{...original,description:'Протокол выполнен.'}),/устарела/);
+  assert.throws(()=>tracks.accept('two',edit.id,{...original,[edit.blockId]:'Протокол выполнен.'}),/устарела/);
 });
 
 test('cancellation stops a running local analysis without logging clinical text', async () => {
