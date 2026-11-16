@@ -28,10 +28,11 @@ export type DocxOptions = {
   title?: string;
   kind?: 'report' | 'template';
   templateId?: string;
+  templateReview?: { format: 1; templateId: string; areaId: string; baseSha256: string; appVersion: string };
   /** Full source font faces keep Word layout stable on machines without that font installed. */
   fonts?: EmbeddedDocxFont[];
 };
-export type ImportedDocx = ReturnType<typeof validateDraft> & { kind: 'report' | 'template'; templateId?: string; importWarnings?: string[]; editedInWord?: boolean };
+export type ImportedDocx = ReturnType<typeof validateDraft> & { kind: 'report' | 'template'; templateId?: string; importWarnings?: string[]; editedInWord?: boolean; templateReview?: { format: number; templateId: string; areaId: string; baseSha256: string; appVersion: string } };
 
 function color(value: unknown): string | undefined {
   if (typeof value !== 'string') return;
@@ -602,6 +603,13 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
     }],
   });
   const zip = unzipSync(new Uint8Array(await Packer.toArrayBuffer(file)));
+  if(options.templateReview){
+    const settings=zip['word/settings.xml'];if(!settings)throw new Error('В DOCX отсутствуют настройки Word.');
+    let settingsXml=strFromU8(settings);if(!/<w:trackRevisions\b/.test(settingsXml))settingsXml=settingsXml.replace('</w:settings>','<w:trackRevisions/></w:settings>');zip['word/settings.xml']=strToU8(settingsXml);
+    zip['word/comments.xml']=strToU8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>');
+    const rels=strFromU8(zip['word/_rels/document.xml.rels']);if(!rels.includes('/comments'))zip['word/_rels/document.xml.rels']=strToU8(rels.replace('</Relationships>','<Relationship Id="rIdXrsComments" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/></Relationships>'));
+    const types=strFromU8(zip['[Content_Types].xml']);if(!types.includes('/word/comments.xml'))zip['[Content_Types].xml']=strToU8(types.replace('</Types>','<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/></Types>'));
+  }
   zip['customXml/itemPropsMRI.xml'] = strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><ds:datastoreItem ds:itemID="{A4B86616-2D71-4B08-9A17-D625BFE59739}" xmlns:ds="http://schemas.openxmlformats.org/officeDocument/2006/customXml"><ds:schemaRefs><ds:schemaRef ds:uri="${STATE_NS}"/></ds:schemaRefs></ds:datastoreItem>`);
   zip['customXml/_rels/mri-report-studio.xml.rels'] = strToU8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdMriProperties" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps" Target="itemPropsMRI.xml"/></Relationships>');
   const contentTypes = strFromU8(zip['[Content_Types].xml']).replace('</Types>', '<Override PartName="/customXml/itemPropsMRI.xml" ContentType="application/vnd.openxmlformats-officedocument.customXmlProperties+xml"/></Types>');
@@ -609,7 +617,7 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
   const relationships = strFromU8(zip['word/_rels/document.xml.rels']).replace('</Relationships>', '<Relationship Id="rIdMriDraft" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml" Target="../customXml/mri-report-studio.xml"/></Relationships>');
   zip['word/_rels/document.xml.rels'] = strToU8(relationships);
   const hashes = await contentHashes(zip);
-  const metadata = strToU8(JSON.stringify({ draft, documentHash: hashes['word/document.xml'], contentHashes: hashes, hashAlgorithm: 'SHA-256' }));
+  const metadata = strToU8(JSON.stringify({ draft, ...(options.templateReview?{templateReview:options.templateReview}:{}), documentHash: hashes['word/document.xml'], contentHashes: hashes, hashAlgorithm: 'SHA-256' }));
   if (metadata.length > MAX_STATE_BYTES) throw new Error('Документ слишком большой для сохранения редактируемых данных.');
   zip[STATE_PART] = strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><mri:report xmlns:mri="${STATE_NS}"><mri:state encoding="base64">${base64(metadata)}</mri:state></mri:report>`);
   const packed = zipSync(zip, { level: 6 });
@@ -659,5 +667,5 @@ export async function importOwnDocx(input: ArrayBuffer | Uint8Array | Blob): Pro
   }
   if (contentChanged && !documentChanged) importWarnings.push('В документе изменены стили или другие элементы Word. Они не входят в поддерживаемое редактируемое содержимое шаблона.');
   const result = validateDraft({ ...metadata.draft, doc: importedDoc });
-  return { ...result, cache: validatedCache(metadata.draft.cache), kind, templateId, editedInWord: documentChanged || contentChanged, importWarnings };
+  return { ...result, cache: validatedCache(metadata.draft.cache), kind, templateId, editedInWord: documentChanged || contentChanged, importWarnings, ...(metadata.templateReview?{templateReview:metadata.templateReview}:{}) };
 }
