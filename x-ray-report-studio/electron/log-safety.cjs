@@ -29,7 +29,8 @@ function sanitizeDiagnosticPath(value) {
 }
 
 function sanitizeUpdateLogEvent(event) {
-  const safe = copyPrimitiveFields(event, ['event', 'applicationVersion', 'platform', 'currentVersion', 'targetVersion', 'version', 'bytes', 'files', 'schemaVersion', 'expected', 'actual', 'percent', 'stage', 'restored', 'errorCode', 'phase', 'code', 'syscall', 'operation', 'attempt', 'processState', 'processCount', 'waitedMs', 'recoveryAction']);
+  const safe = copyPrimitiveFields(event, ['event', 'applicationVersion', 'platform', 'currentVersion', 'targetVersion', 'version', 'bytes', 'files', 'schemaVersion', 'expected', 'actual', 'percent', 'stage', 'restored', 'errorCode', 'errorType', 'phase', 'code', 'syscall', 'operation', 'attempt', 'processState', 'processCount', 'waitedMs', 'recoveryAction', 'currentRootAvailable', 'currentRootAbsolute', 'archiveAvailable']);
+  if (safe.errorType && !['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'SystemError', 'Unknown'].includes(safe.errorType)) safe.errorType = 'Unknown';
   if (Array.isArray(event?.blockingProcesses)) {
     safe.blockingProcesses = event.blockingProcesses.slice(0, 12).flatMap(item => {
       if (!Number.isSafeInteger(item?.pid) || item.pid <= 0 || typeof item?.processType !== 'string'

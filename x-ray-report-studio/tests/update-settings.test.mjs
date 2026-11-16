@@ -27,13 +27,15 @@ test('Stable updater verifies the archive and stages beside the live install bef
   const installHandler = main.slice(installStart, installEnd);
   assert.doesNotMatch(main, /updates:set-channel|channel-preference/);
   assert.match(installHandler, /verifySha256\(archive,update\.sha256\)/);
+  assert.ok(installHandler.indexOf("event: 'install-call-start'") < installHandler.indexOf('installUpdateArchive('), 'the installer entry boundary is logged before invoking the installer');
+  assert.match(main, /code === 'UPDATE_FAILED' && errorType/);
   assert.match(installHandler, /installUpdateArchive\(\{ archive: file, currentRoot: previousRoot, version: update\.version, log \}\)/);
   assert.match(installHandler, /activateRendererUpdate\(/);
   assert.match(installHandler, /pointShortcutTo\(installed\.executable, installed\.root\)/);
   assert.ok(installHandler.indexOf('installUpdateArchive(') < installHandler.indexOf('activateRendererUpdate('));
   assert.ok(installHandler.indexOf('activateRendererUpdate(') < installHandler.indexOf('pointShortcutTo(installed.executable'));
   assert.match(installHandler, /writeJsonAtomic\(installStateFile, nextInstallState\)/);
-  assert.match(installHandler, /errorCode, phase: updatePhase/);
+  assert.match(installHandler, /errorCode, errorType, phase: updatePhase/);
   assert.doesNotMatch(main, /runUpdateWorker|spawnDetachedUpdateWorker|acquireUpdateLease|inspectUpdateLease|user-data-backup/);
   assert.doesNotMatch(installHandler, /process\.execPath, app\.getVersion\(\).*Install|isInstallConfirmed/);
 });

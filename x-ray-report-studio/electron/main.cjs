@@ -188,10 +188,15 @@ async function createUpdateLogger() {
 function describeUpdateFailure(error, phase, logFile) {
   const code = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code)
     ? error.code : 'UPDATE_FAILED';
+  const errorType = ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'SystemError'].includes(error?.name) ? error.name : '';
+  const syscall = typeof error?.syscall === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(error.syscall) ? error.syscall : '';
   const operation = {
     'create-directory': 'создание временной папки',
     'extract-zip': 'распаковка проверенного архива',
     'copy-electron-runtime': 'копирование Electron runtime в новую папку',
+    'verify-current-install': 'проверка текущей установки',
+    'validate-install-input': 'проверка параметров установки',
+    'invoke-install-update-archive': 'запуск установщика обновления',
     'remove-staged-app': 'замена файлов приложения в подготовленной папке',
     'copy-verified-app': 'копирование новой версии приложения',
     'activate-version-directory': 'подготовка отдельной папки версии',
@@ -219,10 +224,14 @@ function describeUpdateFailure(error, phase, logFile) {
     UNSAFE_ARCHIVE: 'структура ZIP не прошла проверку безопасности',
     EXTRACT_FAILED: 'Windows не смогла распаковать ZIP',
     PACKAGE_VERSION_MISMATCH: 'версия внутри ZIP не совпадает с манифестом',
+    INSTALL_ROOT_INVALID: 'не удалось определить каталог текущей установки',
+    CURRENT_INSTALL_INVALID: 'файлы текущей установки недоступны',
+    UPDATE_ARCHIVE_PATH_INVALID: 'не удалось определить путь проверенного архива',
     SHORTCUT_WRITE_FAILED: 'Windows не создала новый ярлык',
   }[code];
   const location = operation || phaseLabel;
-  return `Обновление остановлено на этапе «${location}» (${code}${reason ? ` — ${reason}` : ''}). Предыдущая версия и профиль оставлены без изменений.${logFile ? ` Журнал обновления: ${logFile}` : ''}`;
+  const diagnostic = [code, reason, code === 'UPDATE_FAILED' && errorType ? errorType : '', syscall].filter(Boolean).join(' — ');
+  return `Обновление остановлено на этапе «${location}» (${diagnostic}). Предыдущая версия и профиль оставлены без изменений.${logFile ? ` Журнал обновления: ${logFile}` : ''}`;
 }
 
 function createUpdateLogWriter(filename, getQueue = () => Promise.resolve(), setQueue = () => {}) {
@@ -601,6 +610,12 @@ app.whenReady().then(async () => {
       await log({ event: 'verified-archive-written', targetVersion: update.version, bytes: archive.length, expected: update.sha256, actual: checksum, operation: 'write-verified-archive' });
       sendProgress({stage:'installing',loaded:archive.length,total:archive.length,percent:100});
       updatePhase = 'prepare-install';
+      await log({
+        event: 'install-call-start', phase: updatePhase, targetVersion: update.version,
+        currentRootAvailable: typeof previousRoot === 'string' && previousRoot.length > 0,
+        currentRootAbsolute: typeof previousRoot === 'string' && path.isAbsolute(previousRoot),
+        archiveAvailable: typeof file === 'string' && file.length > 0,
+      });
       installed = await installUpdateArchive({ archive: file, currentRoot: previousRoot, version: update.version, log });
       candidateIndex = path.join(installed.root, 'resources', 'app', 'dist', 'index.html');
       await log({ event: 'update-files-ready', targetVersion: update.version, operation: 'prepare-side-by-side-install' });
@@ -647,6 +662,7 @@ app.whenReady().then(async () => {
     } catch (error) {
       const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'UPDATE_FAILED';
       const syscall = typeof error?.syscall === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(error.syscall) ? error.syscall : undefined;
+      const errorType = ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'SystemError'].includes(error?.name) ? error.name : 'Unknown';
       updatePhase = error?.xrsPhase || updatePhase;
       if (shortcutChanged) {
         try {
@@ -679,8 +695,9 @@ app.whenReady().then(async () => {
         activeRendererIndex = previousIndex;
         liveUpdateInProgress = false;
       }
-      const operation = typeof error?.xrsOperation === 'string' ? error.xrsOperation : undefined;
-      await log({ event: 'update-error', errorCode, phase: updatePhase, ...(operation ? { operation } : {}), ...(syscall ? { syscall } : {}), recoveryAction: 'retain-previous-install-and-profile' });
+      const operation = typeof error?.xrsOperation === 'string' ? error.xrsOperation
+        : updatePhase === 'prepare-install' ? 'invoke-install-update-archive' : undefined;
+      await log({ event: 'update-error', errorCode, errorType, phase: updatePhase, ...(operation ? { operation } : {}), ...(syscall ? { syscall } : {}), recoveryAction: 'retain-previous-install-and-profile' });
       const message = describeUpdateFailure({ ...error, code: errorCode, xrsOperation: operation }, updatePhase, logFile);
       sendProgress({stage:'error',loaded:0,total:0,percent:0,message,logFile});
       throw new Error(message);

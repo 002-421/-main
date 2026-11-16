@@ -6,6 +6,7 @@ import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import { strToU8, zipSync } from 'fflate';
 import { fileURLToPath } from 'node:url';
 
@@ -16,7 +17,7 @@ const runElectronWorker = (executable, worker, options = {}) => execFileAsync(ex
   ...options,
 });
 const require = createRequire(import.meta.url);
-const { installUpdateArchive, writeShortcutAtomically } = require('../electron/update-install.cjs');
+const { installUpdateArchive, verifySha256, writeShortcutAtomically } = require('../electron/update-install.cjs');
 const { createUserDataBackup, verifyUserDataBackup } = require('../electron/user-data-backup.cjs');
 const { CURRENT_DATA_CONTRACT } = require('../electron/data-compatibility.cjs');
 const {
@@ -218,9 +219,9 @@ test('Windows .56 → .57 → .58 handoff and stale Stable-state recovery valida
   }), null, 'mismatched shortcut prevents recovery from confirming Stable');
 });
 
-test('legacy side-by-side update stages a verified app while the real old Electron runtime and synthetic profile remain open', { skip: process.platform !== 'win32' }, async t => {
+test('0.4.66 → 0.4.68 stages a SHA-256-verified app while the real old Electron runtime and synthetic profile remain open', { skip: process.platform !== 'win32' }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'XRS live update кириллица '));
-  const currentRoot = path.join(root, 'App_0.4.62');
+  const currentRoot = path.join(root, 'App_0.4.66');
   const profile = path.join(root, 'Synthetic profile', 'MRI Report Studio');
   const readyFile = path.join(root, 'worker-ready.json');
   const stopFile = path.join(root, 'stop-worker');
@@ -245,7 +246,7 @@ test('legacy side-by-side update stages a verified app while the real old Electr
   const oldApp = path.join(currentRoot, 'resources', 'app');
   await fs.rm(oldApp, { recursive: true, force: true });
   await fs.mkdir(path.join(oldApp, 'electron'), { recursive: true });
-  await fs.writeFile(path.join(oldApp, 'package.json'), JSON.stringify({ name: 'xrs-live-smoke', productName: 'XRS live smoke', version: '0.4.62', main: 'electron/main.cjs' }));
+  await fs.writeFile(path.join(oldApp, 'package.json'), JSON.stringify({ name: 'xrs-live-smoke', productName: 'XRS live smoke', version: '0.4.66', main: 'electron/main.cjs' }));
   await fs.writeFile(path.join(oldApp, 'electron', 'main.cjs'), [
     "const { app } = require('electron');",
     "const fs = require('node:fs');",
@@ -280,20 +281,23 @@ test('legacy side-by-side update stages a verified app while the real old Electr
   const packageRoot = path.join(root, 'verified update', 'X-ray Report Studio Setup', 'app');
   await fs.mkdir(path.join(packageRoot, 'electron'), { recursive: true });
   await fs.mkdir(path.join(packageRoot, 'dist'), { recursive: true });
-  await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ version: '0.4.63', main: 'electron/main.cjs' }));
+  await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ version: '0.4.68', main: 'electron/main.cjs' }));
   await fs.writeFile(path.join(packageRoot, 'electron', 'main.cjs'), 'module.exports = true;');
-  await fs.writeFile(path.join(packageRoot, 'dist', 'index.html'), '<!doctype html><title>Synthetic XRS 0.4.63</title>');
+  await fs.writeFile(path.join(packageRoot, 'dist', 'index.html'), '<!doctype html><title>Synthetic XRS 0.4.68</title>');
   const archive = path.join(root, 'verified-update.zip');
-  await fs.writeFile(archive, 'synthetic archive already passed SHA-256 verification');
+  const verifiedArchive = Buffer.from('synthetic 0.4.68 archive already passed SHA-256 verification');
+  const expectedSha256 = createHash('sha256').update(verifiedArchive).digest('hex');
+  assert.equal(verifySha256(verifiedArchive, expectedSha256), true);
+  await fs.writeFile(archive, verifiedArchive);
   const installed = await installUpdateArchive({
-    archive, currentRoot, version: '0.4.63',
+    archive, currentRoot, version: '0.4.68',
     extractArchive: async (_filename, destination) => fs.cp(path.dirname(packageRoot), path.join(destination, 'X-ray Report Studio Setup'), { recursive: true }),
   });
 
   assert.equal(child.exitCode, null, 'the real old Electron main process remains alive during side-by-side preparation');
   assert.deepEqual(await fs.readFile(path.join(currentRoot, 'resources', 'app', 'electron', 'main.cjs')), oldMainBytes, 'the running old app files remain unchanged');
   assert.deepEqual(await fs.readFile(oldExecutable), oldExecutableBytes, 'the running old executable is read-only to the update flow');
-  assert.equal(JSON.parse(await fs.readFile(path.join(installed.root, 'resources', 'app', 'package.json'), 'utf8')).version, '0.4.63');
+  assert.equal(JSON.parse(await fs.readFile(path.join(installed.root, 'resources', 'app', 'package.json'), 'utf8')).version, '0.4.68');
   for (const [name, contents] of Object.entries(syntheticUserFiles))
     assert.equal(await fs.readFile(path.join(profile, name), 'utf8'), contents, `${name} remains byte-for-byte unchanged`);
   assert.deepEqual(await fs.readdir(path.dirname(profile)), ['MRI Report Studio'], 'no profile backup/copy is created during update staging');

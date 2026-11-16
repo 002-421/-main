@@ -87,8 +87,44 @@ test('temporary extraction directory failure is logged before extract-start and 
   }), /synthetic temporary directory access denied/);
   assert.equal(log.some(entry => entry.event === 'extract-start'), false);
   assert.deepEqual(log.find(entry => entry.event === 'install-error'), {
-    event: 'install-error', phase: 'create-extraction-temp', operation: 'create-directory', errorCode: 'EACCES', syscall: 'mkdtemp',
+    event: 'install-error', phase: 'create-extraction-temp', operation: 'create-directory', errorCode: 'EACCES', errorType: 'Error', syscall: 'mkdtemp',
   });
+  assert.equal(await fs.readFile(path.join(f.currentRoot, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'old app');
+});
+
+test('install entry validates the current root after logging and identifies invalid input before extraction', async t => {
+  const f = await fixture();
+  t.after(() => fs.rm(f.directory, { recursive: true, force: true }));
+  const log = [];
+  await assert.rejects(installUpdateArchive({
+    archive: f.archive, currentRoot: undefined, version: '0.4.14',
+    extractArchive: fakeExtractor(f.packageRoot), log: async entry => log.push(entry),
+  }), error => error.code === 'INSTALL_ROOT_INVALID' && error.xrsPhase === 'validate-install-input');
+  assert.deepEqual(log[0], { event: 'install-phase', phase: 'validate-install-input' });
+  assert.deepEqual(log.at(-1), {
+    event: 'install-error', phase: 'validate-install-input', operation: 'validate-install-input',
+    errorCode: 'INSTALL_ROOT_INVALID', errorType: 'Error',
+  });
+  assert.equal(log.some(entry => entry.event === 'extract-start'), false);
+  assert.equal(await fs.readFile(path.join(f.currentRoot, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'old app');
+});
+
+test('missing current install executable records the actual pre-extraction syscall and retains the old install', async t => {
+  const f = await fixture();
+  t.after(() => fs.rm(f.directory, { recursive: true, force: true }));
+  const log = [];
+  await fs.unlink(path.join(f.currentRoot, 'X-ray Report Studio.exe'));
+  await assert.rejects(installUpdateArchive({
+    archive: f.archive, currentRoot: f.currentRoot, version: '0.4.14',
+    extractArchive: fakeExtractor(f.packageRoot), log: async entry => log.push(entry),
+  }), error => error.code === 'ENOENT' && error.syscall === 'stat' && error.xrsPhase === 'validate-install-input');
+  assert.ok(log.some(entry => entry.event === 'file-operation-error' && entry.operation === 'verify-current-install'
+    && entry.errorCode === 'ENOENT' && entry.syscall === 'stat'));
+  assert.deepEqual(log.at(-1), {
+    event: 'install-error', phase: 'validate-install-input', operation: 'verify-current-install',
+    errorCode: 'ENOENT', errorType: 'Error', syscall: 'stat',
+  });
+  assert.equal(log.some(entry => entry.event === 'extract-start'), false);
   assert.equal(await fs.readFile(path.join(f.currentRoot, 'resources', 'app', 'electron', 'main.cjs'), 'utf8'), 'old app');
 });
 
@@ -127,7 +163,7 @@ test('archive extraction failure is tagged with the extraction phase', async t =
   }), /synthetic invalid ZIP/);
   assert.equal(log.some(entry => entry.event === 'extract-start'), true);
   assert.deepEqual(log.find(entry => entry.event === 'install-error'), {
-    event: 'install-error', phase: 'extract-archive', operation: 'extract-zip', errorCode: 'EINVAL', syscall: 'tar',
+    event: 'install-error', phase: 'extract-archive', operation: 'extract-zip', errorCode: 'EINVAL', errorType: 'Error', syscall: 'tar',
   });
 });
 

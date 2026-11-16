@@ -6,6 +6,11 @@ const { randomUUID, createHash } = require('node:crypto');
 
 const MAX_ZIP_ENTRIES = 20000;
 const MAX_ZIP_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024;
+const SAFE_ERROR_TYPES = new Set(['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'SystemError']);
+
+function safeErrorType(error) {
+  return SAFE_ERROR_TYPES.has(error?.name) ? error.name : 'Unknown';
+}
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
@@ -92,13 +97,13 @@ function verifySha256(bytes, expected) {
 }
 
 /** Install app files beside the running copy. The caller commits the shortcut only after smoke checks. */
-async function installUpdateArchive({ archive, currentRoot, version, extractArchive = extractWithTar, createTemporaryDirectory = prefix => fs.mkdtemp(prefix), log = () => {} }) {
-  if (!/^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/.test(String(version))) throw Object.assign(new Error('Некорректная версия обновления.'), { code: 'INVALID_UPDATE_VERSION' });
-  const parent = path.dirname(currentRoot);
-  const stage = path.join(parent, `.X-ray_Report_Studio_stage_${randomUUID()}`);
+async function installUpdateArchive(options = {}) {
+  const { archive, currentRoot, version, extractArchive = extractWithTar,
+    createTemporaryDirectory = prefix => fs.mkdtemp(prefix), log = () => {} } = options ?? {};
   let temporary;
+  let stage;
   let newRoot;
-  let phase = 'create-extraction-temp';
+  let phase = 'validate-install-input';
   const runOperation = async (operation, diagnosticPath, action) => {
     const activeOperation = operation;
     await log({ event: 'file-operation-start', phase, operation, path: diagnosticPath });
@@ -113,11 +118,29 @@ async function installUpdateArchive({ archive, currentRoot, version, extractArch
       }
       const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'FILE_OPERATION_FAILED';
       const syscall = typeof error?.syscall === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(error.syscall) ? error.syscall : undefined;
-      await log({ event: 'file-operation-error', phase, operation, path: diagnosticPath, errorCode, ...(syscall ? { syscall } : {}) });
+      await log({ event: 'file-operation-error', phase, operation, path: diagnosticPath, errorCode, errorType: safeErrorType(error), ...(syscall ? { syscall } : {}) });
       throw error;
     }
   };
   try {
+    await log({ event: 'install-phase', phase });
+    if (!/^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/.test(String(version)))
+      throw Object.assign(new Error('Некорректная версия обновления.'), { code: 'INVALID_UPDATE_VERSION' });
+    if (typeof currentRoot !== 'string' || !path.isAbsolute(currentRoot))
+      throw Object.assign(new Error('Не удалось определить каталог текущей установки.'), { code: 'INSTALL_ROOT_INVALID' });
+    if (typeof archive !== 'string' || !path.isAbsolute(archive))
+      throw Object.assign(new Error('Не удалось определить проверенный архив обновления.'), { code: 'UPDATE_ARCHIVE_PATH_INVALID' });
+
+    const parent = path.dirname(currentRoot);
+    stage = path.join(parent, `.X-ray_Report_Studio_stage_${randomUUID()}`);
+    await runOperation('verify-current-install', 'current-install-root-and-executable', async () => {
+      const root = await fs.stat(currentRoot);
+      if (!root.isDirectory()) throw Object.assign(new Error('Каталог текущей установки недоступен.'), { code: 'CURRENT_INSTALL_INVALID' });
+      const executable = await fs.stat(path.join(currentRoot, 'X-ray Report Studio.exe'));
+      if (!executable.isFile()) throw Object.assign(new Error('Исполняемый файл текущей установки недоступен.'), { code: 'CURRENT_INSTALL_INVALID' });
+    });
+
+    phase = 'create-extraction-temp';
     await log({ event: 'install-phase', phase });
     temporary = await runOperation('create-directory', 'update-extraction-temp', () => createTemporaryDirectory(path.join(os.tmpdir(), 'XRayReportStudio_Update_')));
     phase = 'extract-archive';
@@ -154,9 +177,10 @@ async function installUpdateArchive({ archive, currentRoot, version, extractArch
     return { root: newRoot, executable: path.join(newRoot, 'X-ray Report Studio.exe'), icon: path.join(newRoot, 'resources', 'app', 'dist', 'x-ray-report-studio.ico'), version };
   } catch (error) {
     if (error && typeof error === 'object') error.xrsPhase ??= phase;
+    if (error && typeof error === 'object') error.xrsOperation ??= phase === 'validate-install-input' ? 'validate-install-input' : undefined;
     const errorCode = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(error.code) ? error.code : 'INSTALL_FAILED';
     const syscall = typeof error?.syscall === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(error.syscall) ? error.syscall : undefined;
-    try { await log({ event: 'install-error', phase, ...(typeof error?.xrsOperation === 'string' ? { operation: error.xrsOperation } : {}), errorCode, ...(syscall ? { syscall } : {}) }); } catch {}
+    try { await log({ event: 'install-error', phase, ...(typeof error?.xrsOperation === 'string' ? { operation: error.xrsOperation } : {}), errorCode, errorType: safeErrorType(error), ...(syscall ? { syscall } : {}) }); } catch {}
     if (newRoot) await fs.rm(newRoot, { recursive: true, force: true }).catch(() => {});
     throw error;
   } finally {
