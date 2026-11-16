@@ -117,3 +117,8 @@ html[data-theme="dark"] .ai-review-panel,html[data-theme="dark"] .ai-review-card
 .save-menu{position:relative}.save-menu-items{position:absolute;right:0;top:calc(100% + 6px);z-index:150;display:grid;gap:4px;padding:6px;background:var(--surface,#fff);border:1px solid var(--border);border-radius:7px;box-shadow:0 6px 20px #0003}.save-menu-items[hidden]{display:none}.save-menu-items .btn{justify-content:flex-start}html[data-theme="dark"] .save-menu-items{background:#1c2936}
 
 .btn[hidden]{display:none!important}
+
+/* Print overrides follow the dark theme rules so the canvas cannot paint black. */
+@media print{html[data-theme],html[data-theme] body,html[data-theme] .shell,html[data-theme] .main,html[data-theme] .canvas,html[data-theme] .paper{background:#fff!important;color-scheme:light!important}.paper{color:#172333!important}#editor{background:#fff!important}.ai-review-card,.ai-review-panel{display:none!important}}
+#stamp-preview{height:190px;overflow:hidden;position:relative;justify-content:center;isolation:isolate}#stamp-preview img{position:static!important;transform:none!important;max-height:170px!important;max-width:100%;object-fit:contain}
+.topbar{height:auto;min-height:62px;padding-top:9px;padding-bottom:9px}.document-heading small[hidden]{display:none}.package-selection{max-height:45vh;overflow:auto}.package-selection label{display:block;padding:8px}.package-diff pre{white-space:pre-wrap;overflow-wrap:anywhere}.package-diff details{border:1px solid var(--border);padding:12px;margin:8px 0}.package-diff .template-import-diff{max-height:50vh;overflow:auto}

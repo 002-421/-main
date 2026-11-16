@@ -2,7 +2,7 @@ name: XRS-07/XRS-08 Windows validation
 
 on:
   push:
-    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062, codex/xrs-updater-rollback-053, codex/xrs-updater-068, codex/xrs-ai-069, codex/xrs-ai-065, codex/xrs-ai-066, codex/xrs-ai-067]
+    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062, codex/xrs-updater-rollback-053, codex/xrs-updater-068, codex/xrs-ai-069, codex/xrs-functional-071, codex/xrs-ai-065, codex/xrs-ai-066, codex/xrs-ai-067]
   pull_request:
     paths:
       - 'x-ray-report-studio/**'
@@ -62,7 +62,7 @@ jobs:
           $isStable056 = $version -eq '0.4.56' -and $sourceRef -eq 'codex/xrs-056-stable-clean'
           $isUpdateHotfix = $sourceRef -eq 'codex/xrs-first-start-confirmation'
           $isUpdaterRecovery = $sourceRef -in @('codex/xrs-updater-recovery', 'codex/xrs-updater-062', 'codex/xrs-updater-068')
-          $isUpdaterRollback053 = $sourceRef -in @('codex/xrs-updater-rollback-053', 'codex/xrs-updater-068', 'codex/xrs-ai-065', 'codex/xrs-ai-066', 'codex/xrs-ai-067', 'codex/xrs-ai-069')
+          $isUpdaterRollback053 = $sourceRef -in @('codex/xrs-updater-rollback-053', 'codex/xrs-updater-068', 'codex/xrs-ai-065', 'codex/xrs-ai-066', 'codex/xrs-ai-067', 'codex/xrs-ai-069', 'codex/xrs-functional-071')
           $isUpdaterCandidate060 = $version -eq '0.4.60' -and $isUpdaterRecovery
           Add-Content -Path $env:GITHUB_OUTPUT -Value "beta=$($isBeta.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "stable056=$($isStable056.ToString().ToLowerInvariant())" -Encoding utf8
@@ -254,6 +254,9 @@ jobs:
       - name: Export and preserve patient tab lifecycle (1, 2, 5, 12 tabs)
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm run test:tab-lifecycle
+      - name: Functional 0.4.71 browser acceptance
+        if: github.ref_name == 'codex/xrs-functional-071'
+        run: node tests/functional-071-browser.mjs
       - name: Verified profile backup tests
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm run test:preupdate-backup
