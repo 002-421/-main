@@ -35,7 +35,7 @@ try{
  const fixedDir=await runtime('0.4.69',candidate);page=await launch(fixedDir);
  assert.equal(await page.locator('#document-name').inputValue(),'Synthetic retained draft');
  // A future version exists only in synthetic test payload; never published.
- const entries=unzipSync(candidate);const p='X-ray Report Studio Setup/app/package.json';const pkg=JSON.parse(new TextDecoder().decode(entries[p]));pkg.version='0.4.70';entries[p]=strToU8(JSON.stringify(pkg));const next=Buffer.from(zipSync(entries));
+ const entries=unzipSync(candidate);const p='X-ray Report Studio Setup/app/package.json';const pkg=JSON.parse(new TextDecoder().decode(entries[p]));pkg.version='0.4.70';entries[p]=strToU8(JSON.stringify(pkg));entries['X-ray Report Studio Setup/app/xrs-test-mode.json']=strToU8(marker);const next=Buffer.from(zipSync(entries));
  await manifest('0.4.70',next,'0'.repeat(64));
  const bad=await page.evaluate(async()=>{try{return await window.desktop.installUpdate();}catch(e){return String(e);}});assert.match(bad,/SHA-256|контрольн|checksum/iu);
  assert.equal(await page.locator('#document-name').inputValue(),'Synthetic retained draft');
