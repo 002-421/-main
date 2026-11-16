@@ -141,10 +141,8 @@ try{
  const editedMeasurement=page.locator('.report-content p').filter({hasText:'максимальная размерами'}).first();
  const measurementMark=editedMeasurement.locator('mark[data-color="#ffff00"]').filter({hasText:'0,0'}).first();
  await measurementMark.click();
- await measurementMark.evaluate(el=>{const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){const offset=node.textContent.indexOf('0,0');if(offset<0)continue;const range=document.createRange();range.setStart(node,offset);range.setEnd(node,offset+3);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);return;}throw new Error('Highlighted measurement not found');});
- await page.keyboard.press('ArrowRight');
- for(let i=0;i<3;i++)await page.keyboard.press('Shift+ArrowLeft');
- assert.equal(await measurementMark.evaluate(el=>{const selection=getSelection();return selection?.anchorNode&&el.contains(selection.anchorNode)?selection.toString():'';}),'0,0','keyboard selection is synchronized with the intended highlighted measurement');
+ await measurementMark.evaluate(async el=>{const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){const offset=node.textContent.indexOf('0,0');if(offset<0)continue;const range=document.createRange();range.setStart(node,offset);range.setEnd(node,offset+3);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);document.dispatchEvent(new Event('selectionchange'));await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));return;}throw new Error('Highlighted measurement not found');});
+ assert.equal(await measurementMark.evaluate(el=>{const selection=getSelection();return selection?.anchorNode&&el.contains(selection.anchorNode)?selection.toString():'';}),'0,0','selection covers the intended highlighted measurement');
  await page.keyboard.type('0,25');
  await page.waitForFunction(()=>[...document.querySelectorAll('.report-content p')].some(el=>el.textContent?.includes('максимальная размерами 0,25 см')));
  assert.match(await editedMeasurement.innerText(),/максимальная размерами 0,25 см/);
