@@ -164,3 +164,11 @@ test('pending first-start cannot be confirmed from an unrelated executable or ma
  assert.equal(getPendingFirstStartAction(state,state.current.root,path.join(state.current.root,'X-ray Report Studio.exe'),'0.4.56'),'blocked','the path alone cannot confirm a different executable version');
  assert.equal(getPendingFirstStartAction(state,state.current.root,path.join(state.current.root,'different.exe'),'0.4.57'),'blocked','the folder alone cannot confirm a different executable');
 });
+
+test('0.4.69 can return to the unchanged 0.4.68 profile contract but refuses another schema',()=>{
+ const root=path.join(os.tmpdir(),'Synthetic-XRS','App_0.4.69');
+ const previousRoot=path.join(os.tmpdir(),'Synthetic-XRS','App_0.4.68');
+ const installState={status:'stable',current:{version:'0.4.69',root,dataSchemaVersion:1},previous:{version:'0.4.68',root:previousRoot,executable:path.join(previousRoot,'X-ray Report Studio.exe'),dataSchemaVersion:1}};
+ assert.equal(canRollback({installState,currentRoot:root,dataState:{schemaVersion:1,dataContract:CURRENT_DATA_CONTRACT}}).available,true);
+ assert.equal(canRollback({installState,currentRoot:root,dataState:{schemaVersion:2,dataContract:CURRENT_DATA_CONTRACT}}).available,false);
+});
