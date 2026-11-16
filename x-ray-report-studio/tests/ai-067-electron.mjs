@@ -3,6 +3,7 @@ import {_electron} from 'playwright-core';
 import {cp,mkdir,mkdtemp,rename,rm,readFile} from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import {execFileSync} from 'node:child_process';
 
 const temp=await mkdtemp(path.join(os.tmpdir(),'xrs-ai-067-'));
 const runtime=path.join(temp,'Installed XRS');
@@ -37,12 +38,17 @@ try{
  await page.keyboard.press('Control+y');assert.match(await page.locator('.report-content').innerText(),/дистрофических/u);
  await page.locator('#copy-for-ai').click();const preview=page.locator('#ai-copy-text');await preview.waitFor();const before=await preview.inputValue();assert.ok(before.includes('Экструзии L1/2'));assert.ok(before.includes('Иванов Иван'));assert.ok(!before.includes('Пациент:'));
  assert.equal(await page.locator('#ai-copy-confirm').count(),0);await page.locator('#ai-copy-commit').click();assert.equal(await app.evaluate(({clipboard})=>clipboard.readText()),'','unresolved personal data must never enter clipboard');
- await preview.fill(before.replace('Осмотрел Иванов Иван.',''));assert.equal(await page.locator('#ai-copy-confirm').count(),0);await page.locator('#ai-copy-commit').click();
+ await preview.fill(before.replace('Осмотрел Иванов Иван.',''));assert.equal(await page.locator('#ai-copy-confirm').count(),0);
+ await app.evaluate(({clipboard})=>{globalThis.__xrsOriginalClipboardWrite=clipboard.writeText;clipboard.writeText=async()=>{throw new Error('SYNTHETIC_CLIPBOARD_REFUSED');};});
+ await page.locator('#ai-copy-commit').click();await page.getByText('Буфер обмена недоступен. Текст не скопирован. Предпросмотр сохранён.',{exact:true}).waitFor();
+ assert.equal(await preview.isVisible(),true);assert.ok((await preview.inputValue()).includes('Экструзии L1/2'));assert.equal(await app.evaluate(({clipboard})=>clipboard.readText()),'');
+ await app.evaluate(({clipboard})=>{clipboard.writeText=globalThis.__xrsOriginalClipboardWrite;delete globalThis.__xrsOriginalClipboardWrite;});
+ await page.locator('#ai-copy-commit').click();
  const copied=await app.evaluate(({clipboard})=>clipboard.readText());assert.ok(copied.includes('Экструзии L1/2'));assert.ok(!copied.includes('Иванов')&&!copied.includes('Пациент:')&&!copied.includes('Тестовый Врач'));
- assert.equal(await app.evaluate(({clipboard})=>clipboard.readHTML()),'','only plain text enters the clipboard');
- const formats=await app.evaluate(({clipboard})=>clipboard.availableFormats());assert.ok(formats.every(x=>/text|unicode|utf/i.test(x)),JSON.stringify(formats));
+ const formats=await app.evaluate(async({clipboard})=>(await clipboard.read()).flatMap(item=>item.types));assert.ok(formats.includes('text/plain'));assert.ok(!formats.some(x=>/html|image|json/i.test(x)),JSON.stringify(formats));
+ if(process.platform==='win32'){const native=execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command','[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Clipboard -Raw)))'],{encoding:'utf8'}).trim();assert.equal(Buffer.from(native,'base64').toString('utf8'),copied,'an independent Windows application reads the same Unicode clipboard text');}
  await page.locator('[data-section-id="description"] p').last().click();await page.keyboard.press('End');await page.keyboard.press('Enter');await page.keyboard.press('Control+v');
- assert.ok((await page.locator('.report-content').innerText()).includes(copied),'system plain text pastes back into XRS');
+ assert.ok((await page.locator('.report-content').innerText()).replace(/\s+/gu,' ').includes(copied.replace(/\s+/gu,' ')),'system plain text pastes back into XRS');
  console.log('PASS clipboard: real system plain-text write, identifier rejection, editable preview, paste back into XRS');
  await page.locator('#settings').click();await page.locator('#doctor-name').fill('Тестовый Врач');
  await page.locator('#doctor-stamp-file').setInputFiles({name:'stamp.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW+0AAAAASUVORK5CYII=','base64')});
