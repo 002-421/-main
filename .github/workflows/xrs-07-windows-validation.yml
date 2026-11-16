@@ -210,7 +210,7 @@ jobs:
         shell: pwsh
         run: |
           $scenarios = @('ai-review-browser', 'morphology-browser', 'dictionary-electron', 'final-medical-browser', 'final-renderer-electron', 'update-progress-browser')
-          if ($env:GITHUB_REF_NAME -eq 'codex/xrs-ai-067') { $scenarios += 'ai-067-electron.test' }
+          if ($env:GITHUB_REF_NAME -eq 'codex/xrs-ai-067') { $scenarios += 'ai-067-electron' }
           foreach ($scenario in $scenarios) {
             Write-Host "Running $scenario"
             $result = & node "tests/$scenario.mjs" 2>&1

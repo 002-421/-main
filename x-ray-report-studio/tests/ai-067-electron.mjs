@@ -1,15 +1,22 @@
 import assert from 'node:assert/strict';
 import {_electron} from 'playwright-core';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {cp,mkdir,mkdtemp,rename,rm} from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
 const temp=await mkdtemp(path.join(os.tmpdir(),'xrs-ai-067-'));
-const runtime=process.env.ELECTRON_PATH??path.join(process.cwd(),'node_modules','electron','dist',process.platform==='win32'?'electron.exe':'electron');
+const runtime=path.join(temp,'Installed XRS');
 let app;
 try{
- app=await _electron.launch({executablePath:runtime,args:['.',`--user-data-dir=${path.join(temp,'Profile')}`,'--no-sandbox',...(process.platform==='linux'?['--ozone-platform=headless','--disable-gpu']:[])],cwd:process.cwd(),env:{...process.env,MRI_REPORT_STUDIO_DICTIONARY_DIR:path.join(temp,'Dictionary')}});
+ await cp(path.join(process.cwd(),'node_modules/electron/dist'),runtime,{recursive:true});
+ const appRoot=path.join(runtime,'resources/app');await mkdir(appRoot,{recursive:true});
+ for(const name of ['electron','dist','package.json'])await cp(path.join(process.cwd(),name),path.join(appRoot,name),{recursive:true});
+ const executablePath=path.join(runtime,process.platform==='win32'?'X-ray Report Studio.exe':'X-ray Report Studio');
+ await rename(path.join(runtime,process.platform==='win32'?'electron.exe':'electron'),executablePath);
+ app=await _electron.launch({executablePath,args:[`--user-data-dir=${path.join(temp,'Profile')}`,'--no-sandbox',...(process.platform==='linux'?['--ozone-platform=headless','--disable-gpu']:[])],cwd:runtime,env:{...process.env,MRI_REPORT_STUDIO_DICTIONARY_DIR:path.join(temp,'Dictionary')}});
  const page=await app.firstWindow(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.locator('.report-content').waitFor();
+ assert.equal(await app.evaluate(({app})=>app.isPackaged),true,'the scenario launches a packaged Electron app');
+ assert.equal(await app.evaluate(({app})=>app.getVersion()),'0.4.67');
  await app.evaluate(({clipboard})=>clipboard.clear());
  const description='На уровне L4/L5 определяется левосторонняя фораминальная экструзия диска. На уровне L5/S1 определяется правосторонняя парамедианно-фораминальная экструзия. На уровне L3/L4 определяется протрузия диска. Признаки  дстрофических изменений. Суставная щели нерезко сужена. Гиперинтенсвный очаг. Позвоночный канал на исследованных уровнях не сужен. Осмотрел Иванов Иван.';
  const conclusion='Экструзии L1/2 и L5/S1. Протрузия L3/L4. Выраженный стеноз позвоночного канала.';
