@@ -225,7 +225,20 @@ jobs:
       - name: Per-document Undo and Redo history across tabs and restart
         id: report-history-tests
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
-        run: npm run test:history-browser
+        shell: pwsh
+        run: |
+          npm run test:history-browser
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            $file = 'test-output/report-history-failure.json'
+            if (Test-Path -LiteralPath $file) {
+              $detail = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
+              $message = "stage=$($detail.stage); error=$($detail.errorMessage)"
+              $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+              Write-Host "::error title=Report history failure::$message"
+            }
+            exit $testExit
+          }
       - name: Preserve report history failure diagnostics
         if: failure() && steps.report-history-tests.outcome == 'failure'
         uses: actions/upload-artifact@v4
