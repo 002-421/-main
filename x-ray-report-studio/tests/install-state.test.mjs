@@ -21,6 +21,7 @@ test('0.4.54 keeps the existing profile contract because Undo history is optiona
  assert.equal(applicationSupportsDataContract('0.4.63',CURRENT_DATA_CONTRACT,1),true,'the updater rollback candidate keeps the persisted contract');
  assert.equal(applicationSupportsDataContract('0.4.64',CURRENT_DATA_CONTRACT,1),true,'the technical update keeps the persisted contract');
  assert.equal(applicationSupportsDataContract('0.4.65',CURRENT_DATA_CONTRACT,1),true,'offline contextual review preserves the profile contract');
+ assert.equal(applicationSupportsDataContract('0.4.70',CURRENT_DATA_CONTRACT,1),true,'technical updater release preserves the 0.4.69 profile contract');
  assert.equal(applicationSupportsDataContract('0.4.53','xrs-local-undo-history-v1',1),false);
 });
 

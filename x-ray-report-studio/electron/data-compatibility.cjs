@@ -28,6 +28,7 @@ const APPLICATION_DATA_CONTRACTS = Object.freeze({
   // Clipboard/updater changes keep the tested .68 workspace and profile format.
   '0.4.68': Object.freeze([CURRENT_DATA_CONTRACT]),
   '0.4.69': Object.freeze([CURRENT_DATA_CONTRACT]),
+  '0.4.70': Object.freeze([CURRENT_DATA_CONTRACT]),
 });
 
 function applicationSupportsDataContract(applicationVersion, dataContract, schemaVersion = DATA_SCHEMA_VERSION) {
