@@ -352,10 +352,10 @@ try{
  const editableReportBefore=await page.locator('.report-content').innerText();
  await insertedField.click();await page.keyboard.press('End');await page.keyboard.insertText('!');
  assert.notEqual(await page.locator('.report-content').innerText(),editableReportBefore,'editing remains available after closing boundary help');await page.keyboard.press('Backspace');
- await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();
+ await selectField(await insertedField.getAttribute('data-field-id'));await page.locator('#highlight-yellow').click();
  assert.equal(await page.locator('#highlight-yellow').getAttribute('aria-pressed'),'true');assert.match(await page.locator('.toast').textContent(),/залит жёлтым/);assert.equal(await page.locator('.report-content').evaluate(el=>el.classList.contains('show-yellow-selection')),true);
  assert.ok((await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')),'yellow text highlighter can be applied');
- await insertedField.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.locator('#highlight-yellow').click();assert.ok(!(await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')),'yellow text highlighter can be removed from the selected text');
+ await selectField(await insertedField.getAttribute('data-field-id'));await page.locator('#highlight-yellow').click();assert.ok(!(await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')),'yellow text highlighter can be removed from the selected text');
  assert.match(await page.locator('.report-content strong').allTextContents().then(t=>t.join(' ')),/ЗАКЛЮЧЕНИЕ/);
  console.log('PASS: searchable previews and insertion, live spelling/grammar corrections and existing report formatting.');
  await insertedField.click();await page.keyboard.press('Control+End');
