@@ -24,7 +24,7 @@ try {
  await page.reload();
  await page.locator('.ai-review-style').filter({hasText:'щели'}).first().waitFor({timeout:30000});
  assert.deepEqual(await page.locator('.ai-review-spelling,.ai-review-terminology').allTextContents(),[],'valid forms are accepted by both analyzers');
- await page.locator('.ai-review-style').filter({hasText:'щели'}).first().click();
+ await page.locator('.ai-review-style').filter({hasText:'щели'}).first().click({button:'right'});
  assert.equal(await page.getByRole('button',{name:'Проверить',exact:true}).count(),0);
  assert.equal(await page.getByRole('button',{name:'Заменить',exact:true}).count(),0,'ambiguous grammar remains a physician comment');
  assert.match(await page.locator('.ai-review-card').innerText(),/Форма существительного не согласована/);

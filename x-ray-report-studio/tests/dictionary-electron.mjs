@@ -35,7 +35,7 @@ try{
   };
  });
  await page.reload();
- const mark=page.locator('.ai-review-spelling').filter({hasText:'Ошибкка'}).first();await mark.waitFor({timeout:30000});await mark.click();
+ const mark=page.locator('.ai-review-spelling').filter({hasText:'Ошибкка'}).first();await mark.waitFor({timeout:30000});await mark.click({button:'right'});
  assert.equal(await page.getByRole('button',{name:'Проверить',exact:true}).count(),0);
  await page.getByRole('button',{name:'Запомнить термин',exact:true}).click();
  await page.waitForFunction(()=>JSON.parse(localStorage.getItem('mri-report-studio.dictionary.v1')||'[]').includes('ошибкка'));
@@ -55,7 +55,7 @@ try{
  assert.ok((await page.evaluate(()=>window.desktop.dictionaryLoad())).words.includes('старыйтермин'),'old dictionary entries survive');
  // A real broken dictionary must fail visibly and must never be overwritten.
  await writeFile(path.join(shared,'dictionary.json'),'{broken-json');
- await page.locator('.ai-review-spelling').filter({hasText:'Ошибкка'}).first().click();
+ await page.locator('.ai-review-spelling').filter({hasText:'Ошибкка'}).first().click({button:'right'});
  await page.getByRole('button',{name:'Запомнить термин',exact:true}).click();
  await page.getByText('Не удалось сохранить термин. Файл словаря повреждён. Сохранение отменено.',{exact:true}).waitFor();
  assert.equal(await readFile(path.join(shared,'dictionary.json'),'utf8'),'{broken-json');
