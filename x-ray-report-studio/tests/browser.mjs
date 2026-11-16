@@ -318,7 +318,7 @@ try{
  const insertedField=page.locator('[data-template-field][data-hint="Описание участка"]').first();await insertedField.waitFor();
  await fillField(await insertedField.getAttribute('data-field-id'),'Иследование. Очаг очаг не выявлен.');
  assert.match(await insertedField.innerText(),/Иследование/);
- await page.waitForFunction(()=>document.querySelector('#ai-review-status')?.textContent?.includes('Не удалось определить границы'));
+ await page.waitForFunction(()=>document.querySelector('#ai-review-status')?.textContent?.includes('Необходимо уточнить границы описания и заключения'));
  assert.equal(await page.locator('.ai-review-underline').count(),0,'ambiguous inserted content outside verified sections has no unsafe review ranges');
  assert.equal(await insertedField.innerText(),'Иследование. Очаг очаг не выявлен.','ambiguous report review leaves the text intact');
  assert.equal(await page.locator('#ai-migrate-open').isVisible(),true,'manual boundary help is offered for ambiguous sections');
