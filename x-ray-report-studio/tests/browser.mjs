@@ -38,7 +38,17 @@ async function fillField(id,text){
   throw new Error(`Synthetic field replacement failed: ${JSON.stringify(failure)}`);
  }
 }
-async function typeAtFieldCaret(id,text='Ж'){await field(id).first().evaluate(el=>{el.closest('[contenteditable]').focus();const node=el.firstChild;const range=document.createRange();range.setStart(node,Math.floor((node.textContent??'').length/2));range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.type(text);}
+async function typeAtFieldCaret(id,text='Ж'){
+ const target=field(id).first();
+ await target.click();
+ await target.evaluate(el=>{const node=el.firstChild;const range=document.createRange();range.setStart(node,Math.floor((node.textContent??'').length/2));range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
+ // A real key event lets ProseMirror observe a DOM selection after the prior
+ // field's Undo. Otherwise its old selection can receive the next typed key.
+ await page.keyboard.press('ArrowRight');
+ const inTarget=await target.evaluate(el=>{const selection=getSelection();return selection?.isCollapsed&&!!selection.anchorNode&&el.contains(selection.anchorNode);});
+ assert.ok(inTarget,`${id}: caret remains in the intended field before typing`);
+ await page.keyboard.type(text);
+}
 async function assertFirstTypingReplacesHint(id){const target=field(id).first(),hint=await target.innerText();await typeAtFieldCaret(id,'Ж');assert.equal(await target.innerText(),'Ж',`${id}: typing at an interior caret replaces the whole hint`);assert.equal(await target.getAttribute('data-filled'),'true');await page.keyboard.press('Control+z');assert.equal(await target.innerText(),hint,`${id}: undo restores the complete hint`);assert.equal(await target.getAttribute('data-filled'),'false');}
 const tabTrace=[];
 async function assertTabState(step,id,required,excluded){
