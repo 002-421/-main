@@ -1,0 +1,37 @@
+name: XRS DOCX Anonymizer Windows x64
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/xrs-docx-anonymizer', 'feature/docx-anonymizer']
+    paths: ['xrs-docx-anonymizer/**', '.github/workflows/xrs-docx-anonymizer-windows.yml']
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: xrs-docx-anonymizer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: xrs-docx-anonymizer/requirements*.txt
+      - name: Build and run synthetic tests
+        shell: pwsh
+        run: ./build-windows.ps1
+      - name: Checksums
+        shell: pwsh
+        run: (Get-FileHash dist/XRS-DOCX-Anonymizer-Windows-x64.zip -Algorithm SHA256).Hash | Out-File dist/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XRS-DOCX-Anonymizer-Windows-x64
+          path: |
+            xrs-docx-anonymizer/dist/XRS-DOCX-Anonymizer-Windows-x64.zip
+            xrs-docx-anonymizer/dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14

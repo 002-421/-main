@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xrs-docx-anonymizer"
+version = "0.1.0"
+description = "Standalone offline DOCX anonymizer with a Russian GUI"
+requires-python = ">=3.12,<3.14"
+dependencies = ["lxml==6.1.1"]
+
+[project.scripts]
+xrs-anonymizer = "xrs_anonymizer.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["xrs_anonymizer*"]
