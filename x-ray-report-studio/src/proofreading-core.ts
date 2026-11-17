@@ -107,7 +107,7 @@ export function createRussianChecker(aff: string, dic: string, englishAff = '', 
         // names/long technical terms are still reported and can be allowed.
         const canSuggest = !isCorrect && word.length <= 28 && suggested < 40;
         if (canSuggest) suggested++;
-        const suggestions = canSuggest ? spell.suggest(word).slice(0, 3) : [];
+        const splits:string[]=[];if(canSuggest&&word.length>=7)for(let split=3;split<=word.length-3;split++){const left=word.slice(0,split),right=word.slice(split);if((correct(left)||recognized(left))&&(correct(right)||recognized(right)))splits.push(`${left} ${right}`);}const suggestions = canSuggest ? [...new Set([...(splits.length===1?splits:[]),...spell.suggest(word)])].filter(x=>normalize(x)!==normalize(word)).slice(0,3) : [];
         result = { correct: isCorrect, suggestions };
         if (spellingCache.size > 10_000) spellingCache.clear();
         // A later check may suggest a word skipped by this run's work budget.

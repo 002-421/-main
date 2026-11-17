@@ -147,7 +147,7 @@ export class ReviewEngine {
     Object.assign(blocks, proofreadingBlocks(doc));
     const unique=new Map<string,Finding>();
     for(const finding of findings){const group=categoryGroup(finding.category);if(!group||!categories.has(group)||!(finding.blockId in blocks)||!Number.isInteger(finding.from)||!Number.isInteger(finding.to)||finding.from<0||finding.to>blocks[finding.blockId].length||finding.from>finding.to||blocks[finding.blockId].slice(finding.from,finding.to)!==finding.original)continue;const key=JSON.stringify([finding.blockId,finding.operation,group,finding.from,finding.to,finding.original,finding.proposed,finding.explanation]);if(!unique.has(key))unique.set(key,finding);}
-    const suggestions=[...unique.values()].map(f=>({ ...f, id: crypto.randomUUID(), state: 'pending' as const }));
+    const suggestions=await Promise.all([...unique.values()].map(async f=>{const source=new TextEncoder().encode(JSON.stringify([f.blockId,f.category,f.operation,f.from,f.to,f.original,f.proposed,f.explanation]));const digest=await crypto.subtle.digest('SHA-256',source);return {...f,id:'review-'+[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join(''),state:'pending' as const};}));
     return { blocks, suggestions, ...(boundaryWarning ? {boundaryWarning:true} : {}) };
   }
 }

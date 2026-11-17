@@ -15,7 +15,7 @@ import { canRedoReport, canUndoReport, configureReportHistoryDepth, getReportHis
 import { EditorState, Selection } from '@tiptap/pm/state';
 import { ReviewEngine, TrackChangesEngine, LocalAIProvider, reviewCategories, categoryGroup, type ReviewCategory } from './ai-review';
 import { applyReviewSuggestion, isSafeReviewReplacement, resolveReviewRange } from './ai-review-editor';
-import { setAiReviewDecorations, setAiReviewFocusedSpan, setAiReviewKeyboardHandler } from './ai-review-decorations';
+import { setAiReviewDecorations } from './ai-review-decorations';
 import type { ReviewDecorationRange } from './ai-review-decorations';
 import { structurePreparedBuiltin } from './ai-review-structure';
 import { planManualMigration, createMigrationBackup, readMigrationBackup, migrationBackupKeys, type ManualBoundaries } from './ai-review-migration';
@@ -418,15 +418,20 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
     for(const item of items){
       const section=document.createElement('article');section.className='ai-review-card-item';
       const title=document.createElement('strong');title.textContent=reviewCategories.find(([id])=>id===categoryGroup(item.category))?.[1]??item.category;
-      const explanation=document.createElement('p');explanation.textContent=item.explanation;
+      const explanation=document.createElement('details');const summary=document.createElement('summary');summary.textContent=item.explanation.split(' Связанный фрагмент:')[0].slice(0,160);const evidence=document.createElement('p');evidence.textContent=item.explanation;explanation.append(summary,evidence);
       section.append(title,explanation);
-      if(item.related){const related=document.createElement('p');related.textContent=`Связанный фрагмент: ${item.related}`;section.append(related);}
-      const excerpt=document.createElement('small');excerpt.textContent=`Фрагмент: ${item.original||'позиция вставки'}`;section.append(excerpt);
+      if(item.related){const related=document.createElement('p');related.textContent=`Связанный фрагмент: ${item.related}`;explanation.append(related);}
+      const excerpt=document.createElement('small');excerpt.textContent=`Фрагмент: ${item.original||'позиция вставки'}`;explanation.append(excerpt);
       if((item.operation==='delete'||item.proposed)&&isSafeReviewReplacement(item)){const replace=document.createElement('button');replace.className='btn small primary';replace.textContent=item.operation==='delete'?'Удалить лишний пробел':'Заменить';replace.onclick=()=>{
         if(reviewedReport!==activeReportId||!reviewedBlocks){toast('Откройте документ, который проверяли.',true);return;}
         try{applyReviewSuggestion(editor,item,reviewedBlocks,reviewedReport,activeReportId);tracks.markAccepted(reviewedReport,item.id);findings=[];reviewedBlocks=undefined;setAiReviewDecorations(editor,[]);closeCard();toast('Исправление применено.');}
         catch{closeCard();toast('Текст изменился. Повторите проверку этого фрагмента.',true);}
       };section.append(replace);}
+      if(item.category==='spelling'){
+        const input=document.createElement('input');input.placeholder='Заменить на...';input.setAttribute('aria-label','Заменить на...');input.value=item.candidates?.[0]??item.proposed;
+        const apply=document.createElement('button');apply.className='btn small';apply.textContent='Применить';
+        apply.onclick=()=>{if(!reviewedBlocks||reviewedReport!==activeReportId)return;const chosen={...item,operation:'replace' as const,proposed:input.value,meaningRisk:false,confidence:'high' as const};try{applyReviewSuggestion(editor,chosen,reviewedBlocks,reviewedReport,activeReportId);closeCard();}catch{toast('Изменение устарело или может затрагивать медицинский смысл. Исправьте текст вручную.',true);}};section.append(input,apply);
+      }
       if(item.category==='spelling')for(const candidate of item.candidates??[]){
         const chosen={...item,operation:'replace' as const,proposed:candidate,meaningRisk:false,confidence:'high' as const};
         if(!isSafeReviewReplacement(chosen))continue;
@@ -444,7 +449,7 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
       section.append(actions);pop.append(section);
     }
     const dismiss=document.createElement('button');dismiss.className='ai-review-card-close';dismiss.type='button';dismiss.textContent='Закрыть';dismiss.onclick=closeCard;pop.append(dismiss);
-    pop.addEventListener('keydown',event=>{if((event as KeyboardEvent).key==='Escape'){closeCard();target.focus();}});
+    pop.addEventListener('keydown',event=>{if((event as KeyboardEvent).key==='Escape'){closeCard();editor.view.focus();}});
     document.body.append(pop);
     const position=()=>{if(!target.isConnected){closeCard();return;}const r=target.getBoundingClientRect(),w=pop.offsetWidth,h=pop.offsetHeight,pad=10;const left=Math.max(pad,Math.min(point?.x??r.left,window.innerWidth-w-pad));let top=point?.y??r.bottom+pad;if(top+h+pad>window.innerHeight)top=(point?.y??r.top)-h-pad;top=Math.max(pad,Math.min(top,window.innerHeight-h-pad));pop.style.left=`${left}px`;pop.style.top=`${top}px`;};
     cardPositionHandler=position;window.addEventListener('resize',position);window.addEventListener('scroll',position,true);
@@ -453,12 +458,13 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
   };
   const editorRoot=editor.view.dom;
   editorRoot.addEventListener('contextmenu',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(!span)return;event.preventDefault();openCard(span,{x:event.clientX,y:event.clientY});});
-  editorRoot.addEventListener('focusin',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(span)setAiReviewFocusedSpan(span);});
-  editorRoot.addEventListener('focusout',event=>{const to=(event as FocusEvent).relatedTarget as Node|null;if(!to||!editorRoot.contains(to))setAiReviewFocusedSpan(undefined);});
-  setAiReviewKeyboardHandler(span=>openCard(span));
+  editorRoot.addEventListener('click',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(span)openCard(span);});
   document.addEventListener('pointerdown',event=>{if(card&&!card.contains(event.target as Node))closeCard();},true);
   document.addEventListener('keydown',event=>{if(card&&(event.key.length===1||event.key==='Backspace'||event.key==='Delete')&&editorRoot.contains(event.target as Node)&&!event.altKey&&!event.ctrlKey&&!event.metaKey)closeCard();},true);
   document.addEventListener('keydown',event=>{const e=event as KeyboardEvent,target=e.target as HTMLElement;if(e.key==='Escape'&&card&&(editorRoot.contains(document.activeElement)||card.contains(target))){e.preventDefault();closeCard();}},true);
+  const enabledCategories=new Set<import('./ai-review.ts').ReviewCategory>(read('xrs.ai-review.categories.v1',reviewCategories.map(([id])=>id)));
+  const settings=document.createElement('details');settings.className='ai-review-category-settings';const settingsTitle=document.createElement('summary');settingsTitle.textContent='Категории проверки';settings.append(settingsTitle);
+  for(const [id,title] of reviewCategories){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=enabledCategories.has(id);input.dataset.aiCategory=id;input.onchange=()=>{if(input.checked)enabledCategories.add(id);else enabledCategories.delete(id);localStorage.setItem('xrs.ai-review.categories.v1',JSON.stringify([...enabledCategories]));scheduleReview();};label.append(input,document.createTextNode(title));settings.append(label);}status.parentElement?.append(settings);
   let reviewTimer=0, reviewGeneration=0;
   let reviewAbort:AbortController|undefined;
   const runReview=async()=>{
@@ -466,7 +472,7 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
     const generation=++reviewGeneration,reportId=activeReportId,snapshot=JSON.stringify(json());
     status.textContent='Проверка…';status.setAttribute('aria-busy','true');migrateButton.hidden=true;
     try{
-      const result=await new ReviewEngine(new LocalAIProvider(undefined,()=>personalWords)).review(json(),new Set(reviewCategories.map(([id])=>id)),abort.signal);
+      const result=await new ReviewEngine(new LocalAIProvider(undefined,()=>personalWords)).review(json(),enabledCategories,abort.signal);
       if(abort.signal.aborted||generation!==reviewGeneration||reportId!==activeReportId||snapshot!==JSON.stringify(json()))return;
       tracks.set(reportId,result.suggestions);const rejected=rejectedReviewKeys.get(reportId)??new Set<string>();
       findings=result.suggestions.filter(item=>!rejected.has(reviewRejectionKey(item,result.blocks))&&!(['spelling','terminology'].includes(item.category)&&personalWords.includes(item.original.toLocaleLowerCase('ru-RU'))));reviewedBlocks=result.blocks;reviewedReport=reportId;

@@ -4,10 +4,6 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 
 export type ReviewDecorationRange = { id: string; from: number; to: number; category: string; original: string };
 const key = new PluginKey<DecorationSet>('xrsAiReviewDecorations');
-let activateReviewSpan:((span:HTMLElement)=>void)|undefined;
-let focusedReviewSpan:HTMLElement|undefined;
-export function setAiReviewKeyboardHandler(handler:(span:HTMLElement)=>void){activateReviewSpan=handler;}
-export function setAiReviewFocusedSpan(span:HTMLElement|undefined){focusedReviewSpan=span;}
 const categoryClass: Record<string,string> = {
   spelling:'spelling', punctuation:'punctuation', style:'style', template:'style',
   terminology:'terminology', side:'consistency', level:'consistency', size:'consistency', consistency:'consistency', clinical:'clinical',
@@ -24,7 +20,7 @@ function build(doc: Parameters<typeof DecorationSet.create>[0], input: ReviewDec
     return Decoration.inline(from,to,{
       class:`ai-review-underline ${categories.map(x=>`ai-review-${x}`).join(' ')}`,
       'data-ai-review-ids':group.map(x=>x.id).join(','),
-      tabindex:'0', role:'button', 'aria-label':`Замечание AI Review: ${categories.join(', ')}`,
+      role:'mark', 'aria-label':`Замечание AI Review: ${categories.join(', ')}`,
     },{inclusiveStart:false,inclusiveEnd:false});
   }));
 }
@@ -47,13 +43,7 @@ export const AiReviewDecorations=Extension.create({
       },
       props:{
         decorations(state){return key.getState(state)??DecorationSet.empty;},
-        handleDOMEvents:{keydown(_view,event){
-          const keyboard=event as KeyboardEvent;
-          if(keyboard.key!=='Enter'&&keyboard.key!==' ')return false;
-          const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]')??(focusedReviewSpan?.isConnected?focusedReviewSpan:undefined);
-          if(!span)return false;
-          keyboard.preventDefault();activateReviewSpan?.(span);return true;
-        }},
+
       },
     })];
   },

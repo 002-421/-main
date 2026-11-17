@@ -79,6 +79,7 @@ function oneEditApart(left:string,right:string):boolean{
 export function isSafeReviewReplacement(suggestion:Suggestion):boolean{
   if(suggestion.operation==='comment'||suggestion.meaningRisk||suggestion.confidence==='limited')return false;
   if(!['spelling','punctuation','style','terminology'].includes(suggestion.category))return false;
+  if(suggestion.category==='spelling'&&suggestion.original!==suggestion.proposed&&suggestion.original.replace(/\s/gu,'')===suggestion.proposed.replace(/\s/gu,'')&&/^[\p{L} ]+$/u.test(suggestion.proposed))return true;
   if(protectedClinicalValue.test(suggestion.original)||protectedClinicalValue.test(suggestion.proposed))return false;
   if(suggestion.category==='punctuation')return suggestion.original.replace(/[\p{L}\p{N}]/gu,'')!==suggestion.proposed.replace(/[\p{L}\p{N}]/gu,'')&&suggestion.original.replace(/[^\p{L}\p{N}]/gu,'')===suggestion.proposed.replace(/[^\p{L}\p{N}]/gu,'');
   const original=suggestion.original.trim(),proposed=suggestion.proposed.trim();
