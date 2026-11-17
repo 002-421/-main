@@ -15,7 +15,22 @@ class BatchError(Exception):
     pass
 
 
+def require_local(path: Path):
+    # Reject network shares before filesystem resolution can contact their server.
+    if str(path).startswith(("\\\\", "//")):
+        raise BatchError("Используйте локальные папки: сетевые UNC-пути не поддерживаются.")
+    if os.name == "nt":
+        import ctypes
+        query = ctypes.windll.kernel32.GetDriveTypeW
+        query.argtypes = [ctypes.c_wchar_p]
+        query.restype = ctypes.c_uint
+        if query(Path(os.path.abspath(path)).anchor) == 4:  # DRIVE_REMOTE
+            raise BatchError("Используйте локальные папки: подключённый сетевой диск не поддерживается.")
+
+
 def discover(source: Path, destination: Path, recursive=True) -> list[Path]:
+    require_local(source)
+    require_local(destination)
     if source.is_symlink():
         raise BatchError("Папка источника не должна быть символической ссылкой.")
     source = source.resolve()
@@ -37,6 +52,7 @@ def discover(source: Path, destination: Path, recursive=True) -> list[Path]:
 
 class Session:
     def __init__(self, destination: Path):
+        require_local(destination)
         self.root = destination.resolve()
         self.lock = self.root / ".xrs-anonymizer.lock"
         self.lock_fd = None

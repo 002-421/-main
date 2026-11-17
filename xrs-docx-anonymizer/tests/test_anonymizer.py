@@ -14,7 +14,7 @@ import zipfile
 from docx import Document
 from lxml import etree as ET
 
-from xrs_anonymizer.batch import BatchError, Session, discover, run_batch
+from xrs_anonymizer.batch import BatchError, Session, discover, require_local, run_batch
 from xrs_anonymizer.core import Blocked, Rebuilder, Q, W, R, REL, NS, parse, process, read_package, verify, xml
 from .fixtures import minimal, rich_fixture, unpack, write
 
@@ -452,6 +452,12 @@ class AnonymizerTests(unittest.TestCase):
         result, blob = self.run_parts(minimal("Протокол МРТ №18415"))
         self.assertEqual(result.status, "PASS", result)
         self.assertEqual(self.text(blob), "Протокол МРТ")
+
+    def test_39_network_share_rejected_before_discovery(self):
+        with self.assertRaises(BatchError):
+            require_local(Path(r"\\server\share\documents"))
+        with self.assertRaises(BatchError):
+            require_local(Path("//server/share/documents"))
 
 
 if __name__ == "__main__":
