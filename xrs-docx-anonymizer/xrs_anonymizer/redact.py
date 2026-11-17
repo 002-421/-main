@@ -10,7 +10,7 @@ EPONYMS = re.compile(r"\b(?:Шморля|Бехтерева|Альцгеймер
 LABEL = re.compile(
     r"(?P<label>(?:Ф\s*\.?\s*И\s*\.?\s*О\s*\.?\s*(?:пациента|врача)?|"
     r"пациент(?:ка)?|врач(?:[-\s]рентгенолог)?|рентгенолог|исследование\s*выполнил[аи]?|"
-    r"подпись|дата\s*(?:рождения|исследования)|д[./]р|родился|родилась|"
+    r"подпись|дата\s*(?:рождения|исследования|проведения|выполнения|обследования)?|д[./]р|родился|родилась|"
     r"телефон|тел\.|адрес(?:\s+проживания)?|e-?mail|почта|СНИЛС|ИНН|паспорт|"
     r"полис(?:\s+ОМС)?|(?:ID|идентификатор|код)\s*пациента|"
     r"(?:номер|№)\s*(?:исследования|протокола|карты|истории\s*болезни)|"
@@ -20,7 +20,7 @@ LABEL = re.compile(
 BARE_LABEL = re.compile(r"^\s*(?:" + LABEL.pattern + r")\s*$", re.I)
 STANDALONE_LABEL = re.compile(
     r"^\s*(?:Ф\.?\s*И\.?\s*О\.?\s*(?:пациента|врача)?|пациент(?:ка)?|врач|"
-    r"дата\s*(?:рождения|исследования)|адрес|телефон|СНИЛС|полис|учреждение)\s*[:：]?\s*$", re.I)
+    r"дата(?:\s*(?:рождения|исследования|проведения|выполнения|обследования))?|адрес|телефон|СНИЛС|полис|учреждение)\s*[:：]?\s*$", re.I)
 PATTERNS = [
     ("FULL_NAME", re.compile(rf"\b{NAME}\s+{NAME}\s+{PATRONYMIC}\b")),
     ("INITIALS", re.compile(rf"\b{NAME}\s+[А-ЯЁ]\s*\.\s*[А-ЯЁ]\s*\.(?:\s*[А-ЯЁ]\s*\.)?")),
@@ -34,6 +34,13 @@ PATTERNS = [
     ("INITIALS", re.compile(r"\b[А-ЯЁ]{2,}\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.")),
 ]
 DATE = re.compile(r"(?<!\d)(?:\d{1,2}[./-]\d{1,2}[./-](?:19|20)?\d{2}|(?:19|20)\d{2}-\d{2}-\d{2})(?!\d)")
+SERVICE_DATE_FIELD = re.compile(
+    r"(?P<leading>[ \t]*)(?P<label>(?<!\w)(?:дата(?:\s+(?:исследования|проведения|выполнения|обследования))?))"
+    r"[ \t]*[:：=][ \t]*(?P<date>" + DATE.pattern + r")(?!\d)(?:[ \t]+\d{1,2}:\d{2}(?::\d{2})?)?",
+    re.I,
+)
+STUDY_TYPE_LABEL = re.compile(r"^[ \t]*область\s+и\s+вид\s+исследования\s*[:：]", re.I | re.M)
+SERVICE_DATE_LABEL_ONLY = re.compile(r"^\s*дата(?:\s+(?:исследования|проведения|выполнения|обследования))?\s*[:：]?\s*$", re.I)
 SUSPECT_NAME = re.compile(rf"\b{NAME}\s+{NAME}\b")
 SUSPECT = [
     ("UNLABELLED_DATE", DATE),
@@ -87,12 +94,38 @@ def spans(text: str, result: Redaction) -> list[tuple[int, int]]:
     return merged
 
 
+def service_date_spans(text: str) -> list[tuple[int, int]]:
+    """Only dates explicitly labelled as service/exam dates are removed."""
+    spans = []
+    for match in SERVICE_DATE_FIELD.finditer(text):
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        line_end = text.find("\n", match.end())
+        if line_end < 0:
+            line_end = len(text)
+        if STUDY_TYPE_LABEL.match(text[line_start:line_end]):
+            continue
+        spans.append((match.start(), match.end()))
+    return spans
+
+
+def study_type_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if STUDY_TYPE_LABEL.match(line)]
+
+
 def suspicious(text: str) -> set[str]:
     # A residual label with a value should already have been removed.
     text = LABEL.sub("", text)
     if STANDALONE_LABEL.fullmatch(text):
         return set()
-    issues = {name for name, pattern in SUSPECT if pattern.search(text)}
+    issues = set()
+    for name, pattern in SUSPECT:
+        candidate = STUDY_TYPE_LABEL.sub("", text) if name == "POSSIBLE_ADDRESS" else text
+        if pattern.search(candidate):
+            issues.add(name)
+    for match in DATE.finditer(text):
+        context = text[max(0, match.start() - 48):match.start()]
+        if re.search(r"(?:по\s+сравнению|сравнен\w*|динамик\w*|после\s+(?:операц\w*|лечен\w*)|\bот)\s*$", context, re.I):
+            issues.add("CLINICAL_DATE_REVIEW")
     for match in SUSPECT_NAME.finditer(text):
         if not EPONYMS.search(match.group()):
             issues.add("POSSIBLE_NAME")
@@ -108,22 +141,39 @@ def redact_nodes(nodes, result: Redaction) -> None:
     """Match across Word runs while retaining formatting of unaffected characters."""
     originals = [node.text or "" for node in nodes]
     text = "".join(originals)
-    changes = spans(text, result)
-    if changes:
-        offset = 0
-        for node, original in zip(nodes, originals):
-            end = offset + len(original)
-            pieces = []
-            cursor = offset
-            for start, stop in changes:
-                if stop <= offset or start >= end:
-                    continue
-                pieces.append(text[cursor:max(cursor, start)])
-                if offset <= start < end:
-                    fragment = text[start:stop].strip()
-                    pieces.append("" if fragment.startswith("№") else REMOVED)
-                cursor = min(end, stop)
-            pieces.append(text[cursor:end])
-            node.text = "".join(pieces)
-            offset = end
+    changes = []
+    service_dates = service_date_spans(text)
+    if service_dates:
+        apply_ranges(nodes, [(start, end, "") for start, end in service_dates])
+        text = "".join(node.text or "" for node in nodes)
+        result.count += len(service_dates)
+        result.categories.add("SERVICE_EXAM_DATE_REMOVED")
+    pii = spans(text, result)
+    if pii:
+        replacements = []
+        for start, end in pii:
+            fragment = text[start:end].strip()
+            replacements.append((start, end, "" if fragment.startswith("№") else REMOVED))
+        apply_ranges(nodes, replacements)
     result.issues.update(suspicious("".join(node.text or "" for node in nodes)))
+
+
+def apply_ranges(nodes, changes: list[tuple[int, int, str]]) -> None:
+    """Apply joined-paragraph ranges across text runs without moving other text."""
+    originals = [node.text or "" for node in nodes]
+    offset = 0
+    for node, original in zip(nodes, originals):
+        start_node, end_node = offset, offset + len(original)
+        pieces = []
+        cursor = start_node
+        for start, end, replacement in sorted(changes):
+            if end <= start_node or start >= end_node:
+                continue
+            if start >= cursor:
+                pieces.append(original[cursor - start_node:start - start_node])
+            if start_node <= start < end_node:
+                pieces.append(replacement)
+            cursor = max(cursor, min(end_node, end))
+        pieces.append(original[cursor - start_node:])
+        node.text = "".join(pieces)
+        offset = end_node

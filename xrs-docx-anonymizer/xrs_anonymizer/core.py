@@ -11,7 +11,7 @@ import zipfile
 
 from lxml import etree as ET
 
-from .redact import Redaction, REMOVED, STANDALONE_LABEL, redact_nodes, spans, suspicious
+from .redact import Redaction, REMOVED, SERVICE_DATE_LABEL_ONLY, STANDALONE_LABEL, STUDY_TYPE_LABEL, redact_nodes, service_date_spans, spans, study_type_lines, suspicious
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -145,6 +145,8 @@ class Rebuilder:
         self.parts: dict[str, bytes] = {}
         self.story_roots = {}
         self.has_numbering = False
+        self.study_type_texts: list[str] = []
+        self.study_type_rows: list[tuple[str, ...]] = []
 
     def inspect(self):
         for name, data in self.package.items():
@@ -359,8 +361,19 @@ class Rebuilder:
         # Identity labels often occupy the left cell, and the value the right cell.
         for row in root.iter(Q("tr")):
             cells = row.findall(Q("tc"))
+            cell_texts = tuple("".join(cell.itertext(Q("t"))) for cell in cells)
+            if any(STUDY_TYPE_LABEL.match(value) for value in cell_texts):
+                self.study_type_rows.append(cell_texts)
             for i in range(len(cells) - 1):
                 label = " ".join(cells[i].itertext(Q("t"))).strip()
+                if SERVICE_DATE_LABEL_ONLY.fullmatch(label):
+                    nodes = list(cells[i].iter(Q("t"))) + list(cells[i + 1].iter(Q("t")))
+                    if any((n.text or "").strip() for n in nodes):
+                        for n in nodes:
+                            n.text = ""
+                        self.redaction.count += 1
+                        self.redaction.categories.add("SERVICE_EXAM_DATE_REMOVED")
+                    continue
                 if STANDALONE_LABEL.fullmatch(label):
                     nodes = list(cells[i + 1].iter(Q("t")))
                     if any((n.text or "").strip() for n in nodes):
@@ -370,7 +383,10 @@ class Rebuilder:
                         self.redaction.count += 1
                         self.redaction.categories.add("TABLE_IDENTITY_FIELD")
         for paragraph in root.iter(Q("p")):
-            redact_nodes(text_nodes(paragraph), self.redaction)
+            nodes = text_nodes(paragraph)
+            original = "".join(node.text or "" for node in nodes)
+            self.study_type_texts.extend(study_type_lines(original))
+            redact_nodes(nodes, self.redaction)
 
     def build(self) -> dict[str, bytes]:
         self.inspect()
@@ -451,11 +467,13 @@ def text_nodes(paragraph):
     return nodes
 
 
-def verify(parts: dict[str, bytes]) -> set[str]:
+def verify(parts: dict[str, bytes], required_study_types=(), required_study_rows=()) -> set[str]:
     """Independent postcondition scan over the actual emitted package."""
     issues = set()
     allowed = {"[Content_Types].xml", "_rels/.rels", "word/_rels/document.xml.rels", "word/styles.xml", "word/numbering.xml"}
     forbidden = DROP | GRAPHICS | {"vanish", "webHidden", "instrText", "delText", "txbxContent", "hyperlink"}
+    found_study_types = []
+    found_study_rows = []
     for name, data in parts.items():
         if name not in allowed and not STORY.fullmatch(name):
             raise Blocked("VERIFY_UNEXPECTED_PART")
@@ -473,6 +491,10 @@ def verify(parts: dict[str, bytes]) -> set[str]:
             continue
         if not name.startswith("word/"):
             continue
+        for row in root.iter(Q("tr")):
+            cell_texts = tuple("".join(cell.itertext(Q("t"))) for cell in row.findall(Q("tc")))
+            if any(STUDY_TYPE_LABEL.match(value) for value in cell_texts):
+                found_study_rows.append(cell_texts)
         for node in root.iter():
             if not isinstance(node.tag, str) or ET.QName(node).namespace != W:
                 raise Blocked("VERIFY_UNEXPECTED_NAMESPACE")
@@ -495,10 +517,19 @@ def verify(parts: dict[str, bytes]) -> set[str]:
                     raise Blocked("VERIFY_METADATA_ATTRIBUTE")
         for p in root.iter(Q("p")):
             text = "".join(n.text or "" for n in text_nodes(p))
+            found_study_types.extend(study_type_lines(text))
+            if service_date_spans(text):
+                raise Blocked("VERIFY_RESIDUAL_SERVICE_DATE")
             residual = Redaction()
             if spans(text, residual):
                 raise Blocked("VERIFY_RESIDUAL_IDENTIFIER")
             issues.update(suspicious(text))
+    for expected in required_study_types:
+        if found_study_types.count(expected) < required_study_types.count(expected):
+            raise Blocked("VERIFY_STUDY_TYPE_CHANGED")
+    for expected in required_study_rows:
+        if found_study_rows.count(expected) < required_study_rows.count(expected):
+            raise Blocked("VERIFY_STUDY_TYPE_CHANGED")
     return issues
 
 
@@ -521,13 +552,13 @@ def process(path: Path, case_id: str) -> tuple[Result, bytes | None]:
         result.removed_fields = builder.redaction.count
         result.removed_images = builder.images
         result.categories = sorted(builder.redaction.categories | builder.redaction.issues)
-        issues = builder.redaction.issues | verify(parts)
+        issues = builder.redaction.issues | verify(parts, builder.study_type_texts, builder.study_type_rows)
         blob = package_bytes(parts)
         with zipfile.ZipFile(BytesIO(blob)) as archive:
             if archive.testzip() is not None:
                 raise Blocked("VERIFY_ZIP_CRC")
             actual = {n: archive.read(n) for n in archive.namelist()}
-        issues |= verify(actual)
+        issues |= verify(actual, builder.study_type_texts, builder.study_type_rows)
         result.removed_fields = builder.redaction.count
         result.removed_images = builder.images
         result.categories = sorted(builder.redaction.categories | issues)

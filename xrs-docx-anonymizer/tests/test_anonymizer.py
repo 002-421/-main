@@ -16,6 +16,7 @@ from lxml import etree as ET
 
 from xrs_anonymizer.batch import BatchError, Session, discover, require_local, run_batch
 from xrs_anonymizer.core import Blocked, Rebuilder, Q, W, R, REL, NS, parse, process, read_package, verify, xml
+from xrs_anonymizer.redact import service_date_spans
 from .fixtures import minimal, rich_fixture, unpack, write
 
 
@@ -56,7 +57,7 @@ class AnonymizerTests(unittest.TestCase):
 
     def test_03_birth_study_dates_and_number(self):
         for text in ["Дата рождения: 16.10.1973", "Дата исследования: 17.11.2026", "Протокол МРТ №18415"]:
-            result, blob = self.run_parts(minimal(text))
+            result, blob = self.run_parts(minimal(text + "\nОчаг 5 мм."))
             self.assertEqual(result.status, "PASS", result)
             for secret in ["1973", "2026", "18415"]:
                 self.assertNotIn(secret, self.text(blob))
@@ -106,6 +107,10 @@ class AnonymizerTests(unittest.TestCase):
         ET.SubElement(run, Q("t")).text = "СЕКРЕТ_СКРЫТЫЙ"
         run = ET.SubElement(p, Q("r"))
         ET.SubElement(run, Q("instrText")).text = "INCLUDETEXT СЕКРЕТ_ПУТЬ"
+        field_result = ET.SubElement(p, Q("r"))
+        ET.SubElement(field_result, Q("fldChar"), {Q("fldCharType"): "begin"})
+        ET.SubElement(field_result, Q("t")).text = "Дата проведения: 22.02.2022"
+        ET.SubElement(field_result, Q("fldChar"), {Q("fldCharType"): "end"})
         ET.SubElement(p, Q("commentRangeStart"), {Q("id"): "4"})
         parts["word/document.xml"] = xml(root)
         parts["word/comments.xml"] = b"<secret>SECRET_COMMENT</secret>"
@@ -115,6 +120,7 @@ class AnonymizerTests(unittest.TestCase):
         for data in unpack(blob).values():
             self.assertNotIn("СЕКРЕТ".encode(), data)
             self.assertNotIn(b"SECRET_COMMENT", data)
+            self.assertNotIn("22.02.2022".encode(), data)
 
     def test_07_hidden_inherited_style(self):
         parts = minimal("СЕКРЕТ_СКРЫТЫЙ")
@@ -290,11 +296,12 @@ class AnonymizerTests(unittest.TestCase):
         pict = ET.SubElement(ET.SubElement(p, Q("r")), Q("pict"))
         shape = ET.SubElement(pict, "{urn:schemas-microsoft-com:vml}shape")
         box = ET.SubElement(shape, Q("txbxContent"))
-        ET.SubElement(ET.SubElement(ET.SubElement(box, Q("p")), Q("r")), Q("t")).text = "Врач: Петров Пётр Петрович"
+        ET.SubElement(ET.SubElement(ET.SubElement(box, Q("p")), Q("r")), Q("t")).text = "Врач: Петров Пётр Петрович Дата: 01.02.2026"
         parts["word/document.xml"] = xml(root)
         result, blob = self.run_parts(parts)
         self.assertEqual(result.status, "REVIEW", result)
         self.assertNotIn("Петров", self.text(blob))
+        self.assertNotIn("01.02.2026", self.text(blob))
         self.assertNotIn(b"shape", b"".join(unpack(blob).values()))
         Document(BytesIO(blob))
 
@@ -458,6 +465,136 @@ class AnonymizerTests(unittest.TestCase):
             require_local(Path(r"\\server\share\documents"))
         with self.assertRaises(BatchError):
             require_local(Path("//server/share/documents"))
+
+    def test_40_study_type_line_preserved_byte_for_text(self):
+        line = "Область и вид исследования: МРТ левого коленного сустава"
+        result, blob = self.run_parts(minimal(line))
+        self.assertEqual(result.status, "PASS", result)
+        self.assertEqual(self.text(blob), line)
+
+    def test_41_inline_service_date_removed_without_neighbor_damage(self):
+        source = "Врач: Иванов Иван Иванович    дата: 01.02.2026"
+        result, blob = self.run_parts(minimal(source))
+        output = self.text(blob)
+        self.assertEqual(result.status, "PASS", result)
+        self.assertEqual(output, "Врач: [УДАЛЕНО]")
+        self.assertFalse(service_date_spans(output))
+
+    def test_42_exam_date_split_across_text_runs(self):
+        parts = minimal("")
+        root = parse(parts["word/document.xml"])
+        p = root.find(".//w:p", NS)
+        p.clear()
+        for fragment in ["Дата исследования: ", "01.02.", "2026", " Заключение: без отрицательной динамики."]:
+            ET.SubElement(ET.SubElement(p, Q("r")), Q("t")).text = fragment
+        parts["word/document.xml"] = xml(root)
+        result, blob = self.run_parts(parts)
+        output = self.text(blob)
+        self.assertEqual(result.status, "PASS", result)
+        self.assertNotIn("01.02", output)
+        self.assertNotIn("Дата исследования", output)
+        self.assertIn("Заключение: без отрицательной динамики.", output)
+
+    def test_43_medical_measurements_and_clinical_date_preserved_review(self):
+        text = "0,65 × 0,40 см; L4/5, L5/S1, C5/6; 73,85°; D>S; DWI. По сравнению с МРТ от 01.10.2025. После операции от 15.03.2024. В динамике с 10.09.2023."
+        result, blob = self.run_parts(minimal(text))
+        output = self.text(blob)
+        self.assertEqual(result.status, "REVIEW", result)
+        for value in ["0,65 × 0,40 см", "L4/5", "L5/S1", "C5/6", "73,85°", "D>S", "DWI", "01.10.2025", "15.03.2024", "10.09.2023"]:
+            self.assertIn(value, output)
+        self.assertIn("CLINICAL_DATE_REVIEW", result.categories)
+
+    def test_44_birth_and_service_dates_both_removed(self):
+        parts = minimal("Описание: без особенностей.")
+        root = parse(parts["word/document.xml"])
+        body = root.find(Q("body"))
+        for text in ["Дата рождения: 01.01.1980", "Дата исследования: 16.11.2026"]:
+            p = ET.Element(Q("p"))
+            ET.SubElement(ET.SubElement(p, Q("r")), Q("t")).text = text
+            body.insert(-1, p)
+        parts["word/document.xml"] = xml(root)
+        result, blob = self.run_parts(parts)
+        output = self.text(blob)
+        self.assertEqual(result.status, "PASS", result)
+        self.assertNotIn("01.01.1980", output)
+        self.assertNotIn("16.11.2026", output)
+        self.assertIn("Дата рождения: [УДАЛЕНО]", output)
+        self.assertIn("Описание: без особенностей.", output)
+        self.assertFalse(service_date_spans(output))
+
+    def test_45_service_date_in_footer_and_table(self):
+        path = rich_fixture(self.source / "footer-date.docx")
+        document = Document(path)
+        document.sections[0].footer.paragraphs[0].add_run(" Дата проведения: 12.01.2025")
+        table = document.add_table(rows=1, cols=2)
+        table.cell(0, 0).text = "Дата исследования:"
+        table.cell(0, 1).text = "13.01.2025"
+        document.save(path)
+        result, blob = process(path, "CASE-000001")
+        self.assertEqual(result.status, "PASS", result)
+        output = self.text(blob)
+        self.assertNotIn("12.01.2025", output)
+        self.assertNotIn("13.01.2025", output)
+        opened = Document(BytesIO(blob))
+        self.assertIn("Заключение без динамики.", opened.sections[0].footer.paragraphs[0].text)
+
+    def test_46_study_type_preserved_through_independent_verifier(self):
+        line = "Область и вид исследования: КТ органов брюшной полости"
+        result, blob = self.run_parts(minimal(line))
+        self.assertEqual(result.status, "PASS", result)
+        parts = unpack(blob)
+        self.assertFalse(verify(parts, [line]))
+        with self.assertRaises(Blocked) as caught:
+            verify(parts, [line + " изменено"])
+        self.assertEqual(str(caught.exception), "VERIFY_STUDY_TYPE_CHANGED")
+
+    def test_49_study_type_table_row_preserved_exactly(self):
+        parts = minimal("Очаг 5 мм.")
+        root = parse(parts["word/document.xml"])
+        body = root.find(Q("body"))
+        table = ET.SubElement(body, Q("tbl"))
+        grid = ET.SubElement(table, Q("tblGrid"))
+        ET.SubElement(grid, Q("gridCol"), {Q("w"): "2400"})
+        ET.SubElement(grid, Q("gridCol"), {Q("w"): "4800"})
+        row = ET.SubElement(table, Q("tr"))
+        for value in ["Область и вид исследования:", "МРТ пояснично-крестцового отдела позвоночника"]:
+            cell = ET.SubElement(row, Q("tc"))
+            ET.SubElement(ET.SubElement(ET.SubElement(cell, Q("p")), Q("r")), Q("t")).text = value
+        parts["word/document.xml"] = xml(root)
+        result, blob = self.run_parts(parts)
+        self.assertEqual(result.status, "PASS", result)
+        output = Document(BytesIO(blob))
+        self.assertEqual(output.tables[0].cell(0, 0).text, "Область и вид исследования:")
+        self.assertEqual(output.tables[0].cell(0, 1).text, "МРТ пояснично-крестцового отдела позвоночника")
+
+    def test_47_thousands_of_paragraphs_and_tables(self):
+        document = Document()
+        for number in range(1800):
+            document.add_paragraph(f"На уровне L{number % 5 + 1}/S1 размеры 0,65 × 0,40 см, угол 73,85°.")
+        table = document.add_table(rows=120, cols=3)
+        for row in range(120):
+            for col in range(3):
+                table.cell(row, col).text = f"Ячейка {row}-{col}; T1/STIR"
+        path = self.source / "large-synthetic.docx"
+        document.save(path)
+        result, blob = process(path, "CASE-000001")
+        self.assertEqual(result.status, "PASS", result)
+        output = Document(BytesIO(blob))
+        self.assertEqual(len(output.paragraphs), 1800)
+        self.assertEqual(len(output.tables[0].rows), 120)
+        self.assertEqual(output.paragraphs[-1].text, "На уровне L5/S1 размеры 0,65 × 0,40 см, угол 73,85°.")
+
+    def test_48_mixed_batch_success_review_and_failure_isolation(self):
+        write(self.source / "synthetic-good.docx", minimal("Дата исследования: 01.02.2026\nОбласть и вид исследования: МРТ правого коленного сустава"))
+        write(self.source / "synthetic-review.docx", minimal("По сравнению с МРТ от 01.10.2025"))
+        (self.source / "synthetic-bad.docx").write_bytes(b"bad synthetic zip")
+        counts = run_batch(self.source, self.output)
+        self.assertEqual((counts["PASS"], counts["REVIEW"], counts["BLOCKED"]), (1, 1, 1))
+        self.assertEqual(len(list((self.output / "Anonymized").glob("*.docx"))), 1)
+        self.assertEqual(len(list((self.output / "Review").glob("*.docx"))), 1)
+        records = json.loads((self.output / "Reports" / "summary.json").read_text())
+        self.assertEqual(len(records), 3)
+        self.assertNotIn("synthetic-good", json.dumps(records))
 
 
 if __name__ == "__main__":
