@@ -130,7 +130,7 @@ test('all CT templates fill the physician date on opening', () => {
   }
 });
 
-test('tables in every template use compact widths, cell text and line breaks', () => {
+test('tables in every template keep compact widths and use the unified 11 pt size', () => {
   for (const template of mriTemplates) {
     const doc = makeTemplateDocument(template.id);
     walk(doc, node => {
@@ -140,8 +140,7 @@ test('tables in every template use compact widths, cell text and line breaks', (
       assert.ok(widths.reduce((sum, value) => sum + value, 0) <= 640, template.title);
       walk(node, cell => {
         if (cell.type === 'paragraph') {
-          const highlightedNote = (cell.attrs?.fontSizePt ?? 0) === 10 && cell.content?.some(child => child.marks?.some(mark => mark.type === 'highlight' && mark.attrs?.color === '#ffff00'));
-          assert.ok((cell.attrs?.fontSizePt ?? 9) <= 9 || highlightedNote, template.title);
+          assert.equal(cell.attrs?.fontSizePt, 11, template.title);
         }
         for (let index = 1; index < (cell.content ?? []).length; index++) {
           assert.ok(!(cell.content[index - 1].type === 'hardBreak' && cell.content[index].type === 'hardBreak'), template.title);
@@ -151,24 +150,19 @@ test('tables in every template use compact widths, cell text and line breaks', (
   }
 });
 
-test('templates default to Arial 12 and separate conclusion and recommendations', () => {
+test('templates preserve their typefaces and formatting while using 11 pt and block spacing', () => {
   for (const template of mriTemplates) {
     const doc = makeTemplateDocument(template.id);
-    assert.equal(doc.attrs.fontFamily, 'Arial', template.title);
-    assert.equal(doc.attrs.fontSizePt, 12, template.title);
-    const check = (node, inTable = false) => {
-      const table = inTable || node.type === 'table';
+    assert.equal(doc.attrs.fontFamily, template.doc.attrs.fontFamily, template.title);
+    assert.equal(doc.attrs.fontSizePt, 11, template.title);
+    const check = node => {
       if (node.type === 'paragraph' || node.type === 'heading') {
-        assert.equal(node.attrs.fontFamily, 'Arial', template.title);
-        const highlightedNote = node.attrs.fontSizePt === 10 && node.content?.some(child => child.marks?.some(mark => mark.type === 'highlight' && mark.attrs?.color === '#ffff00'));
-        assert.ok(node.attrs.fontSizePt === (table ? 9 : 12) || highlightedNote, template.title);
+        assert.equal(node.attrs.fontSizePt, 11, template.title);
       }
       for (const mark of node.marks ?? []) if (mark.type === 'textStyle') {
-        assert.equal(mark.attrs.fontFamily, 'Arial', template.title);
-        const highlighted = node.marks?.some(candidate => candidate.type === 'highlight' && candidate.attrs?.color === '#ffff00');
-        assert.ok(mark.attrs.fontSize === (table ? '12px' : '16px') || highlighted && mark.attrs.fontSize === '13.333px', template.title);
+        assert.equal(mark.attrs.fontSize, '14.66667px', template.title);
       }
-      node.content?.forEach(child => check(child, table));
+      node.content?.forEach(check);
       for (let index = 0; index < (node.content ?? []).length; index++) {
         const child = node.content[index];
         const text = plain(child).trim();
@@ -182,7 +176,7 @@ test('templates default to Arial 12 and separate conclusion and recommendations'
   }
 });
 
-test('removal notes are italic, 10 pt and highlighted yellow', () => {
+test('removal notes are italic, 11 pt and highlighted yellow', () => {
   const deletionNotes = [];
   for (const template of mriTemplates) walk(makeTemplateDocument(template.id), node => {
     if (node.type !== 'paragraph') return;
@@ -191,14 +185,14 @@ test('removal notes are italic, 10 pt and highlighted yellow', () => {
   });
   assert.ok(deletionNotes.length >= 8);
   for (const { template, node, text } of deletionNotes) {
-    assert.equal(node.attrs.fontSizePt, 10, `${template}: ${text}`);
+    assert.equal(node.attrs.fontSizePt, 11, `${template}: ${text}`);
     const runs = [];
     walk(node, child => { if (child.type === 'text') runs.push(child); });
     assert.ok(runs.length > 0, `${template}: ${text}`);
     for (const run of runs) {
       assert.ok(run.marks.some(mark => mark.type === 'italic'), `${template}: ${text}`);
       assert.ok(run.marks.some(mark => mark.type === 'highlight' && mark.attrs?.color === '#ffff00'), `${template}: ${text}`);
-      assert.ok(run.marks.some(mark => mark.type === 'textStyle' && mark.attrs?.fontSize === '13.333px'), `${template}: ${text}`);
+      assert.ok(run.marks.some(mark => mark.type === 'textStyle' && mark.attrs?.fontSize === '14.66667px'), `${template}: ${text}`);
     }
   }
 });
@@ -215,7 +209,7 @@ test('all non-footer notes after the physician line are marked for deletion', ()
       if (/^(?:Дата:|Данное заключение не является диагнозом|Исследование выполнено на магнитно-резонансном томографе)/i.test(text)) return;
       if (node.type === 'paragraph' && text) {
         styledParagraphs++;
-        assert.equal(node.attrs.fontSizePt, 10, `${template.title}: ${text}`);
+        assert.equal(node.attrs.fontSizePt, 11, `${template.title}: ${text}`);
         const runs = [];
         walk(node, child => { if (child.type === 'text') runs.push(child); });
         for (const run of runs) {
@@ -241,7 +235,7 @@ test('both age-specific alternatives are highlighted for choosing the matching n
   const marked = markedRuns.map(node => node.text ?? '').join('');
   assert.match(marked, /норма 18-22,1, после 60 лет 22,6-26,0/);
   assert.match(marked, /норма 24,0-26,3, после 50 лет - 28,2-29,4/);
-  assert.ok(markedRuns.every(node => node.marks.some(mark => mark.type === 'textStyle' && mark.attrs.fontSize === '13.333px')));
+  assert.ok(markedRuns.every(node => node.marks.some(mark => mark.type === 'textStyle' && mark.attrs.fontSize === '14.66667px')));
 });
 
 test('patient-specific dimensions are highlighted while reference norms are left untouched', () => {

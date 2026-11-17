@@ -61,6 +61,18 @@ const ModuleReference = Extension.create({
   },
 });
 
+const ParagraphPresentation = Extension.create({
+  name: 'paragraphPresentation',
+  addGlobalAttributes() {
+    const points = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1000 ? `${value}pt` : '';
+    return [{ types: ['paragraph', 'heading'], attributes: {
+      fontSizePt: { default: null, parseHTML: (element: HTMLElement) => { const match = /^(\d+(?:\.\d+)?)pt$/i.exec(element.style.fontSize); return match ? Number(match[1]) : null; }, renderHTML: attrs => points(attrs.fontSizePt) ? { style: `font-size:${points(attrs.fontSizePt)}` } : {} },
+      spaceBeforePt: { default: null, parseHTML: (element: HTMLElement) => { const match = /^(\d+(?:\.\d+)?)pt$/i.exec(element.style.marginTop); return match ? Number(match[1]) : null; }, renderHTML: attrs => points(attrs.spaceBeforePt) ? { style: `margin-top:${points(attrs.spaceBeforePt)}` } : {} },
+      spaceAfterPt: { default: null, parseHTML: (element: HTMLElement) => { const match = /^(\d+(?:\.\d+)?)pt$/i.exec(element.style.marginBottom); return match ? Number(match[1]) : null; }, renderHTML: attrs => points(attrs.spaceAfterPt) ? { style: `margin-bottom:${points(attrs.spaceAfterPt)}` } : {} },
+    } }];
+  },
+});
+
 export type ReportEditorOptions = { getPersonalWords?: () => string[]; onProofStatus?: (status: ProofStatus) => void; onFieldSelect?: (id: string) => void };
 
 export function makeEditor(element: HTMLElement, content: RichNode, options: ReportEditorOptions | ((id: string) => void) = {}) {
@@ -74,6 +86,7 @@ export function makeEditor(element: HTMLElement, content: RichNode, options: Rep
         link: { openOnClick: false, autolink: false, defaultProtocol: 'https' },
       }),
       TextStyleKit,
+      ParagraphPresentation,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Highlight.configure({ multicolor: true }),
       Superscript,

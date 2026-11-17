@@ -2,7 +2,7 @@ name: XRS-07/XRS-08 Windows validation
 
 on:
   push:
-    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062, codex/xrs-updater-rollback-053, codex/xrs-updater-068, codex/xrs-ai-069, codex/xrs-functional-071, codex/xrs-ai-072, codex/xrs-ai-065, codex/xrs-ai-066, codex/xrs-ai-067]
+    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062, codex/xrs-updater-rollback-053, codex/xrs-updater-068, codex/xrs-ai-069, codex/xrs-functional-071, codex/xrs-ai-072, codex/xrs-ai-065, codex/xrs-ai-066, codex/xrs-ai-067, codex/xrs-template-073]
   pull_request:
     paths:
       - 'x-ray-report-studio/**'
@@ -64,12 +64,14 @@ jobs:
           $isUpdaterRecovery = $sourceRef -in @('codex/xrs-updater-recovery', 'codex/xrs-updater-062', 'codex/xrs-updater-068')
           $isUpdaterRollback053 = $sourceRef -in @('codex/xrs-updater-rollback-053', 'codex/xrs-updater-068', 'codex/xrs-ai-065', 'codex/xrs-ai-066', 'codex/xrs-ai-067', 'codex/xrs-ai-069', 'codex/xrs-functional-071', 'codex/xrs-ai-072')
           $isUpdaterCandidate060 = $version -eq '0.4.60' -and $isUpdaterRecovery
+          $isTemplateCandidate073 = $version -eq '0.4.73' -and $sourceRef -eq 'codex/xrs-template-073'
           Add-Content -Path $env:GITHUB_OUTPUT -Value "beta=$($isBeta.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "stable056=$($isStable056.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updateHotfix=$($isUpdateHotfix.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updaterRecovery=$($isUpdaterRecovery.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updaterRollback053=$($isUpdaterRollback053.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updaterCandidate060=$($isUpdaterCandidate060.ToString().ToLowerInvariant())" -Encoding utf8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "templateCandidate073=$($isTemplateCandidate073.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version" -Encoding utf8
       - run: npm ci
       - name: Install pinned Electron runtime
@@ -207,7 +209,7 @@ jobs:
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm run test:browser
       - name: Offline AI contextual review acceptance
-        if: github.ref_name == 'codex/xrs-ai-072' || github.ref_name == 'codex/xrs-ai-065' || github.ref_name == 'codex/xrs-ai-066' || github.ref_name == 'codex/xrs-ai-067' || github.ref_name == 'codex/xrs-ai-069'
+        if: github.ref_name == 'codex/xrs-ai-072' || github.ref_name == 'codex/xrs-ai-065' || github.ref_name == 'codex/xrs-ai-066' || github.ref_name == 'codex/xrs-ai-067' || github.ref_name == 'codex/xrs-ai-069' || github.ref_name == 'codex/xrs-template-073'
         shell: pwsh
         run: |
           $scenarios = @('ai-review-browser', 'morphology-browser', 'dictionary-electron', 'final-medical-browser', 'final-renderer-electron', 'update-progress-browser')
@@ -310,7 +312,7 @@ jobs:
             x-ray-report-studio/test-output/xrs-0.4.56/X-ray_Report_Studio_Windows_Setup.zip
             x-ray-report-studio/test-output/xrs-0.4.56/SHA256SUMS.txt
       - name: Package and verify unpublished ${{ steps.release-channel.outputs.version }} updater candidate
-        if: steps.release-channel.outputs.updaterRollback053 == 'true'
+        if: steps.release-channel.outputs.updaterRollback053 == 'true' || steps.release-channel.outputs.templateCandidate073 == 'true'
         shell: pwsh
         run: |
           $version = '${{ steps.release-channel.outputs.version }}'
@@ -336,7 +338,7 @@ jobs:
             exit 1
           }
       - name: Parse packaged Install.ps1 with Windows PowerShell 5.1
-        if: steps.release-channel.outputs.updaterRollback053 == 'true'
+        if: steps.release-channel.outputs.updaterRollback053 == 'true' || steps.release-channel.outputs.templateCandidate073 == 'true'
         shell: powershell
         run: |
           $version = '${{ steps.release-channel.outputs.version }}'
@@ -354,7 +356,7 @@ jobs:
             Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
           }
       - name: Upload unpublished ${{ steps.release-channel.outputs.version }} updater candidate
-        if: steps.release-channel.outputs.updaterRollback053 == 'true'
+        if: steps.release-channel.outputs.updaterRollback053 == 'true' || steps.release-channel.outputs.templateCandidate073 == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: xrs-${{ steps.release-channel.outputs.version }}-windows-candidate

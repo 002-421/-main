@@ -121,6 +121,10 @@ async function waitForYellowZero(){
 try{
  await page.locator('.report-content').waitFor();
  assert.equal(await page.locator('.report-content').count(),1);
+ const templateTypography=await page.locator('.report-content p').filter({hasText:'Рекомендована консультация невролога'}).first().evaluate(el=>({fontSize:getComputedStyle(el).fontSize,marginTop:getComputedStyle(el).marginTop,marginBottom:getComputedStyle(el).marginBottom}));
+ assert.ok(Math.abs(parseFloat(templateTypography.fontSize)-14.6667)<0.02,`template editor uses 11 pt: ${JSON.stringify(templateTypography)}`);
+ assert.equal(templateTypography.marginTop,'16px');assert.equal(templateTypography.marginBottom,'16px');
+ await page.emulateMedia({media:'print'});const printTypography=await page.locator('.report-content p').filter({hasText:'Рекомендована консультация невролога'}).first().evaluate(el=>getComputedStyle(el).fontSize);assert.ok(Math.abs(parseFloat(printTypography)-14.6667)<0.02,`PDF print CSS retains 11 pt (${printTypography})`);await page.emulateMedia({media:'screen'});
  assert.equal(await page.locator('.inspector,#field-panel,#field-value').count(),0);
  assert.ok(await page.locator('[data-template-field]').count()>=4);
  assert.match(await page.locator('.report-content').innerText(),/22,1, после 60 лет 22,6-26,0/);
@@ -233,7 +237,7 @@ try{
  assert.match(JSON.stringify(saved.imported.doc),/Тестовый Пациент/);
  assert.match(JSON.stringify(saved.imported.doc),/Петров Алексей Иванович/);
  const zip=unzipSync(saved.bytes),xml=strFromU8(zip['word/document.xml']);
- assert.match(xml,/Arial/);assert.match(xml,/w:top="2438"/);
+ assert.match(xml,/DejaVu Sans/,'DOCX preserves the template typeface instead of forcing Arial');assert.match(xml,/w:top="2438"/);
  assert.doesNotMatch(xml,/template-unchanged|proof-spelling|proof-grammar|data-unchanged|ai-review-underline|data-ai-review-ids/);
  console.log('PASS: real DOCX preserves report, source geometry and formatting, excludes review/proof decorations.');
 
@@ -249,13 +253,17 @@ try{
  console.log('PASS: formatted clipboard and actual desktop PDF export.');
 
  await page.locator('#edit-template').click();
+ assert.match(await page.locator('.template-card.selected small').innerText(),/Версия шаблона: 0\.0\.1/);
+ await page.locator('#save-template').click();
+ assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-versions.v1')??'{}')['head-gm']??'0.0.1'),'0.0.1','opening and saving without edits does not increment the template version');
+ await page.locator('#edit-template').click();
  assert.doesNotMatch(await page.locator('.report-content').innerText(),/Тестовый Пациент|Петров Алексей Иванович/);
  await field(patientId).click();await page.keyboard.press('Control+z');
  assert.doesNotMatch(await page.locator('.report-content').innerText(),/Тестовый Пациент/);
  await fillField(patientId,'Ф.И.О. пациента полностью');
  const templateExport=await saveWord('v3-template.docx');assert.equal(templateExport.imported.kind,'template');
  assert.doesNotMatch(JSON.stringify(templateExport.imported.doc),/Тестовый Пациент|Петров Алексей Иванович/);
- await page.locator('#save-template').click();assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
+ await page.locator('#save-template').click();assert.equal(await field(patientId).innerText(),'Тестовый Пациент');assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-versions.v1')??'{}')['head-gm']),'0.0.2','approved template edits increment once and remain independent of XRS version');
  await field(patientId).click();await page.keyboard.press('Control+z');assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
  await page.locator('#edit-template').click();await fillField(patientId,'Отменённая подсказка');await page.locator('#cancel-template').click();
  assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
@@ -294,6 +302,7 @@ try{
  assert.match(JSON.stringify(updatedTemplate),/СИНТЕТИЧЕСКИЙ ШАБЛОН ИЗ WORD/);assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-backups.v1')??'[]').length),backupCount+1);
  await page.locator('#restore-template-backup').click();await page.locator('[data-restore-template-backup]').first().click();await page.locator('#confirm-template-backup-restore').click();
  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.templates.v4')??'{}')['head-gm']),templateBefore);
+ assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-versions.v1')??'{}')['head-gm']),'0.0.4','approved restore creates a new revision without reusing the old version');
  assert.match(await page.locator('.report-content').innerText(),/Тестовый Пациент/,'template restore does not modify open patient reports');
  console.log('PASS: template DOCX export, Word edit preview/cancel, verified backup, replacement and restore are isolated from patient reports.');
 

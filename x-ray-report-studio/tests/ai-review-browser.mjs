@@ -12,7 +12,7 @@ try {
   page.on('request',request=>{if(!request.url().startsWith(`http://127.0.0.1:${server.address().port}/`))external.push(request.url());});
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.locator('#ai-review-status').waitFor({state:'attached'});
-  assert.equal(await page.locator('#ai-mode,.ai-review-panel,#ai-review-open,#proof-toggle,#check-now').count(),0,'no modal review controls');
+  assert.equal(await page.locator('#ai-mode,#ai-review-open,#proof-toggle,#check-now').count(),0,'no modal review controls');
   // The app persists the old report during beforeunload, so inject the synthetic
   // fixture into the next page's workspace read instead of racing that save.
   await page.addInitScript(()=>{
@@ -31,16 +31,23 @@ try {
   await marks.first().waitFor({state:'visible',timeout:5000});
   assert.equal(await page.locator('.ai-review-card').count(),0);
   assert.equal(await page.locator('[role="dialog"]').count(),0,'contextual results remain non-modal');
-  assert.equal(await marks.first().getAttribute('tabindex'),null,'underlined finding is keyboard reachable');
+  assert.equal(await marks.first().getAttribute('tabindex'),null,'review underline does not intercept editor keyboard navigation');
   assert.equal(await marks.first().getAttribute('role'),'mark');
   await marks.first().hover();
   assert.equal(await page.locator('.ai-review-card').count(),0,'hover never opens the review menu');
   await page.locator('[data-section-id="header"]').first().click({button:'right'});
   assert.equal(await page.locator('.ai-review-card').count(),0,'right click outside a finding keeps the normal context behavior');
   await marks.first().click();
-  assert.equal(await page.locator('.ai-review-card').count(),1,'explicit click opens review');
+  assert.equal(await page.locator('.ai-review-card').count(),0,'left click only places the editor cursor/selects text');
+  await marks.first().dblclick();
+  assert.equal(await page.locator('.ai-review-card').count(),0,'double click selects a word without opening a review card');
+  assert.ok(await page.evaluate(()=>getSelection()?.isCollapsed===false),'double click retains normal word selection');
   await marks.first().click({button:'right'});
   assert.equal(await page.locator('.ai-review-card').count(),1,'right click opens the review menu');
+  assert.equal(await page.locator('.proof-popup').count(),0,'AI Review and spelling popups never overlap');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.ai-review-card').count(),0,'Escape closes the contextual card');
+  await marks.first().click({button:'right'});
   await page.locator('#document-name').click();
   await page.waitForFunction(()=>!document.querySelector('.ai-review-card'),null,{timeout:2000});
   await marks.first().click({button:'right'});
@@ -48,8 +55,11 @@ try {
   assert.equal(await page.locator('.ai-review-card').count(),0,'switching tabs closes the review menu');
   await page.locator('.report-tab-select').first().click();
   await marks.first().waitFor();
-  await marks.first().click();
-  assert.equal(await page.locator('.ai-review-card').count(),1,'keyboard activation opens the contextual card');
+  await page.locator('.ai-review-panel summary').click();
+  const panelIssue=page.locator('.ai-review-finding').first();
+  await panelIssue.focus();await page.keyboard.press('Enter');
+  await page.waitForFunction(()=>document.querySelectorAll('.ai-review-card').length===1,null,{timeout:2000});
+  assert.equal(await page.locator('.ai-review-card').count(),1,'keyboard activation of a side-panel finding opens its contextual card');
   await page.locator('.ai-review-card-close').click();
   await marks.first().click({button:'right'});
   assert.equal(await page.locator('.ai-review-card').count(),1,'right click opens the contextual menu');
@@ -117,6 +127,11 @@ try {
   await page.locator('.ai-review-spelling').filter({hasText:'суженсправа'}).last().evaluate(el=>{const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);walker.nextNode();const node=walker.currentNode;const range=document.createRange();range.setStart(node,node.textContent.indexOf('суженсправа')+5);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);el.closest('[contenteditable]').focus();});
   await page.keyboard.press('Space');assert.equal(await page.locator('.ai-review-card').count(),0,'Space edits and never opens popup');assert.match(await page.locator('#editor').innerText(),/сужен справа/);
   await page.keyboard.press('Control+z');assert.match(await page.locator('#editor').innerText(),/суженсправа/);await page.keyboard.press('Control+y');assert.match(await page.locator('#editor').innerText(),/сужен справа/);
+  await page.locator('#editor .ProseMirror').press('End');
+  await page.keyboard.press('Enter');assert.equal(await page.locator('.ai-review-card').count(),0,'Enter edits without opening a popup');
+  await page.keyboard.press('Backspace');assert.equal(await page.locator('.ai-review-card').count(),0,'Backspace edits without opening a popup');
+  await page.keyboard.press('Delete');assert.equal(await page.locator('.ai-review-card').count(),0,'Delete edits without opening a popup');
+  await page.keyboard.press('Control+z');
   assert.equal(await page.locator('[data-ai-category]').count(),6);
   assert.deepEqual(external,[]);
   console.log('PASS: automatic all-category contextual review and card, local-only review, rejection, workspace isolation and no network requests.');

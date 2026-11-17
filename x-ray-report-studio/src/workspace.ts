@@ -1,4 +1,5 @@
-import { exportTemplateDocxGroup, inspectTemplateDocx, applyTemplateDocx, rollback as rollbackTemplateDocx, recover as recoverTemplateDocx, type TemplateDocxItem } from './template-docx';
+import { exportTemplateDocx, exportTemplateDocxGroup, inspectTemplateDocx, applyTemplateDocx, rollback as rollbackTemplateDocx, recover as recoverTemplateDocx, type TemplateDocxItem } from './template-docx';
+import { INITIAL_TEMPLATE_VERSION, nextTemplateVersion, readTemplateVersions, templateVersion as readTemplateVersion, TEMPLATE_VERSION_STORAGE_KEY } from './template-versioning';
 import { recoverParagraphBlocks } from './document-recovery';
 import { medicalTextForCopy, personalDataWarnings } from './safe-medical-copy';
 import './style.css';
@@ -57,7 +58,7 @@ declare global { interface Window { desktop?: {
 } } }
 const $ = <T extends HTMLElement = HTMLElement>(s:string) => document.querySelector<T>(s)!;
 const esc = (v:unknown) => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
-const KEYS = { draft:'mri-report-studio.draft.v1',workspace:'mri-report-studio.workspace.v1',history:'mri-report-studio.undo-history.v1',templates:'mri-alliance.templates.v4',blocks:'mri-alliance.blocks.v3',settings:'mri-alliance.settings.v3',dictionary:'mri-report-studio.dictionary.v1' };
+const KEYS = { draft:'mri-report-studio.draft.v1',workspace:'mri-report-studio.workspace.v1',history:'mri-report-studio.undo-history.v1',templates:'mri-alliance.templates.v4',templateVersions:TEMPLATE_VERSION_STORAGE_KEY,blocks:'mri-alliance.blocks.v3',settings:'mri-alliance.settings.v3',dictionary:'mri-report-studio.dictionary.v1' };
 type Block = {id:string;title:string;areaId:string;tags:string;doc:RichNode;custom:boolean};
 type OpenReport = {id:string;templateId:string;doc:RichNode;dirty:boolean};
 type StoredReportView = {selection:Record<string,unknown>;scrollTop:number};
@@ -103,6 +104,7 @@ let selectedAreaId = reportTemplates.find(t=>t.id===DEFAULT_TEMPLATE_ID)?.areaId
 let sidebarTab:'templates'|'blocks' = 'templates';
 let templateMode=false;
 let backup:{doc:RichNode;changed:boolean;history?:StoredReportHistory}|null=null;
+let templateEditBaseline:RichNode|null=null;
 let changedSinceOpen=false;
 let suppress=false;
 let review=false;
@@ -116,7 +118,9 @@ function defaultDoctor(doc:RichNode):RichNode {
   let applied=false;
   const walk=(n:RichNode)=>{if(n.content)n.content=n.content.filter(child=>{const m=fieldMark(child);if(m?.attrs?.id===DOCTOR_FIELD_ID&&child.type==='text'){if(applied)return false;applied=true;child.text=settings.doctor.trim();m.attrs={...m.attrs,filled:true};}walk(child);return true;});};walk(doc);return doc;
 }
-function newDocument(id:string) { const doc=justifyDescription(defaultDoctor(prepareInlineDocument(initializeReportFooter(resetInlineTemplate(highlightDeletionNotes(separateRecommendations(compactTemplateTables(overrides[id]??makeTemplateDocument(id)))))))));return !overrides[id]?structurePreparedBuiltin(id,doc):doc; }
+function newDocument(id:string) { const builtin=!overrides[id],source=builtin?makeTemplateDocument(id):structuredClone(overrides[id]);const doc=justifyDescription(defaultDoctor(prepareInlineDocument(initializeReportFooter(resetInlineTemplate(source)))));return builtin?structurePreparedBuiltin(id,doc):doc; }
+function currentTemplateVersion(id:string){const template=reportTemplates.find(item=>item.id===id);return readTemplateVersion(localStorage,id,template?.templateVersion??INITIAL_TEMPLATE_VERSION);}
+function canonicalTemplateRevision(doc:RichNode){return JSON.stringify(doc,(_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.keys(value).sort().map(key=>[key,value[key]])):value);}
 let initial = newDocument(activeTemplateId);
 try {
   const raw=read<any>(KEYS.draft,null);
@@ -294,7 +298,7 @@ function patientNameForReport(doc:RichNode):string {
 }
 function renderReportTabs(){const tabs=$('#report-tabs');const names=openReports.map(report=>patientNameForReport(report.doc));const patients=names.map(patient=>patient.toLocaleLowerCase('ru'));tabs.innerHTML=openReports.map((report,index)=>{const title=reportTitle(report.templateId,report.doc);const template=reportTemplates.find(item=>item.id===report.templateId);const titleCode=template?.title??title;const fallbackCode=template?.description.trim().split(/\s+/).slice(0,3).map(word=>word[0]??'').join('')??title;const codeSource=titleCode.replace(/[^a-zа-яё0-9]/giu,'').length>=3?titleCode:fallbackCode;const patient=names[index];const duplicatePatient=Boolean(patient&&patients.filter(value=>value===patient.toLocaleLowerCase('ru')).length>1);const name=buildReportTabName(patient,title,duplicatePatient,index,codeSource);return `<div class="report-tab ${report.id===activeReportId?'active':''}"><button class="report-tab-select" data-report-select="${esc(report.id)}" aria-label="${esc(name.fullTitle)}" title="${esc(name.fullTitle)}">${report.dirty?'● ':''}${esc(name.label)}</button><button class="report-tab-close" data-report-close="${esc(report.id)}" aria-label="Закрыть ${esc(name.fullTitle)}" title="Закрыть">×</button></div>`;}).join('')+`<button class="report-tab-add" id="add-report-tab" aria-label="Новое заключение" title="Новое заключение">＋</button>`;}
 function modalityForTemplate(id=activeTemplateId):'mri'|'ct' { return id.startsWith('ct-')?'ct':'mri'; }
-function renderTemplates() { const modality=($('#modality-select') as HTMLSelectElement).value||modalityForTemplate();const choices=areas.filter(a=>a.id.startsWith(modality==='ct'?'ct-':'')&& (modality==='ct'||!a.id.startsWith('ct-')));if(!choices.some(a=>a.id===selectedAreaId))selectedAreaId=choices[0]?.id??'';const areaSelect=$('#area-select') as HTMLSelectElement;areaSelect.innerHTML=choices.map(a=>`<option value="${esc(a.id)}">${esc(a.title)}</option>`).join('');areaSelect.value=selectedAreaId;$('#template-list').innerHTML=reportTemplates.filter(t=>t.areaId===selectedAreaId).map(t=>`<button class="template-card ${t.id===activeTemplateId?'selected':''}" data-template="${esc(t.id)}"><span class="template-icon">▤</span><span><strong>${esc(t.title)}</strong><small>${esc(t.description)}${overrides[t.id]?' · Изменённый шаблон':''}</small></span>${t.id===activeTemplateId?'<span class="check">✓</span>':''}</button>`).join(''); }
+function renderTemplates() { const modality=($('#modality-select') as HTMLSelectElement).value||modalityForTemplate();const choices=areas.filter(a=>a.id.startsWith(modality==='ct'?'ct-':'')&& (modality==='ct'||!a.id.startsWith('ct-')));if(!choices.some(a=>a.id===selectedAreaId))selectedAreaId=choices[0]?.id??'';const areaSelect=$('#area-select') as HTMLSelectElement;areaSelect.innerHTML=choices.map(a=>`<option value="${esc(a.id)}">${esc(a.title)}</option>`).join('');areaSelect.value=selectedAreaId;$('#template-list').innerHTML=reportTemplates.filter(t=>t.areaId===selectedAreaId).map(t=>`<button class="template-card ${t.id===activeTemplateId?'selected':''}" data-template="${esc(t.id)}"><span class="template-icon">▤</span><span><strong>${esc(t.title)}</strong><small>Версия шаблона: ${esc(currentTemplateVersion(t.id))}${overrides[t.id]?' · Пользовательская редакция':''}</small></span>${t.id===activeTemplateId?'<span class="check">✓</span>':''}</button>`).join(''); }
 let blockFilter='all';
 function allBlocks():Block[]{return [...customBlocks,{id:'standard-size',title:'Размер (фронтальный/сагиттальный/вертикальный)',areaId:'',tags:'размер размеры фронтальный сагиттальный вертикальный',doc:makeSizeBlock(modalityForTemplate()==='ct'),custom:false},...builtInBlocks];}
 function plain(doc:RichNode):string {if(doc.type==='reportField')return doc.attrs?.value||doc.attrs?.hint||'';return doc.text??(doc.content??[]).map(plain).join(['paragraph','heading','doc','reportSection'].includes(doc.type)?'\n':'');}
@@ -403,11 +407,26 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
   let cardPositionHandler:(()=>void)|undefined;
   let cardResizeObserver:ResizeObserver|undefined;
   const closeCard=()=>{if(cardPositionHandler){window.removeEventListener('resize',cardPositionHandler);window.removeEventListener('scroll',cardPositionHandler,true);}cardResizeObserver?.disconnect();cardPositionHandler=undefined;cardResizeObserver=undefined;card?.remove();card=undefined;};
+  const findingsPanel=document.createElement('details');findingsPanel.className='ai-review-panel';findingsPanel.hidden=true;
+  const findingsSummary=document.createElement('summary');findingsSummary.textContent='Замечания AI Review';
+  const findingsList=document.createElement('div');findingsList.className='ai-review-findings-list';findingsPanel.append(findingsSummary,findingsList);
+  const renderFindingPanel=()=>{
+    findingsPanel.hidden=!findings.length||reviewedReport!==activeReportId;
+    findingsList.replaceChildren();
+    for(const item of findings){
+      const button=document.createElement('button');button.type='button';button.className='ai-review-finding';button.dataset.reviewFinding=item.id;
+      const category=reviewCategories.find(([id])=>id===categoryGroup(item.category))?.[1]??item.category;
+      const label=document.createElement('strong');label.textContent=category;
+      const excerpt=document.createElement('span');excerpt.textContent=item.original||item.explanation.split(' Связанный фрагмент:')[0];
+      button.append(label,excerpt);findingsList.append(button);
+    }
+  };
   const renderDecorations=()=>{
-    if(!reviewedBlocks||reviewedReport!==activeReportId){setAiReviewDecorations(editor,[]);return;}
+    if(!reviewedBlocks||reviewedReport!==activeReportId){setAiReviewDecorations(editor,[]);renderFindingPanel();return;}
     const ranges:ReviewDecorationRange[]=[];
     for(const item of findings){try{const range=resolveReviewRange(editor,item,reviewedBlocks,reviewedReport,activeReportId);ranges.push({...range,id:item.id,category:item.category,original:item.original});}catch{/* stale locations are not decorated */}}
     setAiReviewDecorations(editor,ranges);
+    renderFindingPanel();
   };
   const openCard=(target:HTMLElement,point?:{x:number;y:number})=>{
     closeCard();
@@ -457,14 +476,14 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
     position();
   };
   const editorRoot=editor.view.dom;
-  editorRoot.addEventListener('contextmenu',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(!span)return;event.preventDefault();openCard(span,{x:event.clientX,y:event.clientY});});
-  editorRoot.addEventListener('click',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(span)openCard(span);});
+  editorRoot.addEventListener('contextmenu',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(!span)return;event.preventDefault();clearProofPopup();openCard(span,{x:event.clientX,y:event.clientY});});
+  findingsPanel.addEventListener('click',event=>{const button=(event.target as HTMLElement).closest<HTMLButtonElement>('[data-review-finding]');if(!button)return;const target=[...editorRoot.querySelectorAll<HTMLElement>('[data-ai-review-ids]')].find(span=>span.dataset.aiReviewIds?.split(',').includes(button.dataset.reviewFinding??''));if(!target)return;clearProofPopup();target.scrollIntoView({block:'center',behavior:'smooth'});requestAnimationFrame(()=>openCard(target));});
   document.addEventListener('pointerdown',event=>{if(card&&!card.contains(event.target as Node))closeCard();},true);
   document.addEventListener('keydown',event=>{if(card&&(event.key.length===1||event.key==='Backspace'||event.key==='Delete')&&editorRoot.contains(event.target as Node)&&!event.altKey&&!event.ctrlKey&&!event.metaKey)closeCard();},true);
   document.addEventListener('keydown',event=>{const e=event as KeyboardEvent,target=e.target as HTMLElement;if(e.key==='Escape'&&card&&(editorRoot.contains(document.activeElement)||card.contains(target))){e.preventDefault();closeCard();}},true);
   const enabledCategories=new Set<import('./ai-review.ts').ReviewCategory>(read('xrs.ai-review.categories.v1',reviewCategories.map(([id])=>id)));
   const settings=document.createElement('details');settings.className='ai-review-category-settings';const settingsTitle=document.createElement('summary');settingsTitle.textContent='Категории проверки';settings.append(settingsTitle);
-  for(const [id,title] of reviewCategories){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=enabledCategories.has(id);input.dataset.aiCategory=id;input.onchange=()=>{if(input.checked)enabledCategories.add(id);else enabledCategories.delete(id);localStorage.setItem('xrs.ai-review.categories.v1',JSON.stringify([...enabledCategories]));scheduleReview();};label.append(input,document.createTextNode(title));settings.append(label);}status.parentElement?.append(settings);
+  for(const [id,title] of reviewCategories){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=enabledCategories.has(id);input.dataset.aiCategory=id;input.onchange=()=>{if(input.checked)enabledCategories.add(id);else enabledCategories.delete(id);localStorage.setItem('xrs.ai-review.categories.v1',JSON.stringify([...enabledCategories]));scheduleReview();};label.append(input,document.createTextNode(title));settings.append(label);}status.parentElement?.append(findingsPanel,settings);
   let reviewTimer=0, reviewGeneration=0;
   let reviewAbort:AbortController|undefined;
   const runReview=async()=>{
@@ -521,8 +540,8 @@ function calculatorDialog(){
  setTimeout(()=>overlay.querySelector<HTMLButtonElement>('[data-calc="digit"][data-value="7"]')?.focus(),0);
 }
 function templateChrome(){ $('#template-banner').classList.toggle('hidden',!templateMode);for(const id of ['new-report','open-report','edit-template','area-select'])($(`#${id}`) as HTMLButtonElement).disabled=templateMode;$('.shell').classList.toggle('template-mode',templateMode); }
-$('#edit-template').onclick=()=>{if(templateMode)return;saveLocal();clearTimeout(timer);backup={doc:json(),changed:changedSinceOpen,history:getReportHistory(editor.state)};templateMode=true;restore(resetInlineTemplate(highlightDeletionNotes(separateRecommendations(compactTemplateTables(overrides[activeTemplateId]??makeTemplateDocument(activeTemplateId))))),undefined);templateChrome();$('#canvas').scrollTop=0;};
-function finishTemplate(save:boolean){if(!templateMode||!backup)return;if(save){try{const next=validateTemplate(promoteInlineTemplate(json()));const all={...overrides,[activeTemplateId]:next};localStorage.setItem(KEYS.templates,JSON.stringify(all));overrides=all;}catch(e){toast(`Не удалось сохранить шаблон: ${(e as Error).message}`,true);return;}}const previous=backup;backup=null;templateMode=false;restore(previous.doc,previous.history);changedSinceOpen=previous.changed;templateChrome();renderTemplates();toast(save?'Шаблон сохранён для новых описаний.':'Изменения шаблона отменены.');}
+$('#edit-template').onclick=()=>{if(templateMode)return;saveLocal();clearTimeout(timer);backup={doc:json(),changed:changedSinceOpen,history:getReportHistory(editor.state)};templateMode=true;const initialTemplate=resetInlineTemplate(highlightDeletionNotes(separateRecommendations(compactTemplateTables(overrides[activeTemplateId]??makeTemplateDocument(activeTemplateId)))));restore(initialTemplate,undefined);templateEditBaseline=validateTemplate(promoteInlineTemplate(json()));templateChrome();$('#canvas').scrollTop=0;};
+function finishTemplate(save:boolean){if(!templateMode||!backup)return;if(save){const previousTemplates=localStorage.getItem(KEYS.templates),previousVersions=localStorage.getItem(KEYS.templateVersions),backupKey='mri-alliance.template-backups.v1',previousBackups=localStorage.getItem(backupKey);try{const next=validateTemplate(promoteInlineTemplate(json())),unchanged=Boolean(templateEditBaseline&&canonicalTemplateRevision(next)===canonicalTemplateRevision(templateEditBaseline));if(!unchanged){const old=overrides[activeTemplateId]??makeTemplateDocument(activeTemplateId),oldVersion=currentTemplateVersion(activeTemplateId),nextVersion=nextTemplateVersion(oldVersion);let backups=JSON.parse(previousBackups??'[]');if(!Array.isArray(backups))throw new Error('Повреждено хранилище резервных копий шаблонов.');const record={id:crypto.randomUUID(),templateId:activeTemplateId,templateTitle:reportTemplates.find(item=>item.id===activeTemplateId)?.title??activeTemplateId,templateVersion:oldVersion,createdAt:new Date().toISOString(),doc:old};backups=[...backups,record];localStorage.setItem(backupKey,JSON.stringify(backups));const checkedBackups=JSON.parse(localStorage.getItem(backupKey)??'null');if(!Array.isArray(checkedBackups)||JSON.stringify(checkedBackups.at(-1))!==JSON.stringify(record))throw new Error('Не удалось проверить резервную копию шаблона.');const all={...overrides,[activeTemplateId]:next};localStorage.setItem(KEYS.templates,JSON.stringify(all));if(JSON.stringify(JSON.parse(localStorage.getItem(KEYS.templates)??'null')?.[activeTemplateId])!==JSON.stringify(next))throw new Error('Не удалось проверить сохранённый шаблон.');localStorage.setItem(KEYS.templateVersions,JSON.stringify({...readTemplateVersions(localStorage),[activeTemplateId]:nextVersion}));if(currentTemplateVersion(activeTemplateId)!==nextVersion)throw new Error('Не удалось проверить версию шаблона.');overrides=all;}}catch(e){if(previousTemplates===null)localStorage.removeItem(KEYS.templates);else try{localStorage.setItem(KEYS.templates,previousTemplates);}catch{}if(previousVersions===null)localStorage.removeItem(KEYS.templateVersions);else try{localStorage.setItem(KEYS.templateVersions,previousVersions);}catch{}if(previousBackups===null)localStorage.removeItem(backupKey);else try{localStorage.setItem(backupKey,previousBackups);}catch{}toast(`Не удалось сохранить шаблон: ${(e as Error).message}`,true);return;}}const previous=backup;backup=null;templateEditBaseline=null;templateMode=false;restore(previous.doc,previous.history);changedSinceOpen=previous.changed;templateChrome();renderTemplates();toast(save?'Шаблон сохранён для новых описаний.':'Изменения шаблона отменены.');}
 $('#save-template').onclick=()=>finishTemplate(true);$('#cancel-template').onclick=()=>finishTemplate(false);
 $('#reset-template').onclick=()=>{const d=dialog('Вернуть исходный шаблон?','<p>В режиме редактирования будут восстановлены исходные текст и форматирование. Для применения нажмите «Сохранить шаблон».</p>','<button class="btn" data-close>Отмена</button><button class="btn primary" id="confirm-reset">Восстановить</button>');d.querySelector('#confirm-reset')!.addEventListener('click',()=>{restore(makeTemplateDocument(activeTemplateId),undefined);closeDialog();});};
 
@@ -649,7 +668,7 @@ $('#export-template-docx').onclick=async()=>{
  try{
   const template=reportTemplates.find(item=>item.id===activeTemplateId);if(!template)throw new Error('Шаблон не найден.');
   const doc=overrides[activeTemplateId]??makeTemplateDocument(activeTemplateId),fonts=await embeddedFonts();
-  const blob=await exportDocx(doc,{profile:profileForTemplate(),templateId:activeTemplateId,kind:'template',title:template.title,fonts});
+  const blob=await exportTemplateDocx({...template,templateVersion:currentTemplateVersion(template.id),doc},packageInfo.version,fonts);
   const safeName=template.title.replace(/[\\/:*?"<>|]/g,' ').replace(/\s+/g,' ').trim()||activeTemplateId;
   download(blob,`${safeName}.docx`);toast(`Шаблон «${template.title}» экспортирован в Word.`);
  }catch(error){toast(`Не удалось экспортировать шаблон: ${(error as Error).message}`,true);}
@@ -677,7 +696,7 @@ $('#template-file').onchange=async event=>{
    '<button class="btn" data-close>Отмена</button><button class="btn primary" id="confirm-template-import">Создать резервную копию и заменить шаблон</button>');
   d.querySelector('.dialog')!.classList.add('wide-preview');
   d.querySelector('#confirm-template-import')!.addEventListener('click',()=>{
-   const backupKey='mri-alliance.template-backups.v1',previousTemplates=localStorage.getItem(KEYS.templates),backupRecord={id:crypto.randomUUID(),templateId,templateTitle:template.title,createdAt:new Date().toISOString(),doc:old};
+   const backupKey='mri-alliance.template-backups.v1',previousTemplates=localStorage.getItem(KEYS.templates),previousVersions=localStorage.getItem(KEYS.templateVersions),oldVersion=currentTemplateVersion(templateId),newVersion=nextTemplateVersion(oldVersion),backupRecord={id:crypto.randomUUID(),templateId,templateTitle:template.title,templateVersion:oldVersion,createdAt:new Date().toISOString(),doc:old};
    try{
     const oldBackups=localStorage.getItem(backupKey),backups=oldBackups?JSON.parse(oldBackups):[];
     if(!Array.isArray(backups))throw new Error('Повреждено хранилище резервных копий шаблонов.');
@@ -687,9 +706,12 @@ $('#template-file').onchange=async event=>{
     const nextOverrides={...overrides,[templateId]:candidate};localStorage.setItem(KEYS.templates,JSON.stringify(nextOverrides));
     const saved=JSON.parse(localStorage.getItem(KEYS.templates)??'null');
     if(!saved||JSON.stringify(saved[templateId])!==JSON.stringify(candidate))throw new Error('Не удалось проверить сохранённый шаблон.');
+    localStorage.setItem(KEYS.templateVersions,JSON.stringify({...readTemplateVersions(localStorage),[templateId]:newVersion}));
+    if(currentTemplateVersion(templateId)!==newVersion)throw new Error('Не удалось проверить версию шаблона.');
     overrides=nextOverrides;renderTemplates();closeDialog();toast(`Шаблон «${template.title}» заменён. Резервная копия сохранена локально.`);
    }catch(error){
     if(previousTemplates===null)localStorage.removeItem(KEYS.templates);else try{localStorage.setItem(KEYS.templates,previousTemplates);}catch{}
+    if(previousVersions===null)localStorage.removeItem(KEYS.templateVersions);else try{localStorage.setItem(KEYS.templateVersions,previousVersions);}catch{}
     toast(`Импорт отменён: ${(error as Error).message}. Исходный шаблон сохранён.`,true);
    }
   });
@@ -707,7 +729,8 @@ $('#restore-template-backup').onclick=()=>{
   let restored:RichNode;try{restored=validateTemplate(item.doc);}catch(error){toast(`Резервная копия повреждена: ${(error as Error).message}`,true);return;}
   const confirmDialog=dialog(`Восстановить «${template.title}»?`,'<p>Текущий вариант будет сохранён как резервная копия. Протоколы пациентов не изменяются.</p>','<button class="btn" data-close>Отмена</button><button class="btn primary" id="confirm-template-backup-restore">Сохранить копию и восстановить</button>');
   confirmDialog.querySelector('#confirm-template-backup-restore')!.addEventListener('click',()=>{
-   try{const now=overrides[item.templateId]??makeTemplateDocument(item.templateId),record={id:crypto.randomUUID(),templateId:item.templateId,templateTitle:template.title,createdAt:new Date().toISOString(),doc:now};const next=[...backups,record];localStorage.setItem(backupKey,JSON.stringify(next));const checked=JSON.parse(localStorage.getItem(backupKey)??'null');if(!Array.isArray(checked)||JSON.stringify(checked.at(-1))!==JSON.stringify(record))throw new Error('Не удалось проверить резервную копию текущей версии.');const nextOverrides={...overrides,[item.templateId]:restored};localStorage.setItem(KEYS.templates,JSON.stringify(nextOverrides));const saved=JSON.parse(localStorage.getItem(KEYS.templates)??'null');if(JSON.stringify(saved?.[item.templateId])!==JSON.stringify(restored))throw new Error('Не удалось проверить восстановленный шаблон.');overrides=nextOverrides;renderTemplates();closeDialog();toast(`Шаблон «${template.title}» восстановлен.`);}catch(error){toast(`Восстановление отменено: ${(error as Error).message}`,true);}
+   const previousTemplates=localStorage.getItem(KEYS.templates),previousVersions=localStorage.getItem(KEYS.templateVersions),oldVersion=currentTemplateVersion(item.templateId);
+   try{const now=overrides[item.templateId]??makeTemplateDocument(item.templateId),record={id:crypto.randomUUID(),templateId:item.templateId,templateTitle:template.title,templateVersion:oldVersion,createdAt:new Date().toISOString(),doc:now};const next=[...backups,record];localStorage.setItem(backupKey,JSON.stringify(next));const checked=JSON.parse(localStorage.getItem(backupKey)??'null');if(!Array.isArray(checked)||JSON.stringify(checked.at(-1))!==JSON.stringify(record))throw new Error('Не удалось проверить резервную копию текущей версии.');const nextOverrides={...overrides,[item.templateId]:restored};localStorage.setItem(KEYS.templates,JSON.stringify(nextOverrides));const saved=JSON.parse(localStorage.getItem(KEYS.templates)??'null');if(JSON.stringify(saved?.[item.templateId])!==JSON.stringify(restored))throw new Error('Не удалось проверить восстановленный шаблон.');const newVersion=nextTemplateVersion(oldVersion);localStorage.setItem(KEYS.templateVersions,JSON.stringify({...readTemplateVersions(localStorage),[item.templateId]:newVersion}));if(currentTemplateVersion(item.templateId)!==newVersion)throw new Error('Не удалось проверить версию восстановленного шаблона.');overrides=nextOverrides;renderTemplates();closeDialog();toast(`Шаблон «${template.title}» восстановлен как версия ${newVersion}.`);}catch(error){if(previousTemplates===null)localStorage.removeItem(KEYS.templates);else try{localStorage.setItem(KEYS.templates,previousTemplates);}catch{}if(previousVersions===null)localStorage.removeItem(KEYS.templateVersions);else try{localStorage.setItem(KEYS.templateVersions,previousVersions);}catch{}toast(`Восстановление отменено: ${(error as Error).message}`,true);}
   });
  }));
 };
@@ -778,7 +801,7 @@ window.addEventListener('beforeunload',()=>{if(!templateMode)saveLocal();});
 if(recoveryError)toast('Предыдущий черновик не удалось восстановить. Можно открыть сохранённый Word.',true);
 const readyShell=document.querySelector<HTMLElement>('#app .shell');const readyStyle=readyShell?getComputedStyle(readyShell):null;const readyBounds=readyShell?.getBoundingClientRect();const refreshApplicationVersion=()=>void window.desktop?.getApplicationVersion().then(version=>{const versionLabel=document.querySelector('#application-version');if(versionLabel)versionLabel.textContent=version;}).catch(()=>{});window.desktop?.reportReady({appRoot:Boolean(readyShell),templateCount:reportTemplates.length,viewport:{width:innerWidth,height:innerHeight},shell:{width:Math.round(readyBounds?.width??0),height:Math.round(readyBounds?.height??0),display:readyStyle?.display??'missing',visibility:readyStyle?.visibility??'missing',opacity:readyStyle?.opacity??'missing'},bodyColor:getComputedStyle(document.body).backgroundColor,textLength:document.body.innerText.length});refreshApplicationVersion();setTimeout(refreshApplicationVersion,1500);setTimeout(refreshApplicationVersion,3500);
 
-function packageLibrary():TemplateDocxItem[]{return reportTemplates.map(t=>({id:t.id,title:t.title,areaId:t.areaId,group:t.id.startsWith('ct-')?'КТ':'МРТ',doc:overrides[t.id]??makeTemplateDocument(t.id)}));}
+function packageLibrary():TemplateDocxItem[]{return reportTemplates.map(t=>({id:t.id,title:t.title,areaId:t.areaId,group:t.id.startsWith('ct-')?'КТ':'МРТ',templateVersion:currentTemplateVersion(t.id),doc:overrides[t.id]??makeTemplateDocument(t.id)}));}
 function packagePreview(doc:RichNode){const host=document.createElement('div'),view=makeEditor(host,doc,()=>{});try{return DOMPurify.sanitize(view.getHTML());}finally{view.destroy();}}
 $('#template-packages').onclick=()=>{
  if(templateMode){toast('Завершите редактирование шаблона.',true);return;}

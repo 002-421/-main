@@ -16,7 +16,7 @@ test('Word preview uses the same page geometry and base font as exported source 
     assert.match(xml, new RegExp(`w:bottom="${twips(layout.bottomMm)}"`), `${id}: Word bottom margin`);
     assert.match(xml, new RegExp(`w:left="${twips(layout.leftMm)}"`), `${id}: Word left margin`);
     assert.match(xml, new RegExp(`w:right="${twips(layout.rightMm)}"`), `${id}: Word right margin`);
-    assert.equal(layout.fontSizePt, 12);
+    assert.equal(layout.fontSizePt, 11);
     assert.equal(layout.topMm, 43);
   }
 });

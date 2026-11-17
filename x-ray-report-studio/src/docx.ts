@@ -28,11 +28,11 @@ export type DocxOptions = {
   title?: string;
   kind?: 'report' | 'template';
   templateId?: string;
-  templateReview?: { format: 1; templateId: string; areaId: string; baseSha256: string; appVersion: string };
+  templateReview?: { format: number; templateId: string; areaId: string; baseSha256: string; appVersion: string; templateVersion?: string };
   /** Full source font faces keep Word layout stable on machines without that font installed. */
   fonts?: EmbeddedDocxFont[];
 };
-export type ImportedDocx = ReturnType<typeof validateDraft> & { kind: 'report' | 'template'; templateId?: string; importWarnings?: string[]; editedInWord?: boolean; templateReview?: { format: number; templateId: string; areaId: string; baseSha256: string; appVersion: string } };
+export type ImportedDocx = ReturnType<typeof validateDraft> & { kind: 'report' | 'template'; templateId?: string; importWarnings?: string[]; editedInWord?: boolean; templateReview?: { format: number; templateId: string; areaId: string; baseSha256: string; appVersion: string; templateVersion?: string } };
 
 function color(value: unknown): string | undefined {
   if (typeof value !== 'string') return;

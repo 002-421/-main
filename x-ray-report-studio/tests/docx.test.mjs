@@ -338,6 +338,22 @@ test('template export retains the footer when editor document attrs are absent',
   assert.match(xml, /<w:footerReference w:type="default"/);
 });
 
+test('0.4.73 built-in template DOCX keeps 11 pt, 12 pt recommendation margins and footer only in the footer part', async () => {
+  const template = reportTemplates.find(item => item.id === 'abdomen-bp-zp-ku');
+  const doc = makeTemplateDocument(template.id);
+  const { xml, zip } = await exported(doc, { templateId: template.id });
+  assert.match(xml, /<w:sz w:val="22"\/>/);
+  assert.doesNotMatch(xml, /<w:sz w:val="(?:20|24)"\/>/);
+  const recommendation = xml.match(/<w:p[\s\S]*?Рекомендована консультация лечащего врача\.[\s\S]*?<\/w:p>/)?.[0];
+  assert.ok(recommendation);
+  assert.match(recommendation, /<w:spacing(?=[^>]*w:before="240")(?=[^>]*w:after="240")/);
+  assert.doesNotMatch(xml, /Данное заключение не является диагнозом|Исследование выполнено на магнитно-резонансном томографе/);
+  const footer = Object.entries(zip).find(([name]) => /^word\/footer\d+\.xml$/.test(name));
+  assert.ok(footer);
+  assert.match(strFromU8(footer[1]), /Данное заключение не является диагнозом/);
+  assert.match(strFromU8(footer[1]), /Исследование выполнено на магнитно-резонансном томографе/);
+});
+
 test('source font faces are embedded with Word font relationships and cannot be modified behind embedded draft metadata', async () => {
   const dir = new URL('../src/assets/fonts/', import.meta.url);
   const font = {

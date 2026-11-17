@@ -6,12 +6,14 @@ import type { RichNode } from './model';
 import { compactTemplateTables, separateRecommendations, highlightDeletionNotes } from './table-layout.ts';
 import piRadsReference from './assets/pi-rads-v21.ts';
 import { highlightBrainAlternatives } from './template-alternatives.ts';
+import { INITIAL_TEMPLATE_VERSION } from './template-versioning.ts';
 
 export type ReportTemplate = {
   id: string;
   areaId: string;
   title: string;
   description: string;
+  templateVersion: string;
   sourceFiles: string[];
   doc: RichNode;
 };
@@ -28,14 +30,89 @@ export const PATIENT_FIELD_ID = source.patientFieldId;
 export const DOCTOR_FIELD_ID = source.doctorFieldId;
 export const DEFAULT_TEMPLATE_ID = source.defaultTemplateId;
 export const templatePage = source.page;
-export const reportTemplates = [...source.templates, ...ctSource.templates] as ReportTemplate[];
+const rawReportTemplates = [...source.templates, ...ctSource.templates] as unknown as ReportTemplate[];
+export const reportTemplates = rawReportTemplates.map(template => ({
+  ...template,
+  // Template revisions evolve independently from XRS releases. Existing local
+  // revision maps are applied by the workspace without rewriting user overrides.
+  templateVersion: typeof template.templateVersion === 'string' ? template.templateVersion : INITIAL_TEMPLATE_VERSION,
+})) as ReportTemplate[];
 export const reportBlocks = source.blocks as ReportBlock[];
+
+const plain = (node: RichNode): string => node.type === 'text' ? node.text ?? '' : node.content?.map(plain).join('') ?? '';
+const serviceFooter = /^(?:Данное заключение не является диагнозом|Исследование выполнено на магнитно-резонансном томографе)(?:\s|$)/iu;
+
+function addYellowBold(marks: RichNode['marks'] = []) {
+  const result = structuredClone(marks ?? []);
+  if (!result.some(mark => mark.type === 'bold')) result.push({ type: 'bold' });
+  const yellow = result.find(mark => mark.type === 'highlight');
+  if (yellow) yellow.attrs = { ...yellow.attrs, color: '#ffff00' };
+  else result.push({ type: 'highlight', attrs: { color: '#ffff00' } });
+  const style = result.find(mark => mark.type === 'textStyle');
+  if (style) style.attrs = { ...style.attrs, fontSize: '14.66667px' };
+  else result.push({ type: 'textStyle', attrs: { fontSize: '14.66667px' } });
+  return result;
+}
+
+/** Replace a legacy spinal heading even when Word split it into styled runs. */
+function normalizeSpinalHeadings(node: RichNode) {
+  if (node.content) {
+    if (node.type === 'paragraph' || node.type === 'heading') {
+      const replacements = [
+        ['Дорзальные грыжи дисков:', 'Дорзальные -ая экструзии -я дисков -а:'],
+        ['Дорзальные протрузии дисков:', 'Дорзальные -ая протрузии -я дисков -а:'],
+      ] as const;
+      const result: RichNode[] = [];
+      for (let i = 0; i < node.content.length;) {
+        if (node.content[i].type !== 'text') { result.push(node.content[i++]); continue; }
+        let end = i;
+        while (end < node.content.length && node.content[end].type === 'text') end++;
+        const runs = node.content.slice(i, end), combined = runs.map(run => run.text ?? '').join('');
+        const matches: Array<{ start: number; end: number; replacement: string }> = [];
+        for (const [needle, replacement] of replacements) {
+          for (const match of combined.matchAll(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')))
+            matches.push({ start: match.index!, end: match.index! + match[0].length, replacement });
+        }
+        matches.sort((a, b) => a.start - b.start);
+        let cursor = 0;
+        const appendRange = (from: number, to: number) => {
+          let offset = 0;
+          for (const run of runs) {
+            const text = run.text ?? '', runEnd = offset + text.length;
+            const left = Math.max(from, offset), right = Math.min(to, runEnd);
+            if (right > left) result.push({ ...run, text: text.slice(left - offset, right - offset) });
+            offset = runEnd;
+          }
+        };
+        for (const match of matches) {
+          if (match.start < cursor) continue;
+          appendRange(cursor, match.start);
+          let offset = 0, sourceRun = runs[0];
+          for (const run of runs) { if (match.start < offset + (run.text ?? '').length) { sourceRun = run; break; } offset += (run.text ?? '').length; }
+          result.push({ type: 'text', text: match.replacement, marks: addYellowBold(sourceRun.marks) });
+          cursor = match.end;
+        }
+        appendRange(cursor, combined.length);
+        i = end;
+      }
+      node.content = result;
+    } else node.content.forEach(normalizeSpinalHeadings);
+  }
+}
+
+function removeServiceFooter(node: RichNode) {
+  if (!node.content) return;
+  node.content = node.content.filter(child => !(child.type === 'paragraph' && serviceFooter.test(plain(child).trim())));
+  node.content.forEach(removeServiceFooter);
+}
 
 /** A new independent document with source formatting and blank entry fields. */
 export function makeTemplateDocument(templateId = DEFAULT_TEMPLATE_ID): RichNode {
   const template = reportTemplates.find(item => item.id === templateId);
   if (!template) throw new Error('Шаблон исследования не найден.');
   const document = structuredClone(template.doc);
+  normalizeSpinalHeadings(document);
+  removeServiceFooter(document);
   const spacing = (node: RichNode) => { if (['doc','paragraph','heading'].includes(node.type)) node.attrs={...node.attrs,lineHeight:1.05}; for(const mark of node.marks ?? []) if(mark.type==='textStyle' && mark.attrs) delete mark.attrs.lineHeight; node.content?.forEach(spacing); }; spacing(document);
   if (templateId === 'pelvis-omt-zh' || templateId === 'pelvis-omt-zh-ku') {
     const content = document.content ??= [];

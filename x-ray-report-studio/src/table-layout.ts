@@ -20,14 +20,6 @@ export function compactTemplateTables(input: RichNode): RichNode {
       };
       node.content?.forEach(scaleWidths);
       const compactBreaks = (cell: RichNode) => {
-        if (cell.type === 'paragraph') {
-          cell.attrs = { ...cell.attrs, fontSizePt: Math.min(Number(cell.attrs?.fontSizePt) || 9, 9), spaceAfterPt: Math.min(Number(cell.attrs?.spaceAfterPt) || 1, 1) };
-        }
-        if (cell.type === 'text' && cell.marks) cell.marks = cell.marks.map(mark => {
-          if (mark.type !== 'textStyle') return mark;
-          const size = Number.parseFloat(String(mark.attrs?.fontSize ?? '12'));
-          return { ...mark, attrs: { ...mark.attrs, fontSize: `${Math.min(Number.isFinite(size) ? size : 12, 12)}px` } };
-        });
         if (cell.type === 'paragraph' && cell.content) {
           while (cell.content.length && isBlank(cell.content[0])) cell.content.shift();
           while (cell.content.length && isBlank(cell.content[cell.content.length - 1])) cell.content.pop();
@@ -49,17 +41,19 @@ export function compactTemplateTables(input: RichNode): RichNode {
     } else node.content?.forEach(visit);
   };
   visit(doc);
-  const setTypography = (node: RichNode, inTable = false) => {
-    const tableContent = inTable || node.type === 'table';
-    if (node.type === 'paragraph' || node.type === 'heading') node.attrs = {
-      ...node.attrs, fontFamily: 'Arial', fontSizePt: tableContent ? 9 : 12,
-    };
-    if (node.type === 'text' && node.marks) node.marks = node.marks.map(mark => mark.type === 'textStyle'
-      ? { ...mark, attrs: { ...mark.attrs, fontFamily: 'Arial', fontSize: tableContent ? '12px' : '16px' } }
-      : mark);
-    node.content?.forEach(child => setTypography(child, tableContent));
+  const templateSizePx = '14.66667px';
+  const setTypography = (node: RichNode) => {
+    if (node.type === 'paragraph' || node.type === 'heading') node.attrs = { ...node.attrs, fontSizePt: 11 };
+    if (node.type === 'text' || node.type === 'reportField') {
+      const marks = [...(node.marks ?? [])];
+      const index = marks.findIndex(mark => mark.type === 'textStyle');
+      if (index >= 0) marks[index] = { ...marks[index], attrs: { ...marks[index].attrs, fontSize: templateSizePx } };
+      else marks.push({ type: 'textStyle', attrs: { fontSize: templateSizePx } });
+      node.marks = marks;
+    }
+    node.content?.forEach(setTypography);
   };
-  doc.attrs = { ...doc.attrs, fontFamily: 'Arial', fontSizePt: 12 };
+  doc.attrs = { ...doc.attrs, fontSizePt: 11 };
   setTypography(doc);
   return doc;
 }
@@ -70,20 +64,24 @@ export function separateRecommendations(input: RichNode): RichNode {
   const doc = structuredClone(input);
   const walk = (node: RichNode) => {
     if (!node.content) return;
-    const separated: RichNode[] = [];
-    for (const child of node.content) {
+    const children = node.content;
+    for (let index = 0; index < children.length;) {
+      const child = children[index];
       const text = textOf(child).trim();
-      const isSectionStart = child.type === 'paragraph' && (/^\s*(?:Рекоменд|Рекоменду)/i.test(text) || /^заключение\s*:?$/i.test(text) || /^заключение\s*:/i.test(text));
-      if (isSectionStart) {
-        const previous = separated.at(-1);
-        if (previous?.type !== 'paragraph' || textOf(previous).trim()) {
-          separated.push({ type: 'paragraph', attrs: { ...(child.attrs ?? {}), fontFamily: 'Arial', fontSizePt: 12, spaceBeforePt: 0, spaceAfterPt: 0 }, content: [] });
+      const isRecommendation = child.type === 'paragraph' && /^\s*(?:Рекоменд|Рекоменду)/i.test(text);
+      if (isRecommendation) {
+        let end = index;
+        while (end + 1 < children.length && children[end + 1].type === 'paragraph' && /^\s*(?:Рекоменд|Рекоменду|Консультац)/i.test(textOf(children[end + 1]).trim())) end++;
+        for (let at = index; at <= end; at++) {
+          const paragraph = children[at];
+          paragraph.attrs = { ...paragraph.attrs, fontSizePt: 11, spaceBeforePt: at === index ? 12 : 0, spaceAfterPt: at === end ? 12 : 0 };
         }
+        index = end + 1;
+        continue;
       }
-      walk(child);
-      separated.push(child);
+      index++;
     }
-    node.content = separated;
+    children.forEach(walk);
   };
   walk(doc);
   return doc;
@@ -109,6 +107,8 @@ function choiceRanges(text: string): Array<{ start: number; end: number }> {
   add(/(?:нерезко\s*\/\s*умеренно(?:\s+выраженн\w*)?|нерезко\s+выраженн\w*\s*\/\s*умеренн\w*(?:\s+выраженн\w*)?|незначительн\w*\s*\/\s*умерен\w*|единичн\w*\s*\/\s*единичн\w*)/giu);
   add(/(?:латеральн\w*|медиальн\w*|центральн\w*|базальн\w*|апикальн\w*|сагиттальн\w*|фронтальн\w*|вертикальн\w*)\s*\/\s*(?:латеральн\w*|медиальн\w*|центральн\w*|базальн\w*|апикальн\w*|сагиттальн\w*|фронтальн\w*|вертикальн\w*)(?:\s*\/\s*(?:латеральн\w*|медиальн\w*|центральн\w*|базальн\w*|апикальн\w*|сагиттальн\w*|фронтальн\w*|вертикальн\w*)){0,2}/giu);
   add(/(?:абсолютный\s*\/\s*относительный\s+стеноз|Fazekas\s+\d(?:\s*\/\s*\d){1,2}|MTA-score\s+\d(?:\s*\/\s*\d){1,2}|(?:гонартроз|артроз[^\n.!?]{0,50}|хондромаляция[^\n.!?]{0,50})\s*\(?\s*(?:I{1,3}|IV|\d)(?:\s*\/\s*(?:I{1,3}|IV|\d)){1,3})/giu);
+  add(/\bD\s*(?:\/|[<>=]{1,2})\s*S\b/giu);
+  add(/-[а-яё]+(?:\s*\/\s*-[а-яё]+)+/giu);
   // A slash denotes a fixed MRI sequence, reference range, or named standard in these cases.
   return ranges.filter(range => {
     const selected = text.slice(range.start, range.end);
@@ -128,12 +128,12 @@ export function highlightDeletionNotes(input: RichNode, options: { ct?: boolean 
     if (!marks.some(mark => mark.type === 'italic')) marks.push(ITALIC_MARK);
     if (!marks.some(mark => mark.type === 'highlight')) marks.push(DELETION_HIGHLIGHT);
     const textStyle = marks.find(mark => mark.type === 'textStyle');
-    if (textStyle) textStyle.attrs = { ...textStyle.attrs, fontFamily: 'Arial', fontSize: '13.333px' };
-    else marks.push({ type: 'textStyle', attrs: { fontFamily: 'Arial', fontSize: '13.333px' } });
+    if (textStyle) textStyle.attrs = { ...textStyle.attrs, fontSize: '14.66667px' };
+    else marks.push({ type: 'textStyle', attrs: { fontSize: '14.66667px' } });
     node.marks = marks;
   };
   const styleParagraph = (paragraph: RichNode) => {
-    paragraph.attrs = { ...paragraph.attrs, fontFamily: 'Arial', fontSizePt: 10 };
+    paragraph.attrs = { ...paragraph.attrs, fontSizePt: 11 };
     const style = (node: RichNode) => {
       if (node.type === 'text') styleText(node);
       node.content?.forEach(style);
@@ -251,6 +251,8 @@ export function highlightDeletionNotes(input: RichNode, options: { ct?: boolean 
     const ranges = [...fullText.matchAll(dimension)].map(match => ({ start: match.index!, end: match.index! + match[0].length }))
       .filter(range => !exclusions.some(excluded => range.start >= excluded.start && range.start < excluded.end));
     ranges.push(...choiceRanges(fullText));
+    const sameRegionLateralityChoice = /(?:прав(?:ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми)\s+(?:или|либо)\s+лев(?:ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми)|лев(?:ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми)\s+(?:или|либо)\s+прав(?:ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми))/iu;
+    if (sameRegionLateralityChoice.test(fullText)) ranges.push({ start: 0, end: fullText.length });
     highlightRanges(paragraph, ranges, node => {
       const marks = [...(node.marks ?? [])];
       if (!marks.some(mark => mark.type === 'highlight')) marks.push(DELETION_HIGHLIGHT);

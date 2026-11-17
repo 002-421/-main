@@ -12,7 +12,7 @@ export function previewPageLayout(doc: RichNode): PreviewPageLayout {
     topMm: Math.max(43, mm(attrs.marginTopMm, 16, 0, 80)),
     bottomMm: mm(attrs.marginBottomMm, 907 * 25.4 / 1440, 0, 80),
     leftMm: mm(attrs.marginLeftMm, 18, 0, 80), rightMm: mm(attrs.marginRightMm, 18, 0, 80),
-    fontSizePt: mm(attrs.fontSizePt, 12, 1, 200),
+    fontSizePt: mm(attrs.fontSizePt, 11, 1, 200),
     fontFamily: typeof attrs.fontFamily === 'string' && attrs.fontFamily.length <= 100 ? attrs.fontFamily : 'Arial',
   };
 }
