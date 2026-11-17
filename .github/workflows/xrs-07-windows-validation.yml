@@ -116,7 +116,8 @@ jobs:
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         shell: pwsh
         run: |
-          $result = & npm test 2>&1
+          # Keep dictionary-heavy files from starving the real PowerShell lock fixture.
+          $result = & node --test --test-concurrency=1 tests/*.test.mjs 2>&1
           $testExit = $LASTEXITCODE
           $result | ForEach-Object { Write-Host $_ }
           if ($testExit -ne 0) {
