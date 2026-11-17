@@ -442,6 +442,17 @@ class AnonymizerTests(unittest.TestCase):
             parts[f"word/media/{number}.png"] = b"x"
         self.assertEqual(self.run_parts(parts)[0].reason, "ZIP_ENTRY_LIMIT")
 
+    def test_37_eponym_in_identifying_name_is_removed(self):
+        for text in ["Бехтерев Иван Иванович", "Модик Иван Иванович", "Modic@example.invalid"]:
+            result, blob = self.run_parts(minimal(text))
+            self.assertEqual(result.status, "PASS", result)
+            self.assertNotIn(text, self.text(blob))
+
+    def test_38_study_number_example(self):
+        result, blob = self.run_parts(minimal("Протокол МРТ №18415"))
+        self.assertEqual(result.status, "PASS", result)
+        self.assertEqual(self.text(blob), "Протокол МРТ")
+
 
 if __name__ == "__main__":
     unittest.main()

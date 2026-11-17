@@ -73,9 +73,10 @@ def spans(text: str, result: Redaction) -> list[tuple[int, int]]:
             result.issues.add("EMPTY_PERSONAL_LABEL")
     for category, pattern in PATTERNS:
         for match in pattern.finditer(text):
-            if not EPONYMS.search(match.group()):
-                found.append(match.span())
-                result.categories.add(category)
+            # Complete names, initials and contact details are identifying even if
+            # a surname coincides with a medical eponym.
+            found.append(match.span())
+            result.categories.add(category)
     merged: list[tuple[int, int]] = []
     for start, end in sorted(found):
         if merged and start <= merged[-1][1]:
@@ -119,7 +120,8 @@ def redact_nodes(nodes, result: Redaction) -> None:
                     continue
                 pieces.append(text[cursor:max(cursor, start)])
                 if offset <= start < end:
-                    pieces.append(REMOVED)
+                    fragment = text[start:stop].strip()
+                    pieces.append("" if fragment.startswith("№") else REMOVED)
                 cursor = min(end, stop)
             pieces.append(text[cursor:end])
             node.text = "".join(pieces)

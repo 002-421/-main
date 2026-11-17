@@ -12,14 +12,15 @@ if ($Offline) {
     python -m pip install -r requirements-dev.txt
 }
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
-python -m unittest discover -s tests -t . -v
+python tools/run_tests.py build/test-evidence.json
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
 python -m PyInstaller --noconfirm --clean --onedir --windowed --name XRS-DOCX-Anonymizer --exclude-module PIL --exclude-module docx launcher.py
 if ($LASTEXITCODE -ne 0) { throw 'GUI build failed.' }
 python -m PyInstaller --noconfirm --clean --onefile --console --name XRS-DOCX-Anonymizer-CLI --exclude-module PIL --exclude-module docx cli_launcher.py
 if ($LASTEXITCODE -ne 0) { throw 'CLI build failed.' }
 Copy-Item dist/XRS-DOCX-Anonymizer-CLI.exe dist/XRS-DOCX-Anonymizer/
-Copy-Item README_RU.md,ARCHITECTURE.md,SECURITY.md,MANUAL_REVIEW.md,THIRD_PARTY_NOTICES.md dist/XRS-DOCX-Anonymizer/
+Copy-Item README_RU.md,ARCHITECTURE.md,SECURITY.md,MANUAL_REVIEW.md,THIRD_PARTY_NOTICES.md,TEST_RESULTS.md dist/XRS-DOCX-Anonymizer/
+Copy-Item build/test-evidence.json dist/XRS-DOCX-Anonymizer/BUILD_EVIDENCE.json
 python tools/collect_licenses.py dist/XRS-DOCX-Anonymizer/licenses
 if ($LASTEXITCODE -ne 0) { throw 'License collection failed.' }
 python tools/windows_smoke.py dist/XRS-DOCX-Anonymizer/XRS-DOCX-Anonymizer-CLI.exe
@@ -28,7 +29,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Frozen smoke test failed.' }
 $gui = Start-Process dist/XRS-DOCX-Anonymizer/XRS-DOCX-Anonymizer.exe -PassThru
 Start-Sleep -Seconds 4
 if ($gui.HasExited) { throw 'Frozen GUI exited during startup.' }
-$gui.CloseMainWindow() | Out-Null
+$window = Get-Process -Name XRS-DOCX-Anonymizer -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like 'XRS DOCX Anonymizer*' } | Select-Object -First 1
+if ($null -eq $window) { throw 'The expected frozen GUI window was not found.' }
+$window.CloseMainWindow() | Out-Null
 if (-not $gui.WaitForExit(5000)) { $gui.Kill() }
 Compress-Archive -Path dist/XRS-DOCX-Anonymizer -DestinationPath dist/XRS-DOCX-Anonymizer-Windows-x64.zip -Force
 Get-FileHash dist/XRS-DOCX-Anonymizer-Windows-x64.zip -Algorithm SHA256 | Format-List

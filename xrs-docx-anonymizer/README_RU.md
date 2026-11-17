@@ -2,7 +2,7 @@
 
 Отдельная локальная утилита для подготовки медицинских DOCX. Интерфейс на русском языке; X-ray Report Studio не требуется. Оригиналы открываются только для чтения. Интернет, облачные модели и телеметрия в приложении отсутствуют.
 
-**Стадия: MVP для испытаний на синтетических документах.** Полная поставка READY FOR TEST требует успешной сборки Windows EXE и проверки в Windows 11 x64 / Microsoft Word. Наличие workflow само по себе не означает, что EXE собран. Подтверждённые проверки перечислены в TEST_RESULTS.md.
+**Статус: READY FOR TEST — MVP для приёмочных испытаний.** Windows EXE собран в GitHub Actions; синтетические тесты и проверка frozen CLI пройдены на Windows Server 2022 x64. Проверка на целевой Windows 11 x64 / Microsoft Word ещё требуется. Подтверждённые проверки перечислены в TEST_RESULTS.md; BUILD_EVIDENCE.json в дистрибутиве содержит результат тестов именно этой сборки.
 
 ## Запуск переносимой Windows-сборки
 
@@ -80,6 +80,8 @@ python tools/generate_synthetic.py synthetic-suite --bulk 1000
 На Windows x64 с Python 3.12 запустите `./build-windows.ps1` из PowerShell. Скрипт проверяет тесты, собирает переносимую папку GUI и дополнительный CLI EXE, включает лицензии, проверяет frozen CLI на синтетическом документе и проверяет запуск GUI. Результат: `dist/XRS-DOCX-Anonymizer-Windows-x64.zip`.
 
 В `.github/workflows/windows-build.yml` подготовлена сборка Windows на отдельной ветке, без публикации релиза и без слияния в Stable. GitHub Actions использует интернет для загрузки инструментов сборки. В workflow поступает только исходный код и синтетические тесты. Сборка и обычная работа приложения — разные процессы: установленная утилита не обращается к сети.
+
+В общем репозитории workflow находится в `.github/workflows/xrs-docx-anonymizer-windows.yml`, а исходники — в отдельной папке `xrs-docx-anonymizer`. [Сборки отдельной ветки](https://github.com/002-421/-main/actions/workflows/xrs-docx-anonymizer-windows.yml?query=branch%3Acodex%2Fxrs-docx-anonymizer). Откройте успешный запуск и скачайте artifact `XRS-DOCX-Anonymizer-Windows-x64`; затем распакуйте лежащий внутри Windows ZIP. Для скачивания artifact GitHub может требовать вход в учётную запись.
 
 Для сборки в изолированном контуре заранее подготовьте на Windows с теми же Python и архитектурой папку wheelhouse:
 
