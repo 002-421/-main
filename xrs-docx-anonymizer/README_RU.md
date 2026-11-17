@@ -83,7 +83,7 @@ python tools/generate_synthetic.py synthetic-suite --bulk 1000
 
 В `.github/workflows/windows-build.yml` подготовлена сборка Windows на отдельной ветке, без публикации релиза и без слияния в Stable. GitHub Actions использует интернет для загрузки инструментов сборки. В workflow поступает только исходный код и синтетические тесты. Сборка и обычная работа приложения — разные процессы: установленная утилита не обращается к сети.
 
-В общем репозитории workflow находится в `.github/workflows/xrs-docx-anonymizer-windows.yml`, а исходники — в отдельной папке `xrs-docx-anonymizer`. [Сборки отдельной ветки](https://github.com/002-421/-main/actions/workflows/xrs-docx-anonymizer-windows.yml?query=branch%3Acodex%2Fxrs-docx-anonymizer). Откройте успешный запуск и скачайте artifact `XRS-DOCX-Anonymizer-Windows-x64`; затем распакуйте лежащий внутри Windows ZIP. Для скачивания artifact GitHub может требовать вход в учётную запись.
+В общем репозитории workflow находится в `.github/workflows/xrs-docx-anonymizer-windows.yml`, а исходники — в отдельной папке `xrs-docx-anonymizer`. [Скачать подтверждённый Windows artifact](https://github.com/002-421/-main/actions/runs/44112446035/artifacts/14341996449) или просмотреть [сборки ветки](https://github.com/002-421/-main/actions/workflows/xrs-docx-anonymizer-windows.yml?query=branch%3Acodex%2Fxrs-docx-anonymizer). Распакуйте artifact и лежащий внутри Windows ZIP. Для скачивания GitHub может потребовать вход в учётную запись.
 
 Для сборки в изолированном контуре заранее подготовьте на Windows с теми же Python и архитектурой папку wheelhouse:
 
