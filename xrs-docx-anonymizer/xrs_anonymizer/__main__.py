@@ -20,7 +20,7 @@ def main():
     try:
         result = run_batch(args.source, args.output, recursive=not args.no_recursive)
         print(json.dumps(result, ensure_ascii=False))
-        return 2 if result["BLOCKED"] else 0
+        return 2 if result["FAILED"] else 0
     except BatchError as exc:
         print(str(exc))
     except Exception:

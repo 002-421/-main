@@ -37,7 +37,7 @@ class Blocked(Exception):
 @dataclass
 class Result:
     case_id: str
-    status: str = "BLOCKED"
+    status: str = "FAILED"
     removed_fields: int = 0
     removed_images: int = 0
     categories: list[str] = field(default_factory=list)
@@ -562,7 +562,7 @@ def process(path: Path, case_id: str) -> tuple[Result, bytes | None]:
         result.removed_fields = builder.redaction.count
         result.removed_images = builder.images
         result.categories = sorted(builder.redaction.categories | issues)
-        result.status = "REVIEW" if issues else "PASS"
+        result.status = "REVIEW_REQUIRED" if issues else "PASS"
         return result, blob
     except Blocked as exc:
         result.reason = str(exc)

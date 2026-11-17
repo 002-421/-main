@@ -128,7 +128,7 @@ class Session:
 def run_batch(source: Path, destination: Path, recursive=True, callback=None,
               cancel: threading.Event | None = None) -> dict:
     files = discover(source, destination, recursive)
-    counts = {"total": len(files), "processed": 0, "PASS": 0, "REVIEW": 0, "BLOCKED": 0, "cancelled": False}
+    counts = {"total": len(files), "processed": 0, "PASS": 0, "REVIEW_REQUIRED": 0, "FAILED": 0, "cancelled": False}
     with Session(destination) as session:
         if callback:
             callback(dict(counts))

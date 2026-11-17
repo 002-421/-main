@@ -137,7 +137,7 @@ class AnonymizerTests(unittest.TestCase):
         ET.SubElement(child, Q("basedOn"), {Q("val"): "HIDDEN"})
         parts["word/styles.xml"] = xml(styles)
         result, blob = self.run_parts(parts)
-        self.assertEqual(result.status, "REVIEW")  # no visible clinical content left
+        self.assertEqual(result.status, "REVIEW_REQUIRED")  # no visible clinical content left
         self.assertNotIn("СЕКРЕТ", self.text(blob))
         self.assertNotIn(b"PRIVATE_STYLE", b"".join(unpack(blob).values()))
 
@@ -154,7 +154,7 @@ class AnonymizerTests(unittest.TestCase):
         parts = minimal()
         parts["unknown/opaque.dat"] = b"SECRET"
         result, blob = self.run_parts(parts)
-        self.assertEqual(result.status, "BLOCKED")
+        self.assertEqual(result.status, "FAILED")
         self.assertIsNone(blob)
 
     def test_10_large_batch_thousand_and_repeat_no_clobber(self):
@@ -214,14 +214,14 @@ class AnonymizerTests(unittest.TestCase):
     def test_13_ambiguous_review_isolation(self):
         write(self.source / "synthetic.docx", minimal("Сравнение от 11.12.2024. Иванов Иван."))
         counts = run_batch(self.source, self.output)
-        self.assertEqual(counts["REVIEW"], 1)
+        self.assertEqual(counts["REVIEW_REQUIRED"], 1)
         self.assertEqual(list((self.output / "Anonymized").glob("*.docx")), [])
         self.assertEqual(len(list((self.output / "Review").glob("*.docx"))), 1)
 
     def test_14_blocked_not_written_and_safe_reports(self):
         (self.source / "Иванов SECRET.docx").write_bytes(b"bad zip SECRET")
         counts = run_batch(self.source, self.output)
-        self.assertEqual(counts["BLOCKED"], 1)
+        self.assertEqual(counts["FAILED"], 1)
         self.assertEqual(list(self.output.rglob("*.docx")), [])
         for path in (self.output / "Reports").iterdir():
             text = path.read_text(encoding="utf-8-sig")
@@ -299,7 +299,7 @@ class AnonymizerTests(unittest.TestCase):
         ET.SubElement(ET.SubElement(ET.SubElement(box, Q("p")), Q("r")), Q("t")).text = "Врач: Петров Пётр Петрович Дата: 01.02.2026"
         parts["word/document.xml"] = xml(root)
         result, blob = self.run_parts(parts)
-        self.assertEqual(result.status, "REVIEW", result)
+        self.assertEqual(result.status, "REVIEW_REQUIRED", result)
         self.assertNotIn("Петров", self.text(blob))
         self.assertNotIn("01.02.2026", self.text(blob))
         self.assertNotIn(b"shape", b"".join(unpack(blob).values()))
@@ -342,7 +342,7 @@ class AnonymizerTests(unittest.TestCase):
         ET.SubElement(root.find(Q("body")), Q("altChunk"), {f"{{{R}}}id": "SECRET_ID"})
         parts["word/document.xml"] = xml(root)
         result, blob = self.run_parts(parts)
-        self.assertEqual(result.status, "REVIEW", result)
+        self.assertEqual(result.status, "REVIEW_REQUIRED", result)
         self.assertNotIn(b"SECRET_ID", b"".join(unpack(blob).values()))
 
     def test_26_metadata_in_format_attributes_does_not_survive(self):
@@ -403,7 +403,7 @@ class AnonymizerTests(unittest.TestCase):
     def test_32_standalone_surname_and_latin_names_review(self):
         for text in ["Иванов", "ИВАНОВ", "John Smith", "ГБУЗ Тестовая больница"]:
             result, _ = self.run_parts(minimal(text))
-            self.assertEqual(result.status, "REVIEW", result)
+            self.assertEqual(result.status, "REVIEW_REQUIRED", result)
 
     def test_33_explicit_hidden_false_preserves_clinical_text(self):
         parts = minimal()
@@ -424,7 +424,7 @@ class AnonymizerTests(unittest.TestCase):
         ET.SubElement(defaults, Q("vanish"))
         parts["word/styles.xml"] = xml(styles)
         result, blob = self.run_parts(parts)
-        self.assertEqual(result.status, "REVIEW", result)
+        self.assertEqual(result.status, "REVIEW_REQUIRED", result)
         self.assertNotIn("СЕКРЕТ", self.text(blob))
         styles = ET.Element(Q("styles"))
         node = ET.SubElement(styles, Q("style"), {Q("styleId"): "a"})
@@ -499,7 +499,7 @@ class AnonymizerTests(unittest.TestCase):
         text = "0,65 × 0,40 см; L4/5, L5/S1, C5/6; 73,85°; D>S; DWI. По сравнению с МРТ от 01.10.2025. После операции от 15.03.2024. В динамике с 10.09.2023."
         result, blob = self.run_parts(minimal(text))
         output = self.text(blob)
-        self.assertEqual(result.status, "REVIEW", result)
+        self.assertEqual(result.status, "REVIEW_REQUIRED", result)
         for value in ["0,65 × 0,40 см", "L4/5", "L5/S1", "C5/6", "73,85°", "D>S", "DWI", "01.10.2025", "15.03.2024", "10.09.2023"]:
             self.assertIn(value, output)
         self.assertIn("CLINICAL_DATE_REVIEW", result.categories)
@@ -589,7 +589,7 @@ class AnonymizerTests(unittest.TestCase):
         write(self.source / "synthetic-review.docx", minimal("По сравнению с МРТ от 01.10.2025"))
         (self.source / "synthetic-bad.docx").write_bytes(b"bad synthetic zip")
         counts = run_batch(self.source, self.output)
-        self.assertEqual((counts["PASS"], counts["REVIEW"], counts["BLOCKED"]), (1, 1, 1))
+        self.assertEqual((counts["PASS"], counts["REVIEW_REQUIRED"], counts["FAILED"]), (1, 1, 1))
         self.assertEqual(len(list((self.output / "Anonymized").glob("*.docx"))), 1)
         self.assertEqual(len(list((self.output / "Review").glob("*.docx"))), 1)
         records = json.loads((self.output / "Reports" / "summary.json").read_text())

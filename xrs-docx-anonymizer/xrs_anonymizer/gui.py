@@ -57,7 +57,7 @@ def main():
     progress.pack(fill="x")
     status = tk.StringVar(value="Выберите две отдельные папки.")
     ttk.Label(panel, textvariable=status, wraplength=720).pack(anchor="w", pady=(10, 8))
-    ttk.Label(panel, text="PASS означает прохождение автоматических проверок.\nПеред внешней передачей необходим ручной контроль. REVIEW хранится отдельно.", wraplength=720).pack(anchor="w", pady=8)
+    ttk.Label(panel, text="PASS означает прохождение автоматических проверок.\nПеред внешней передачей необходим ручной контроль. REVIEW_REQUIRED хранится отдельно; FAILED не экспортируется.", wraplength=720).pack(anchor="w", pady=8)
     messages = queue.Queue()
     cancellation = threading.Event()
     running = False
@@ -101,7 +101,7 @@ def main():
         while not messages.empty():
             kind, value = messages.get_nowait()
             if kind == "progress":
-                counts_var.set(f"Всего: {value['total']}   Обработано: {value['processed']}   Успешно: {value['PASS']}   На проверку: {value['REVIEW']}   Ошибки: {value['BLOCKED']}")
+                counts_var.set(f"Всего: {value['total']}   Обработано: {value['processed']}   Успешно: {value['PASS']}   На проверку: {value['REVIEW_REQUIRED']}   Ошибки: {value['FAILED']}")
                 progress.configure(maximum=max(1, value["total"]), value=value["processed"])
             else:
                 running = False
