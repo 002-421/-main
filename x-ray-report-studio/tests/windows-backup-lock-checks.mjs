@@ -34,13 +34,12 @@ async function probe(commandMode,unicode,instrumented=false){
  }
  return result;
 }
-const probes=await Promise.all([probe('-Command',false),probe('-Command',false,true),probe('-EncodedCommand',false,true),probe('-Command',true,true),probe('-EncodedCommand',true,true)]);
-await fs.writeFile(path.join(output,'legacy-transport.json'),JSON.stringify(probes,null,2));
-for(const p of probes){const message=JSON.stringify(p).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A');console.log('::notice title=PowerShell lock transport diagnosis::'+message);}
 
 const a='^Windows backup does not skip a locked user data file;',b='^an open Windows LevelDB LOCK does not block a verified backup$';
 const file='tests/user-data-backup.test.mjs';
 const scenarios=[['locked user data file',['--test','--test-name-pattern='+a,file]],['open LevelDB LOCK',['--test','--test-name-pattern='+b,file]],...Array.from({length:3},(_,i)=>['both Windows locks repetition '+(i+1),['--test','--test-name-pattern='+a+'|'+b,file]]),['release updater suite (original parallel command)',['--test','tests/update-channel.test.mjs','tests/update-version.test.mjs','tests/update-install.test.mjs','tests/install-state.test.mjs','tests/update-settings.test.mjs','tests/user-data-backup.test.mjs','tests/log-safety.test.mjs','tests/windows-integration.test.mjs']]];
+// Run the exact release command first, before any other powershell.exe fixture warms it up.
+scenarios.unshift(scenarios.pop());
 const results=[];let log='';
 for(const [name,args] of scenarios){
  console.log('CHECK:',name);const started=Date.now();
@@ -55,4 +54,8 @@ for(const [name,args] of scenarios){
  await fs.writeFile(path.join(output,'checks.log'),log);await fs.writeFile(path.join(output,'results.json'),JSON.stringify(results,null,2));
  if(result.code!==0){console.error('::error title=Windows backup lock acceptance::'+(result.stdout+result.stderr).slice(-12000).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A'));process.exitCode=1;break;}
 }
+const probes=await Promise.all([probe('-Command',false),probe('-Command',false,true),probe('-EncodedCommand',false,true),probe('-Command',true,true),probe('-EncodedCommand',true,true)]);
+await fs.writeFile(path.join(output,'legacy-transport.json'),JSON.stringify(probes,null,2));
+for(const p of probes){const message=JSON.stringify(p).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A');console.log('::warning title=PowerShell lock transport diagnosis::'+message);}
+
 if(process.env.GITHUB_STEP_SUMMARY)await fs.appendFile(process.env.GITHUB_STEP_SUMMARY,'\n## Real Windows backup lock acceptance\n\n```json\n'+JSON.stringify(results,null,2)+'\n```\n');
