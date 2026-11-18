@@ -1,19 +1,13 @@
+import type { PrintBox } from './print-document.ts';
 import type { RichNode } from './model';
 import { DISCLAIMER_TEXT, EQUIPMENT_TEXT } from './report-footer.ts';
 
 export { previewPageLayout } from './page-geometry.ts';
 import { previewPageLayout } from './page-geometry.ts';
 
-export function paginateBrowserPreview(html: string, doc: RichNode): string {
+/** The same footer measurement supplies preview and print-only object bounds. */
+function createMeasurement(doc: RichNode) {
   const layout = previewPageLayout(doc);
-  const source = document.createElement('div');
-  source.innerHTML = html;
-  const blocks: HTMLElement[] = [];
-  const collect = (node: Element) => {
-    if (node.matches('section[data-report-section]')) { [...node.children].forEach(collect); return; }
-    blocks.push(node.cloneNode(true) as HTMLElement);
-  };
-  [...source.children].forEach(collect);
   const css = [layout.widthMm, layout.heightMm, layout.topMm, layout.bottomMm, layout.leftMm, layout.rightMm]
     .map((value, index) => `--preview-${['width', 'height', 'top', 'bottom', 'left', 'right'][index]}:${value}mm`).join(';') + `;--preview-font-size:${layout.fontSizePt}pt`;
   const scratch = document.createElement('article');
@@ -38,6 +32,31 @@ export function paginateBrowserPreview(html: string, doc: RichNode): string {
   const contentHeight = (layout.heightMm - layout.topMm) * 96 / 25.4 - bottom;
   const effectiveCss = css + `;--preview-bottom:${bottom}px`;
 
+  return {scratch, measure, scale, layout, contentHeight, effectiveCss};
+}
+export function measurePrintBox(doc: RichNode): PrintBox {
+  const box = createMeasurement(doc);
+  try {
+    const image=document.createElement('img');box.measure.append(image);
+    const style=getComputedStyle(image),margin=(parseFloat(style.marginTop)||0)+(parseFloat(style.marginBottom)||0);
+    return {width:box.measure.getBoundingClientRect().width/box.scale,height:box.contentHeight-2,imageHeight:box.contentHeight-margin-2};
+  }
+  finally { box.scratch.remove(); }
+}
+
+export function paginateBrowserPreview(html: string, doc: RichNode): string {
+  const source = document.createElement('div');
+  source.innerHTML = html;
+  const blocks: HTMLElement[] = [];
+  const collect = (node: Element) => {
+    if (node.matches('section[data-report-section]')) { [...node.children].forEach(collect); return; }
+    // Tiptap wraps resizable tables in a scrolling view, which is not a print block.
+    if (node.matches('.tableWrapper') && node.querySelector(':scope > table')) { collect(node.querySelector(':scope > table')!); return; }
+    blocks.push(node.cloneNode(true) as HTMLElement);
+  };
+  [...source.children].forEach(collect);
+  const {scratch, measure, scale, layout, contentHeight, effectiveCss} = createMeasurement(doc);
+
   const pages: HTMLElement[] = [];
   const makePage = () => { const paper = document.createElement('article'); paper.className = 'export-preview-paper'; paper.style.cssText = effectiveCss; const content = document.createElement('div'); content.className = 'report-content'; content.style.fontFamily = layout.fontFamily; paper.append(content); pages.push(paper); return content; };
   let target = makePage();
@@ -45,17 +64,13 @@ export function paginateBrowserPreview(html: string, doc: RichNode): string {
     const top = measure.getBoundingClientRect().top;
     return Math.max(measure.getBoundingClientRect().height, ...[...measure.querySelectorAll('*')].map(n => n.getBoundingClientRect().bottom - top)) / scale;
   };
-  const fits = (node: HTMLElement) => { measure.append(node); const fits = measuredHeight() <= contentHeight - 0.5; node.remove(); return fits; };
+  const withinWidth=()=>{const box=measure.getBoundingClientRect();return [...measure.querySelectorAll('*')].every(element=>{const rect=element.getBoundingClientRect();return rect.width===0&&rect.height===0||rect.right<=box.right+1;});};
+  const fits = (node: HTMLElement) => { measure.append(node); const fits = measuredHeight() <= contentHeight - 0.5&&withinWidth(); node.remove(); return fits; };
   const append = (node: HTMLElement) => {
     const copy = node.cloneNode(true) as HTMLElement;
     measure.append(copy);
-    // An indivisible oversized object (image/table row/word) must stay visible
-    // inside A4. Shrink only its preview; never clip or change the document.
-    if (!target.children.length && measuredHeight() > contentHeight) {
-      const ratio = Math.max(0.01, (contentHeight - 2) / measuredHeight());
-      node.style.zoom = copy.style.zoom = String(ratio);
-      node.setAttribute('data-preview-scaled', 'true');
-    }
+    if(!withinWidth())throw new Error('Объект превышает ширину печатной области; текст не уменьшен и не обрезан.');
+    if (measuredHeight() > contentHeight) throw new Error('Неделимый блок превышает высоту страницы. Текст не уменьшен и не обрезан. Разделите строку таблицы или уменьшите графический объект.');
     target.append(node);
   };
   const paragraphPart = (original: HTMLElement, start: number, end: number, total: number): HTMLElement => {
@@ -74,20 +89,31 @@ export function paginateBrowserPreview(html: string, doc: RichNode): string {
   };
   try {
     for (const block of blocks) {
+      if(block.tagName==='TABLE'){
+        const rows=[...block.querySelectorAll(':scope > thead > tr,:scope > tbody > tr,:scope > tfoot > tr,:scope > tr')];
+        if(rows.some(row=>row.querySelector('[rowspan]:not([rowspan="1"])'))&&!fits(block.cloneNode(true) as HTMLElement))throw new Error('Таблица с объединёнными строками не помещается на страницу; безопасный перенос требует разделения таблицы.');
+        let piece=block.cloneNode(true) as HTMLElement;piece.querySelectorAll('tr').forEach(row=>row.remove());
+        const addRow=(table:HTMLElement,row:Element)=>{const body=table.querySelector('tbody')??table;body.append(row.cloneNode(true));};
+        for(const row of rows){const candidate=piece.cloneNode(true) as HTMLElement;addRow(candidate,row);
+          if(!fits(candidate)&&piece.querySelector('tr')){append(piece);target=makePage();measure.replaceChildren();piece=block.cloneNode(true) as HTMLElement;piece.querySelectorAll('tr').forEach(r=>r.remove());}
+          else if(!fits(candidate)&&target.children.length){target=makePage();measure.replaceChildren();}
+          addRow(piece,row);
+          if(!fits(piece.cloneNode(true) as HTMLElement))throw new Error('Строка таблицы выше печатной страницы; содержимое не обрезано.');
+        }
+        if(rows.length){if(/^\s*ЗАКЛЮЧЕНИЕ\s*[.:]/iu.test(blocks[blocks.indexOf(block)+1]?.textContent??''))piece.setAttribute('data-keep-next','true');append(piece);}continue;
+      }
       // The Word exporter preserves explicit page breaks and keep-with-next.
       if (block.hasAttribute('data-page-break-before') && target.children.length) { target = makePage(); measure.replaceChildren(); }
       if (!fits(block.cloneNode(true) as HTMLElement) && target.children.length && block.tagName !== 'P') {
-        const keepPrevious = target.lastElementChild?.matches('[data-keep-next="true"],h1,h2,h3');
-        const previous = keepPrevious ? target.lastElementChild as HTMLElement : null;
-        if (previous) { previous.remove(); measure.lastElementChild?.remove(); }
-        target = makePage();
-        measure.replaceChildren();
-        if (previous) append(previous);
+        const previous:HTMLElement[]=[];
+        while(target.lastElementChild?.matches('[data-keep-next="true"],h1,h2,h3')){previous.unshift(target.lastElementChild as HTMLElement);target.lastElementChild.remove();measure.lastElementChild?.remove();}
+        if(target.children.length)target=makePage();measure.replaceChildren();previous.forEach(append);
       }
       if (block.tagName === 'P' && (block.textContent ?? '').length > 0 && !block.querySelector('img') && !fits(block.cloneNode(true) as HTMLElement)) {
         if (target.children.length && target.lastElementChild?.matches('[data-keep-next="true"],h1,h2,h3')) {
-          const previous = target.lastElementChild as HTMLElement;
-          previous.remove(); target = makePage(); measure.replaceChildren(); append(previous);
+          const previous:HTMLElement[]=[];
+          while(target.lastElementChild?.matches('[data-keep-next="true"],h1,h2,h3')){previous.unshift(target.lastElementChild as HTMLElement);target.lastElementChild.remove();measure.lastElementChild?.remove();}
+          if(target.children.length)target=makePage();measure.replaceChildren();previous.forEach(append);
         }
         const text = block.textContent ?? '';
         const boundaries = [...text.matchAll(/\s+/g)].map(match => match.index + match[0].length).filter(index => index > 0 && index < text.length);

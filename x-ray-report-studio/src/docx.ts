@@ -1,5 +1,5 @@
 import { previewPageLayout } from './page-geometry.ts';
-import { preparePrintDocument } from './print-document.ts';
+import { preparePrintDocument, type PrintBox } from './print-document.ts';
 import {
   AlignmentType, BorderStyle, Document, ExternalHyperlink, Footer, HeadingLevel,
   LevelFormat, LineRuleType, Packer, Paragraph, ImageRun, ShadingType, Table, TableCell,
@@ -24,6 +24,8 @@ const BODY_WIDTH = PAGE_WIDTH - 2 * PAGE_MARGIN;
 
 export type EmbeddedDocxFont = { name: string; data: Uint8Array; bold?: Uint8Array; italic?: Uint8Array; boldItalic?: Uint8Array };
 export type DocxOptions = {
+  /** Measured printable bounds from the shared browser plan, in CSS pixels. */
+  printBox?: PrintBox;
   profile?: string;
   customModules?: Module[];
   cache?: Record<string, { body: RichNode; conclusion?: RichNode }>;
@@ -314,12 +316,14 @@ function blocks(nodes: RichNode[], context: Context): (Paragraph | Table)[] {
       const attrs = node.attrs ?? {};
       const source = String(attrs.src ?? '');
       if (!/^data:image\/png;base64,/.test(source)) return [];
+      const imageWidth=Number(attrs.width)||640,imageHeight=Number(attrs.height)||291;
+      const imageScale=Math.min(1,(context.width??BODY_WIDTH)/15/imageWidth);
       return [new Paragraph({
         alignment: AlignmentType.CENTER,
         spacing: { before: 100, after: 120 },
         children: [new ImageRun({
           type: 'png', data: source,
-          transformation: { width: Number(attrs.width) || 640, height: Number(attrs.height) || 291 },
+          transformation: { width:imageWidth*imageScale, height:imageHeight*imageScale },
           altText: { title: String(attrs.alt ?? 'Справочная схема'), description: String(attrs.alt ?? 'Справочная схема'), name: 'Справочная схема' },
         })],
       })];
@@ -338,7 +342,7 @@ function blocks(nodes: RichNode[], context: Context): (Paragraph | Table)[] {
     if (node.type === 'paragraph' || node.type === 'heading') return [paragraph(node, context)];
     if (node.type === 'table') return [table(node, context)];
     if (node.type === 'bulletList' || node.type === 'orderedList') return list(node, context);
-    if (node.type === 'horizontalRule') return [new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, color: 'CDD6E2', size: 6 } }, spacing: { before: 100, after: 100 } })];
+    if (node.type === 'horizontalRule') return [new Paragraph({ ...(node.attrs?.keepNext?{keepNext:true}:{}), border: { bottom: { style: BorderStyle.SINGLE, color: 'CDD6E2', size: 6 } }, spacing: { before: 100, after: 100 } })];
     if (node.type === 'blockquote') return blocks(node.content ?? [], { ...context, indent: (context.indent ?? 0) + 360 });
     if (node.type === 'codeBlock') return [paragraph(node, { ...context, inherited: { ...context.inherited, font: 'Consolas' } })];
     if (node.type === 'text' || node.type === 'reportField' || node.type === 'hardBreak') return [paragraph({ type: 'paragraph', content: [node] }, context)];
@@ -569,7 +573,7 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
     numbering: [], depth: 0, source, width: pageWidth - marginLeft - marginRight,
     ...(source ? { inherited: { font, size: fontSize, color: '000000' }, lineHeight: Number(a.lineHeight) || 1.05, spaceAfterPt: Number(a.spaceAfterPt) || 5 } : {}),
   };
-  const children = blocks((options.kind === 'template' ? doc : preparePrintDocument(doc)).content ?? [], context);
+  const children = blocks((options.kind === 'template' ? doc : preparePrintDocument(doc,options.printBox)).content ?? [], context);
   if (!children.length) children.push(new Paragraph({}));
   const file = new Document({
     creator: 'МРТ Альянс', title: cleanText(options.title ?? 'Протокол МРТ-исследования'),
@@ -593,7 +597,7 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
     sections: [{
       properties: { page: { size: { width: pageWidth, height: pageHeight }, margin: {
         top: Math.max(source ? millimetres(a.marginTopMm, 907, 0, 80) : 800, millimetres(43, 0)),
-        bottom: source ? millimetres(a.marginBottomMm, 907, 0, 80) : 900,
+        bottom: options.printBox ? Math.max(0,Math.round((geometry.heightMm-geometry.topMm)*1440/25.4-options.printBox.height*15)) : source ? millimetres(a.marginBottomMm, 907, 0, 80) : 900,
         left: marginLeft, right: marginRight,
         ...(source ? { header: 369, footer: 369 } : {}),
       } } },

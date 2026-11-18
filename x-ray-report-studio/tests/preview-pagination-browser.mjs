@@ -26,6 +26,7 @@ try {
   const sentence = 'Синтетическое описание без клинических сведений; размеры и форма исследуемой модели указаны условно.';
   const paragraph = (text, attrs = {}) => ({ type: 'paragraph', attrs: { fontFamily: 'Arial', fontSizePt: 12, lineHeight: 1.05, spaceAfterPt: 5, textAlign: 'justify', ...attrs }, content: [{ type: 'text', text }] });
   page = await browser.newPage({ viewport: { width: 1500, height: 1000 } });
+  await page.addInitScript(()=>{localStorage.setItem('xrs.doctor-format.v1',JSON.stringify({version:1,activeId:'baseline',profiles:{baseline:{id:'baseline',name:'',fontSize:11,optimize:false}}}));});
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.locator('#editor .report-content p').first().waitFor();
   const builtinSizes = await paragraphSizes(page.locator('#editor .report-content p'));
@@ -75,6 +76,7 @@ try {
     if(scenario.signature)doc.content.push(paragraph('Врач: Синтетический врач. Дата: 01.01.2000'),{type:'image',attrs:{src:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW+0AAAAASUVORK5CYII=',alt:'Синтетическая печать',width:100,height:40}});
     page = await browser.newPage({ viewport: { width: 1500, height: 1000 } });
     await page.addInitScript(doc => {
+      localStorage.setItem('xrs.doctor-format.v1',JSON.stringify({version:1,activeId:'baseline',profiles:{baseline:{id:'baseline',name:'',fontSize:11,optimize:false}}}));
       localStorage.setItem('mri-report-studio.workspace.v1', JSON.stringify({ activeId: 'synthetic-preview', reports: [{ id: 'synthetic-preview', templateId: 'head-gm', doc, dirty: false }] }));
       localStorage.removeItem('mri-report-studio.draft.v1');
     }, doc);

@@ -254,6 +254,17 @@ jobs:
       - name: Word-oriented preview pagination with synthetic reports
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: node tests/preview-pagination-browser.mjs
+      - name: Doctor formatting and adaptive print acceptance
+        id: doctor-print-tests
+        if: github.ref_name == 'codex/xrs-print-ai-074'
+        run: node tests/doctor-print-browser.mjs
+      - name: Preserve adaptive print failure diagnostics
+        if: failure() && steps.doctor-print-tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-doctor-print-diagnostics-${{ github.run_id }}
+          path: x-ray-report-studio/test-output/doctor-print-failure.*
+          if-no-files-found: warn
       - name: Export and preserve patient tab lifecycle (1, 2, 5, 12 tabs)
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npm run test:tab-lifecycle
