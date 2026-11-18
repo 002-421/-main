@@ -114,6 +114,17 @@ jobs:
           $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
           Set-Content -Path 'test-output/xrs-0.4.56/SHA256SUMS.txt' -Value "$hash  X-ray_Report_Studio_Windows_Setup.zip" -NoNewline
           Write-Host "Stable setup ZIP SHA-256: $hash"
+      - name: Real Windows backup lock transport and release updater acceptance
+        id: backup-lock-tests
+        if: github.ref_name == 'codex/xrs-print-ai-074'
+        run: node tests/windows-backup-lock-checks.mjs
+      - name: Preserve Windows backup lock diagnosis and repetition results
+        if: always() && steps.backup-lock-tests.outcome != 'skipped' && github.ref_name == 'codex/xrs-print-ai-074'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-0.4.74-backup-lock-diagnostics
+          path: x-ray-report-studio/test-output/windows-backup-lock/
+          if-no-files-found: error
       - name: Full unit suite
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         shell: pwsh

@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { spawn } from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {holdWindowsFile} from './helpers/windows-file-lock.mjs';
 
 const require=createRequire(import.meta.url);
 const {createUserDataBackup,verifyUserDataBackup,runWithFileRetry}=require('../electron/user-data-backup.cjs');
@@ -81,47 +82,43 @@ test('backup records and excludes only Chromium LevelDB LOCK while preserving da
 
 test('Windows backup does not skip a locked user data file; it reports the safe relative path and succeeds after unlock',{skip:process.platform!=='win32'},async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-win-busy-profile-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
- const profile=path.join(root,'synthetic-profile'),backups=path.join(root,'Backups'),filename=path.join(profile,'Local Storage','leveldb','workspace-state.ldb');
+ const profile=path.join(root,"Синтетический профиль ' Юникод"),backups=path.join(root,'Backups'),filename=path.join(profile,'Local Storage','leveldb','workspace-state.ldb');
  await fs.mkdir(path.dirname(filename),{recursive:true});await fs.writeFile(filename,'synthetic workspace state');
- const script='$p=[Console]::In.ReadLine();$f=[System.IO.File]::Open($p,[System.IO.FileMode]::Open,[System.IO.FileAccess]::ReadWrite,[System.IO.FileShare]::None);[Console]::Out.WriteLine("LOCKED");[Console]::Out.Flush();Start-Sleep -Seconds 60;$f.Dispose()';
- const child=spawn('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{stdio:['pipe','pipe','pipe'],windowsHide:true});
- let output='';child.stdout.setEncoding('utf8');child.stdout.on('data',chunk=>{output+=chunk;});child.stdin.end(`${filename}\n`);
+ const held=await holdWindowsFile(filename,root);
  try {
-  const deadline=Date.now()+10000;while(!output.includes('LOCKED')&&Date.now()<deadline&&child.exitCode===null)await new Promise(resolve=>setTimeout(resolve,25));
-  assert.ok(output.includes('LOCKED'),'PowerShell should hold the synthetic workspace file without sharing');
+  assert.equal(held.ready.event,'LOCKED');
   let events=[];
   await assert.rejects(createUserDataBackup({userDataDir:profile,backupRoot:backups,onOperation:event=>events.push(event)}),error=>{
    assert.ok(['EBUSY','EPERM'].includes(error.code),`unexpected file-lock error: ${error.code}`);
    assert.equal(error.backupRelativePath,'profile/Local Storage/leveldb/workspace-state.ldb');return true;
   });
   assert.ok(events.some(event=>event.event==='file-operation-retry'&&event.path==='profile/Local Storage/leveldb/workspace-state.ldb'));
- } finally {child.kill();}
+ } finally {await held.release();}
  const recovered=await createUserDataBackup({userDataDir:profile,backupRoot:backups});
  assert.equal(await fs.readFile(path.join(recovered.directory,'data','profile','Local Storage','leveldb','workspace-state.ldb'),'utf8'),'synthetic workspace state');
  assert.equal((await verifyUserDataBackup(recovered.directory)).files,1);
+ const manifest=JSON.parse(await fs.readFile(path.join(recovered.directory,'manifest.json'),'utf8'));
+ assert.equal(manifest.files[0].sha256,createHash('sha256').update('synthetic workspace state').digest('hex'));
  assert.equal(await fs.readFile(filename,'utf8'),'synthetic workspace state');
 });
 
 test('an open Windows LevelDB LOCK does not block a verified backup', { skip: process.platform !== 'win32' }, async t => {
- const {spawn}=await import('node:child_process');
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-open-leveldb-lock-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const profile=path.join(root,'Профиль XRS','MRI Report Studio'),backups=path.join(root,'Резервные копии');
  const leveldb=path.join(profile,'Session Data','Local Storage','leveldb');await fs.mkdir(leveldb,{recursive:true});
  const lockPath=path.join(leveldb,'LOCK');await fs.writeFile(lockPath,'');
  await fs.writeFile(path.join(leveldb,'000001.log'),'synthetic workspace data');
- const script='$p=[Console]::In.ReadLine();$f=[System.IO.File]::Open($p,[System.IO.FileMode]::Open,[System.IO.FileAccess]::ReadWrite,[System.IO.FileShare]::None);[Console]::Out.WriteLine("LOCKED");[Console]::Out.Flush();Start-Sleep -Seconds 60;$f.Dispose()';
- const child=spawn('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{stdio:['pipe','pipe','pipe'],windowsHide:true});
- let output='';let stderr='';child.stdout.setEncoding('utf8');child.stderr.setEncoding('utf8');
- child.stdout.on('data',chunk=>{output+=chunk});child.stderr.on('data',chunk=>{stderr+=chunk});
- child.stdin.end(`${lockPath}\n`);
+ const held=await holdWindowsFile(lockPath,root);
  try {
-  const deadline=Date.now()+10000;
-  while(!output.includes('LOCKED')&&Date.now()<deadline&&child.exitCode===null)await new Promise(resolve=>setTimeout(resolve,25));
-  assert.ok(output.includes('LOCKED'),`PowerShell did not acquire the synthetic lock: ${stderr}`);
+  assert.equal(held.ready.event,'LOCKED');
   const backup=await createUserDataBackup({userDataDir:profile,backupRoot:backups,version:'0.4.57'});
   assert.equal(await fs.readFile(path.join(backup.directory,'data','profile','Session Data','Local Storage','leveldb','000001.log'),'utf8'),'synthetic workspace data');
   assert.deepEqual(await verifyUserDataBackup(backup.directory),{files:1,bytes:Buffer.byteLength('synthetic workspace data'),excludedFiles:1});
- } finally {child.kill();}
+  const manifest=JSON.parse(await fs.readFile(path.join(backup.directory,'manifest.json'),'utf8'));
+  assert.equal(manifest.files[0].sha256,createHash('sha256').update('synthetic workspace data').digest('hex'));
+  await fs.writeFile(path.join(backup.directory,'data','profile','Session Data','Local Storage','leveldb','000001.log'),'synthetic corruption');
+  await assert.rejects(verifyUserDataBackup(backup.directory),/целостности/);
+ } finally {await held.release();}
 });
 
 test('backup failure preserves earlier usable backup and removes only the incomplete staging directory',async t=>{
