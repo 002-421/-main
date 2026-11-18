@@ -150,10 +150,10 @@ test('tables in every template keep compact widths and use the unified 11 pt siz
   }
 });
 
-test('templates preserve their typefaces and formatting while using 11 pt and block spacing', () => {
+test('new templates use Arial 11 pt and preserve marks and block spacing', () => {
   for (const template of mriTemplates) {
     const doc = makeTemplateDocument(template.id);
-    assert.equal(doc.attrs.fontFamily, template.doc.attrs.fontFamily, template.title);
+    assert.equal(doc.attrs.fontFamily, 'Arial', template.title);
     assert.equal(doc.attrs.fontSizePt, 11, template.title);
     const check = node => {
       if (node.type === 'paragraph' || node.type === 'heading') {

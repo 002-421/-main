@@ -58,6 +58,7 @@ export function proofreadingBlocks(doc: RichNode): ReviewBlocks {
   const blocks: ReviewBlocks = {};
   const size = (n: RichNode): number => n.type === 'text' ? (n.text ?? '').length : n.content ? 2 + n.content.reduce((sum, child) => sum + size(child), 0) : 1;
   const walk = (n: RichNode, pos: number) => {
+    if (['paragraph','heading'].includes(n.type) && /^\s*(?:Данное заключение не является диагнозом|Исследование выполнено на .*томографе)/iu.test((n.content??[]).map(child=>child.text??'').join(''))) return;
     if (['paragraph','heading'].includes(n.type)) {
       let text = '';
       for (const child of n.content ?? []) {

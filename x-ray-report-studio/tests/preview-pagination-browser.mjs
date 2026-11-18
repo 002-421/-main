@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
+import { unzipSync, strFromU8 } from 'fflate';
+import { exportDocx } from '../src/docx.ts';
 import { makeTemplateDocument } from '../src/catalog.ts';
 
 const output = 'test-output';
@@ -17,7 +19,7 @@ const px = pt => pt * 96 / 72;
 const assertSize = (actual, pt, message) => assert.ok(Math.abs(Number.parseFloat(actual) - px(pt)) < 0.02, `${message}: ${actual}, expected ${pt} pt`);
 // ProseMirror may append an empty cursor paragraph outside report sections.
 // Measure authored text here; the page-fit checks below still include all blocks.
-const paragraphSizes = locator => locator.evaluateAll(nodes => nodes.filter(node => node.textContent.trim()).map(node => ({ text: node.textContent, inlineSize: node.style.fontSize, computedSize: getComputedStyle(node).fontSize })));
+const paragraphSizes = locator => locator.evaluateAll(nodes => nodes.filter(node => node.textContent.trim()).map(node => ({ text: node.textContent, inlineSize: node.style.fontSize, computedSize: getComputedStyle(node).fontSize, fontFamily:getComputedStyle(node).fontFamily })));
 try {
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'], ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) });
   const base = makeTemplateDocument('head-gm');
@@ -28,6 +30,8 @@ try {
   await page.locator('#editor .report-content p').first().waitFor();
   const builtinSizes = await paragraphSizes(page.locator('#editor .report-content p'));
   diagnostic = { builtinSizes };
+  assert.ok(builtinSizes.every(item=>item.fontFamily.split(',')[0].trim()==='Arial'),'new builtin computed family is Arial');
+  if(process.platform==='win32'){const cdp=await page.context().newCDPSession(page);await cdp.send('DOM.enable');await cdp.send('CSS.enable');const tree=await cdp.send('DOM.getDocument');const node=await cdp.send('DOM.querySelector',{nodeId:tree.root.nodeId,selector:'#editor .report-content p'});const rendered=await cdp.send('CSS.getPlatformFontsForNode',{nodeId:node.nodeId});assert.ok(rendered.fonts.some(font=>font.familyName==='Arial'&&font.glyphCount>0),'Windows renders actual Arial glyphs');await cdp.detach();}
   for (const item of builtinSizes) assertSize(item.computedSize, 11, 'new builtin editor paragraph');
   await page.locator('#preview-report').click();
   await page.locator('.preview-page').first().waitFor();
@@ -42,6 +46,13 @@ try {
     { name: 'two pages', paragraphs: 30, minPages: 2, maxPages: 2 },
     { name: 'three pages', paragraphs: 50, minPages: 3, maxPages: 3 },
     { name: 'four-page boundary', paragraphs: 65, minPages: 4, maxPages: 4 },
+    { name: 'five pages', paragraphs: 95, minPages: 5, maxPages: 5 },
+    { name: 'long conclusion', paragraphs: 30, closing: 70, minPages: 2, maxPages: 8 },
+    { name: 'multi-paragraph conclusion', paragraphs: 30, multi: true, minPages: 2, maxPages: 3 },
+    { name: 'long recommendations', paragraphs: 30, recommendations: true, minPages: 2, maxPages: 5 },
+    { name: 'physician date and stamp', paragraphs: 30, signature: true, minPages: 2, maxPages: 3 },
+    { name: 'last description almost fills a page', paragraphs: 10, tail: true, minPages: 1, maxPages: 3 },
+    { name: 'description ends near page boundary', paragraphs: 21, minPages: 1, maxPages: 2 },
     { name: 'long paragraph', paragraphs: 0, long: true, minPages: 2, maxPages: 4 },
     { name: 'explicit conclusion page break', paragraphs: 10, breakConclusion: true, minPages: 2, maxPages: 2 },
     { name: 'custom margins and spacing', paragraphs: 28, custom: true, minPages: 2, maxPages: 5 },
@@ -54,9 +65,14 @@ try {
     if (scenario.baseSize) doc.attrs.fontSizePt = scenario.baseSize;
     if(scenario.custom)doc.attrs={...doc.attrs,marginBottomMm:4,marginLeftMm:25,marginRightMm:25,lineHeight:1.4};
     doc.content = Array.from({ length: scenario.paragraphs }, (_, index) => paragraph(`${index + 1}. ${sentence}`, scenario.mixed ? { fontSizePt: index % 3 === 0 ? 14 : 10 } : scenario.custom ? {lineHeight:1.4} : {}));
+    if(scenario.tail)doc.content.push(paragraph(sentence.repeat(16)));
     if (scenario.long) doc.content.push(paragraph(sentence.repeat(90)));
     if (scenario.table) doc.content.push({ type: 'table', content: Array.from({ length: 3 }, (_, row) => ({ type: 'tableRow', content: Array.from({ length: 2 }, (_, column) => ({ type: 'tableCell', content: [paragraph(`Синтетическая ячейка ${row + 1}.${column + 1}`)] })) })) });
     doc.content.push(paragraph('ЗАКЛЮЧЕНИЕ: синтетический результат для проверки границ страницы.', scenario.breakConclusion ? { pageBreakBefore: true } : {}));
+    if(scenario.closing)doc.content[doc.content.length-1].content[0].text+=' '+sentence.repeat(scenario.closing);
+    if(scenario.multi)doc.content.push(paragraph('Продолжение заключения. '+sentence),paragraph('Заключительный абзац. '+sentence));
+    if(scenario.recommendations)doc.content.push(paragraph('Рекомендована консультация. '+sentence.repeat(30)),paragraph('Врач: Синтетический тест. Дата: 01.01.2000'));
+    if(scenario.signature)doc.content.push(paragraph('Врач: Синтетический врач. Дата: 01.01.2000'),{type:'image',attrs:{src:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW+0AAAAASUVORK5CYII=',alt:'Синтетическая печать',width:100,height:40}});
     page = await browser.newPage({ viewport: { width: 1500, height: 1000 } });
     await page.addInitScript(doc => {
       localStorage.setItem('mri-report-studio.workspace.v1', JSON.stringify({ activeId: 'synthetic-preview', reports: [{ id: 'synthetic-preview', templateId: 'head-gm', doc, dirty: false }] }));
@@ -72,7 +88,7 @@ try {
     for (const item of editorSizes) assertSize(item.computedSize, Number.parseFloat(item.inlineSize), `${scenario.name}: editor paragraph`);
     await page.emulateMedia({ media: 'print' });
     for (const item of await paragraphSizes(page.locator('#editor .report-content p'))) assertSize(item.computedSize, Number.parseFloat(item.inlineSize), `${scenario.name}: PDF print paragraph`);
-    await page.emulateMedia({ media: 'screen' });
+    await page.emulateMedia({ media: null });
     await page.locator('#preview-report').click();
     await page.locator('.preview-page').first().waitFor();
     if(scenario.custom)await page.locator('.export-preview-scroll').evaluate(el=>{el.style.zoom='0.8';});
@@ -94,7 +110,20 @@ try {
     console.log(`${scenario.name}: base ${geometry[0].fontSize}, paragraph sizes ${[...new Set(previewSizes.map(item => item.computedSize))].join('/')}`);
     assert.ok(geometry.every(item => item.contentHeight <= item.allowedHeight + 3 && !item.overflow), `${scenario.name}: content fits the Word page: ${JSON.stringify(geometry)}`);
     assert.ok(geometry.every(item=>item.textBottom < item.footerTop), `${scenario.name}: text never overlaps footer: ${JSON.stringify(geometry)}`);
-    assert.match(await page.locator('.preview-page').last().innerText(), /ЗАКЛЮЧЕНИЕ/);
+    assert.match(await page.locator('.preview-page .report-content').allTextContents().then(parts=>parts.join(' ')), /ЗАКЛЮЧЕНИЕ/);
+    const conclusionContext=await page.locator('.preview-page .report-content').evaluateAll(contents=>{for(const content of contents){const ps=[...content.querySelectorAll('p')];const index=ps.findIndex(p=>/^ЗАКЛЮЧЕНИЕ/u.test(p.textContent));if(index>=0)return ps.slice(0,index).some(p=>p.textContent.trim());}return false;});
+    const plain=node=>node.text??(node.content??[]).map(plain).join('');
+    const printed=await page.locator('.preview-page .report-content').allTextContents();
+    assert.equal(printed.join('').replace(/\s/gu,''),plain(doc).replace(/\s/gu,''),`${scenario.name}: every medical character survives pagination`);
+    assert.ok(conclusionContext, `${scenario.name}: first conclusion page includes description text`);
+    const word=await exportDocx(doc,{templateId:'head-gm'});
+    const xml=strFromU8(unzipSync(new Uint8Array(await word.arrayBuffer()))['word/document.xml']);
+    const wordText=[...xml.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map(m=>m[1].replaceAll('&amp;','&').replaceAll('&lt;','<').replaceAll('&gt;','>')).join('');
+    assert.equal(wordText.replace(/\s/gu,''),plain(doc).replace(/\s/gu,''),`${scenario.name}: DOCX retains all medical text`);
+    await page.evaluate(()=>{const app=document.querySelector('#app');app.style.display='none';const copy=document.createElement('div');copy.id='synthetic-pdf-copy';copy.className='export-only-editor';copy.innerHTML=document.querySelector('.paginated-browser-preview').innerHTML;document.body.append(copy);});
+    const pdf=await page.pdf({path:`${output}/pagination-${scenario.name.replace(/[^a-z0-9]/gi,'-')}.pdf`,preferCSSPageSize:true,printBackground:true,margin:{top:0,bottom:0,left:0,right:0}});
+    assert.equal((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g)||[]).length,actual,`${scenario.name}: real Chromium PDF page count matches preview`);
+    await page.evaluate(()=>{document.querySelector('#synthetic-pdf-copy').remove();document.querySelector('#app').style.display='';});
     await page.locator('.dialog [data-close]').last().click();
     await page.close();
   }

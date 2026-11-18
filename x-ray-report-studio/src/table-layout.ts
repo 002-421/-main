@@ -43,17 +43,17 @@ export function compactTemplateTables(input: RichNode): RichNode {
   visit(doc);
   const templateSizePx = '14.66667px';
   const setTypography = (node: RichNode) => {
-    if (node.type === 'paragraph' || node.type === 'heading') node.attrs = { ...node.attrs, fontSizePt: 11 };
+    if (node.type === 'paragraph' || node.type === 'heading') node.attrs = { ...node.attrs, fontSizePt: 11, fontFamily: 'Arial' };
     if (node.type === 'text' || node.type === 'reportField') {
       const marks = [...(node.marks ?? [])];
       const index = marks.findIndex(mark => mark.type === 'textStyle');
-      if (index >= 0) marks[index] = { ...marks[index], attrs: { ...marks[index].attrs, fontSize: templateSizePx } };
-      else marks.push({ type: 'textStyle', attrs: { fontSize: templateSizePx } });
+      if (index >= 0) marks[index] = { ...marks[index], attrs: { ...marks[index].attrs, fontSize: templateSizePx, fontFamily: 'Arial' } };
+      else marks.push({ type: 'textStyle', attrs: { fontSize: templateSizePx, fontFamily: 'Arial' } });
       node.marks = marks;
     }
     node.content?.forEach(setTypography);
   };
-  doc.attrs = { ...doc.attrs, fontSizePt: 11 };
+  doc.attrs = { ...doc.attrs, fontSizePt: 11, fontFamily: 'Arial' };
   setTypography(doc);
   return doc;
 }
@@ -74,7 +74,7 @@ export function separateRecommendations(input: RichNode): RichNode {
         while (end + 1 < children.length && children[end + 1].type === 'paragraph' && /^\s*(?:Рекоменд|Рекоменду|Консультац)/i.test(textOf(children[end + 1]).trim())) end++;
         for (let at = index; at <= end; at++) {
           const paragraph = children[at];
-          paragraph.attrs = { ...paragraph.attrs, fontSizePt: 11, spaceBeforePt: at === index ? 12 : 0, spaceAfterPt: at === end ? 12 : 0 };
+          paragraph.attrs = { ...paragraph.attrs, fontSizePt: 11, fontFamily: 'Arial', spaceBeforePt: at === index ? 12 : 0, spaceAfterPt: at === end ? 12 : 0 };
         }
         index = end + 1;
         continue;
@@ -128,12 +128,12 @@ export function highlightDeletionNotes(input: RichNode, options: { ct?: boolean 
     if (!marks.some(mark => mark.type === 'italic')) marks.push(ITALIC_MARK);
     if (!marks.some(mark => mark.type === 'highlight')) marks.push(DELETION_HIGHLIGHT);
     const textStyle = marks.find(mark => mark.type === 'textStyle');
-    if (textStyle) textStyle.attrs = { ...textStyle.attrs, fontSize: '14.66667px' };
-    else marks.push({ type: 'textStyle', attrs: { fontSize: '14.66667px' } });
+    if (textStyle) textStyle.attrs = { ...textStyle.attrs, fontSize: '14.66667px', fontFamily: 'Arial' };
+    else marks.push({ type: 'textStyle', attrs: { fontSize: '14.66667px', fontFamily: 'Arial' } });
     node.marks = marks;
   };
   const styleParagraph = (paragraph: RichNode) => {
-    paragraph.attrs = { ...paragraph.attrs, fontSizePt: 11 };
+    paragraph.attrs = { ...paragraph.attrs, fontSizePt: 11, fontFamily: 'Arial' };
     const style = (node: RichNode) => {
       if (node.type === 'text') styleText(node);
       node.content?.forEach(style);

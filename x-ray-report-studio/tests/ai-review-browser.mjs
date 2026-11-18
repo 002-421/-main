@@ -21,12 +21,17 @@ try {
       const value=original.call(this,key);if(key!=='mri-report-studio.workspace.v1'||injected||!value)return value;
       const workspace=JSON.parse(value),report=workspace.reports.find(item=>item.id===workspace.activeId)??workspace.reports[0];
       const section=report.doc.content.find(node=>node.attrs?.id==='description');
-      const visit=node=>{if(node.type==='text'){node.text='[[СИНТЕТИЧЕСКИЙ_МАРКЕР]] Ошибкка  ТЕСТ';return true;}for(const child of node.content??[])if(visit(child))return true;return false;};
+      const visit=node=>{if(node.type==='text'){node.text='[[СИНТЕТИЧЕСКИЙ_МАРКЕР]] Ошибкка  ТЕСТ Определяются паталогические изменения.';return true;}for(const child of node.content??[])if(visit(child))return true;return false;};
+      const closing=report.doc.content.find(node=>node.attrs?.id==='conclusion');
+      if(closing)closing.content=[{type:'paragraph',content:[{type:'text',text:'ЗАКЛЮЧЕНИЕ: МР-картина дегенеративных '},{type:'text',text:'измин',marks:[{type:'bold'}]},{type:'text',text:'ений.',marks:[{type:'italic'}]}]}];
       if(!visit(section))throw new Error('Description fixture has no text node');if(!workspace.reports.some(r=>r.id==='synthetic-tab-2'))workspace.reports.push({...structuredClone(report),id:'synthetic-tab-2'});injected=true;return JSON.stringify(workspace);
     };
   });
   await page.reload();
   await page.waitForFunction(()=>!document.querySelector('#ai-review-status')?.hasAttribute('aria-busy')&&Boolean(document.querySelector('#ai-review-status')?.textContent));
+  await page.waitForFunction(()=>{const ranges=new Map();for(const el of document.querySelectorAll('.ai-review-underline')){const id=el.getAttribute('data-ai-review-ids');ranges.set(id,(ranges.get(id)||'')+el.textContent);}return [...ranges.values()].some(text=>text.includes('изминений'));});
+  const conclusionFragment=page.locator('[data-section-id=conclusion] .ai-review-underline').filter({hasText:'измин'}).first();await conclusionFragment.scrollIntoViewIfNeeded();await conclusionFragment.click({button:'right'});assert.match(await page.locator('.ai-review-card').innerText(),/изменений/);await page.keyboard.press('Escape');
+  await page.locator('.ai-review-underline').filter({hasText:'паталогические'}).first().waitFor({state:'attached',timeout:15000});
   const marks=page.locator('.ai-review-underline').filter({hasText:'СИНТЕТИЧЕСКИЙ_МАРКЕР'});
   await marks.first().waitFor({state:'visible',timeout:5000});
   assert.equal(await page.locator('.ai-review-card').count(),0);

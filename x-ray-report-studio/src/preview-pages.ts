@@ -1,32 +1,13 @@
 import type { RichNode } from './model';
 import { DISCLAIMER_TEXT, EQUIPMENT_TEXT } from './report-footer.ts';
 
-export type PreviewPageLayout = { widthMm: number; heightMm: number; topMm: number; bottomMm: number; leftMm: number; rightMm: number; fontSizePt: number; fontFamily: string };
-
-/** Match the section geometry emitted by exportDocx for catalog reports. */
-export function previewPageLayout(doc: RichNode): PreviewPageLayout {
-  const attrs = doc.attrs ?? {};
-  const mm = (value: unknown, fallback: number, min = 0, max = 1000) => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max ? value : fallback;
-  return {
-    widthMm: mm(attrs.pageWidthMm, 210, 100), heightMm: mm(attrs.pageHeightMm, 297, 100),
-    topMm: Math.max(43, mm(attrs.marginTopMm, 16, 0, 80)),
-    bottomMm: mm(attrs.marginBottomMm, 907 * 25.4 / 1440, 0, 80),
-    leftMm: mm(attrs.marginLeftMm, 18, 0, 80), rightMm: mm(attrs.marginRightMm, 18, 0, 80),
-    fontSizePt: mm(attrs.fontSizePt, 11, 1, 200),
-    fontFamily: typeof attrs.fontFamily === 'string' && attrs.fontFamily.length <= 100 ? attrs.fontFamily : 'Arial',
-  };
-}
+export { previewPageLayout } from './page-geometry.ts';
+import { previewPageLayout } from './page-geometry.ts';
 
 export function paginateBrowserPreview(html: string, doc: RichNode): string {
   const layout = previewPageLayout(doc);
   const source = document.createElement('div');
   source.innerHTML = html;
-  // OOXML `lineRule=auto` multiplies the font's natural line box. CSS multiplies
-  // font-size instead; Arial's natural line box is about 1.18 times that size.
-  source.querySelectorAll<HTMLElement>('p,h1,h2,h3').forEach(node => {
-    const ratio = Number(node.style.lineHeight || doc.attrs?.lineHeight || 1.05);
-    if (Number.isFinite(ratio) && ratio >= 0.5 && ratio <= 5) node.style.lineHeight = String(ratio * 1.18);
-  });
   const blocks: HTMLElement[] = [];
   const collect = (node: Element) => {
     if (node.matches('section[data-report-section]')) { [...node.children].forEach(collect); return; }

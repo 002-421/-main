@@ -124,7 +124,7 @@ try{
  const templateTypography=await page.locator('.report-content p').filter({hasText:'Рекомендована консультация невролога'}).first().evaluate(el=>({fontSize:getComputedStyle(el).fontSize,marginTop:getComputedStyle(el).marginTop,marginBottom:getComputedStyle(el).marginBottom}));
  assert.ok(Math.abs(parseFloat(templateTypography.fontSize)-14.6667)<0.02,`template editor uses 11 pt: ${JSON.stringify(templateTypography)}`);
  assert.equal(templateTypography.marginTop,'16px');assert.equal(templateTypography.marginBottom,'16px');
- await page.emulateMedia({media:'print'});const printTypography=await page.locator('.report-content p').filter({hasText:'Рекомендована консультация невролога'}).first().evaluate(el=>getComputedStyle(el).fontSize);assert.ok(Math.abs(parseFloat(printTypography)-14.6667)<0.02,`PDF print CSS retains 11 pt (${printTypography})`);await page.emulateMedia({media:'screen'});
+ await page.emulateMedia({media:'print'});const printTypography=await page.locator('.report-content p').filter({hasText:'Рекомендована консультация невролога'}).first().evaluate(el=>getComputedStyle(el).fontSize);assert.ok(Math.abs(parseFloat(printTypography)-14.6667)<0.02,`PDF print CSS retains 11 pt (${printTypography})`);await page.emulateMedia({media:null});
  assert.equal(await page.locator('.inspector,#field-panel,#field-value').count(),0);
  assert.ok(await page.locator('[data-template-field]').count()>=4);
  assert.match(await page.locator('.report-content').innerText(),/22,1, после 60 лет 22,6-26,0/);
@@ -237,7 +237,7 @@ try{
  assert.match(JSON.stringify(saved.imported.doc),/Тестовый Пациент/);
  assert.match(JSON.stringify(saved.imported.doc),/Петров Алексей Иванович/);
  const zip=unzipSync(saved.bytes),xml=strFromU8(zip['word/document.xml']);
- assert.match(xml,/DejaVu Sans/,'DOCX preserves the template typeface instead of forcing Arial');assert.match(xml,/w:top="2438"/);
+ assert.match(xml,/Arial/,'new template DOCX uses Arial');assert.match(xml,/w:top="2438"/);
  assert.doesNotMatch(xml,/template-unchanged|proof-spelling|proof-grammar|data-unchanged|ai-review-underline|data-ai-review-ids/);
  console.log('PASS: real DOCX preserves report, source geometry and formatting, excludes review/proof decorations.');
 
@@ -247,9 +247,9 @@ try{
  assert.match(clip.text,/Тестовый Пациент/);assert.match(clip.html,/Arial/);
  const pdfPath=path.join(output,'v3-native.pdf');
  await application.evaluate(({dialog},filePath)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath});},pdfPath);
- await page.locator('#save-menu-toggle').click();await page.locator('#export-pdf').click();assert.equal(await page.locator('#preview-save-word').count(),0,'PDF menu selection stays on the PDF export path');await page.locator('#preview-save-pdf').click();if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
+ await page.locator('#save-menu-toggle').click();await page.locator('#export-pdf').click();assert.equal(await page.locator('#preview-save-word').count(),0,'PDF menu selection stays on the PDF export path');await page.locator('#preview-save-pdf').waitFor();const expectedPdfPages=await page.locator('.preview-page').count();await page.locator('#preview-save-pdf').click();if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
  await page.getByRole('status').filter({hasText:'PDF сохранён'}).waitFor({timeout:30000});
- assert.equal((await readFile(pdfPath)).subarray(0,5).toString(),'%PDF-');
+ const pdfBytes=await readFile(pdfPath);assert.equal(pdfBytes.subarray(0,5).toString(),'%PDF-');assert.equal((pdfBytes.toString('latin1').match(/\/Type\s*\/Page\b/g)||[]).length,expectedPdfPages,'actual Electron PDF page count matches preview');
  console.log('PASS: formatted clipboard and actual desktop PDF export.');
 
  await page.locator('#edit-template').click();

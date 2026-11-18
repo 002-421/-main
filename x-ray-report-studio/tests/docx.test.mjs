@@ -91,7 +91,7 @@ test('Word runs preserve typography and line spacing while filled fields have no
   assert.match(empty, /<w:highlight w:val="yellow"\/>/);
   assert.match(empty, /w:fill="FFF0A4"/);
   assert.match(xml, /<w:jc w:val="center"\/>/);
-  assert.match(xml, /w:line="360" w:lineRule="auto"/);
+  assert.match(xml, /w:line="360" w:lineRule="atLeast"/);
 });
 
 test('table grids preserve resized columns, header cells and horizontal plus vertical merges', async () => {
@@ -135,7 +135,7 @@ test('lists produce real Word numbering with nested levels and separate start va
   assert.match(xml, /<w:br\/>/);
   assert.match(xml, /<w:tab\/>/);
   assert.match(xml, /<w:jc w:val="both"\/>/);
-  assert.match(xml, /w:line="480" w:lineRule="auto"/);
+  assert.match(xml, /w:line="480" w:lineRule="atLeast"/);
 });
 
 test('own DOCX restores fields, rich JSON, modules, custom library, cached module edits and template marker', async () => {
@@ -263,7 +263,7 @@ test('source template profile retains exact page geometry, title styles, spacing
   assert.match(xml, /<w:pStyle w:val="Subtitle"\/>/);
   assert.match(xml, /<w:pStyle w:val="Heading2"\/>/);
   assert.match(xml, /<w:pageBreakBefore\/>/);
-  assert.match(xml, /w:line="252" w:lineRule="auto"/);
+  assert.match(xml, /w:line="210" w:lineRule="atLeast"/);
   assert.match(xml, /<w:tblGrid><w:gridCol w:w="3061"\/><w:gridCol w:w="6803"\/><\/w:tblGrid>/);
   assert.match(xml, /<w:tblW w:type="dxa" w:w="9864"\/>/);
   assert.match(xml, /<w:tblInd w:type="dxa" w:w="-113"\/>/);
@@ -382,7 +382,7 @@ test('line spacing selected in the editor overrides a source paragraph baseline 
     content: [{ type: 'text', text: 'Изменённый интервал', marks: [{ type: 'textStyle', attrs: { lineHeight: '1.5' } }] }],
   }] };
   const { xml } = await exported(doc);
-  assert.match(xml, /w:line="360" w:lineRule="auto"/);
+  assert.match(xml, /w:line="360" w:lineRule="atLeast"/);
 });
 
 test('a doctor stamp image is embedded between physician and date paragraphs', async () => {

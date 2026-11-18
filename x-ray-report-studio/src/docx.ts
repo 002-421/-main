@@ -1,3 +1,5 @@
+import { previewPageLayout } from './page-geometry.ts';
+import { preparePrintDocument } from './print-document.ts';
 import {
   AlignmentType, BorderStyle, Document, ExternalHyperlink, Footer, HeadingLevel,
   LevelFormat, LineRuleType, Packer, Paragraph, ImageRun, ShadingType, Table, TableCell,
@@ -169,7 +171,7 @@ function paragraph(node: RichNode, context: Context, extra: IParagraphOptions = 
     children: inline(compactWordSpaces(node.content ?? []), inherited),
     ...(style ? { style } : { heading }),
     alignment: ALIGNMENTS[attrs.textAlign],
-    spacing: { line, lineRule: LineRuleType.AUTO, before: pt(attrs.spaceBeforePt, context.source && sourceStyle !== 'Normal' ? 180 : heading ? (level === 1 ? 0 : 180) : 0), after: pt(attrs.spaceAfterPt, heading ? 100 : Math.round((context.spaceAfterPt ?? 4.25) * 20)) },
+    spacing: { line: Math.round((inherited.size ?? 24) * 10 * line / 240), lineRule: LineRuleType.AT_LEAST, before: pt(attrs.spaceBeforePt, context.source && sourceStyle !== 'Normal' ? 180 : heading ? (level === 1 ? 0 : 180) : 0), after: pt(attrs.spaceAfterPt, heading ? 100 : Math.round((context.spaceAfterPt ?? 4.25) * 20)) },
     ...(typeof attrs.firstLineIndentPt === 'number' || typeof attrs.leftIndentPt === 'number' || typeof attrs.rightIndentPt === 'number' ? { indent: { ...(typeof attrs.firstLineIndentPt === 'number' ? { firstLine: pt(attrs.firstLineIndentPt, 0) } : {}), ...(typeof attrs.leftIndentPt === 'number' ? { left: pt(attrs.leftIndentPt, 0) } : {}), ...(typeof attrs.rightIndentPt === 'number' ? { right: pt(attrs.rightIndentPt, 0) } : {}) } } : {}),
     widowControl: true,
     ...(heading ? { keepNext: true, keepLines: true } : {}),
@@ -555,9 +557,10 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
   validatedCache(draft.cache);
   const source = doc.attrs?.sourceFormat === 'alliance-template' || Boolean(options.templateId);
   const a = doc.attrs ?? {};
+  const geometry = previewPageLayout(doc);
   const millimetres = (value: unknown, fallback: number, min = 0, max = 1000) => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max ? Math.round(value / 25.4 * 1440) : fallback;
-  const pageWidth = source ? millimetres(a.pageWidthMm, PAGE_WIDTH, 100) : PAGE_WIDTH;
-  const pageHeight = source ? millimetres(a.pageHeightMm, PAGE_HEIGHT, 100) : PAGE_HEIGHT;
+  const pageWidth = source ? millimetres(geometry.widthMm, PAGE_WIDTH, 100) : PAGE_WIDTH;
+  const pageHeight = source ? millimetres(geometry.heightMm, PAGE_HEIGHT, 100) : PAGE_HEIGHT;
   const marginLeft = source ? millimetres(a.marginLeftMm, 1020, 0, 80) : PAGE_MARGIN;
   const marginRight = source ? millimetres(a.marginRightMm, 1020, 0, 80) : PAGE_MARGIN;
   const font = source && typeof a.fontFamily === 'string' ? a.fontFamily : 'Arial';
@@ -566,7 +569,7 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
     numbering: [], depth: 0, source, width: pageWidth - marginLeft - marginRight,
     ...(source ? { inherited: { font, size: fontSize, color: '000000' }, lineHeight: Number(a.lineHeight) || 1.05, spaceAfterPt: Number(a.spaceAfterPt) || 5 } : {}),
   };
-  const children = blocks(doc.content ?? [], context);
+  const children = blocks((options.kind === 'template' ? doc : preparePrintDocument(doc)).content ?? [], context);
   if (!children.length) children.push(new Paragraph({}));
   const file = new Document({
     creator: 'МРТ Альянс', title: cleanText(options.title ?? 'Протокол МРТ-исследования'),
