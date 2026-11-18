@@ -31,7 +31,7 @@ try {
   const builtinSizes = await paragraphSizes(page.locator('#editor .report-content p'));
   diagnostic = { builtinSizes };
   assert.ok(builtinSizes.every(item=>item.fontFamily.split(',')[0].trim()==='Arial'),'new builtin computed family is Arial');
-  if(process.platform==='win32'){const cdp=await page.context().newCDPSession(page);await cdp.send('DOM.enable');await cdp.send('CSS.enable');const tree=await cdp.send('DOM.getDocument');const node=await cdp.send('DOM.querySelector',{nodeId:tree.root.nodeId,selector:'#editor .report-content p'});const rendered=await cdp.send('CSS.getPlatformFontsForNode',{nodeId:node.nodeId});assert.ok(rendered.fonts.some(font=>font.familyName==='Arial'&&font.glyphCount>0),'Windows renders actual Arial glyphs');await cdp.detach();}
+  if(process.platform==='win32'){const cdp=await page.context().newCDPSession(page);await cdp.send('DOM.enable');await cdp.send('CSS.enable');const tree=await cdp.send('DOM.getDocument');const node=await cdp.send('DOM.querySelector',{nodeId:tree.root.nodeId,selector:'#editor .report-content p :not(:has(*))'});const rendered=await cdp.send('CSS.getPlatformFontsForNode',{nodeId:node.nodeId});assert.ok(rendered.fonts.some(font=>font.familyName==='Arial'&&font.glyphCount>0&&!font.isCustomFont),'Windows renders actual system Arial glyphs: '+JSON.stringify(rendered.fonts));await cdp.detach();}
   for (const item of builtinSizes) assertSize(item.computedSize, 11, 'new builtin editor paragraph');
   await page.locator('#preview-report').click();
   await page.locator('.preview-page').first().waitFor();
