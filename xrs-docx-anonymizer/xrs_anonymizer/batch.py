@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+from collections import Counter
 from pathlib import Path
 import re
 import threading
@@ -105,7 +106,28 @@ class Session:
 
     def reports(self):
         reportdir = self.root / "Reports"
-        text = json.dumps(self.records, ensure_ascii=False, indent=2)
+        status_counts = Counter(record["status"] for record in self.records)
+        review_reasons = Counter(
+            code
+            for record in self.records
+            if record["status"] == "REVIEW_REQUIRED"
+            for code in record.get("reason", "").split(";")
+            if code
+        )
+        payload = {
+            "records": self.records,
+            "aggregate": {
+                "total": len(self.records),
+                "PASS": status_counts["PASS"],
+                "REVIEW_REQUIRED": status_counts["REVIEW_REQUIRED"],
+                "FAILED": status_counts["FAILED"],
+                "common_review_reasons": [
+                    {"code": code, "count": count}
+                    for code, count in sorted(review_reasons.items(), key=lambda item: (-item[1], item[0]))
+                ],
+            },
+        }
+        text = json.dumps(payload, ensure_ascii=False, indent=2)
         # Write the per-run history first; summary is a convenience snapshot of this run.
         history = reportdir / f"run-{self.run_id:06d}.json"
         temp = reportdir / ".report.tmp"
@@ -116,12 +138,28 @@ class Session:
         os.replace(temp, history)
         temp.write_text(text, encoding="utf-8")
         os.replace(temp, reportdir / "summary.json")
-        fields = ["case_id", "status", "removed_fields", "removed_images", "categories", "reason"]
+        fields = [
+            "record_type", "case_id", "status", "replaced_dates", "removed_images",
+            "removed_headers", "categories", "reason", "count",
+        ]
         with temp.open("w", encoding="utf-8-sig", newline="") as stream:
             writer = csv.DictWriter(stream, fieldnames=fields)
             writer.writeheader()
             for record in self.records:
-                writer.writerow({**record, "categories": ";".join(record["categories"])})
+                writer.writerow({
+                    "record_type": "CASE",
+                    "case_id": record["case_id"],
+                    "status": record["status"],
+                    "replaced_dates": record["replaced_dates"],
+                    "removed_images": record["removed_images"],
+                    "removed_headers": record["removed_headers"],
+                    "categories": ";".join(record["categories"]),
+                    "reason": record["reason"],
+                })
+            for status in ("PASS", "REVIEW_REQUIRED", "FAILED"):
+                writer.writerow({"record_type": "AGGREGATE", "status": status, "count": status_counts[status]})
+            for code, count in payload["aggregate"]["common_review_reasons"]:
+                writer.writerow({"record_type": "REVIEW_REASON", "status": "REVIEW_REQUIRED", "reason": code, "count": count})
         os.replace(temp, reportdir / "summary.csv")
 
 

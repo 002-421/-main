@@ -1,5 +1,6 @@
 """Deterministic Russian rules; ambiguous content is never automatically released."""
 from dataclasses import dataclass, field
+from datetime import date
 import re
 
 REMOVED = "[УДАЛЕНО]"
@@ -33,20 +34,77 @@ PATTERNS = [
     ("FULL_NAME", re.compile(r"\b[А-ЯЁ]{2,}(?:-[А-ЯЁ]+)?\s+[А-ЯЁ]{2,}\s+[А-ЯЁ]+(?:ОВИЧ|ЕВИЧ|ОВНА|ЕВНА|ИЧНА)\b")),
     ("INITIALS", re.compile(r"\b[А-ЯЁ]{2,}\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.")),
 ]
-DATE = re.compile(r"(?<!\d)(?:\d{1,2}[./-]\d{1,2}[./-](?:19|20)?\d{2}|(?:19|20)\d{2}-\d{2}-\d{2})(?!\d)")
-SERVICE_DATE_FIELD = re.compile(
-    r"(?P<leading>[ \t]*)(?P<label>(?<!\w)(?:дата(?:\s+(?:исследования|проведения|выполнения|обследования))?))"
-    r"[ \t]*[:：=][ \t]*(?P<date>" + DATE.pattern + r")(?!\d)(?:[ \t]+\d{1,2}:\d{2}(?::\d{2})?)?",
-    re.I,
+DATE_SPACE = r"[ \t\u00a0\u202f]"
+DATE_SUFFIX = r"(?:" + DATE_SPACE + r"+(?:г\.|года))?"
+NUMERIC_DATE_CANDIDATE = re.compile(
+    r"(?<![\w./-])(?P<day>\d{1,2})(?P<sep>[./-])(?P<month>\d{1,2})(?P=sep)"
+    r"(?P<year>\d{2,4})" + DATE_SUFFIX + r"(?![\w/-])"
+)
+SPACED_NUMERIC_DATE_CANDIDATE = re.compile(
+    r"(?<![\w./-])(?P<day>\d{1,2})" + DATE_SPACE + r"*(?P<sep1>[./-])" + DATE_SPACE + r"*(?P<month>\d{1,2})"
+    + DATE_SPACE + r"*(?P<sep2>[./-])" + DATE_SPACE + r"*(?P<year>\d{2,4})" + DATE_SUFFIX + r"(?![\w/-])"
+)
+MIXED_NUMERIC_DATE_CANDIDATE = re.compile(
+    r"(?<![\w./-])(?P<day>\d{1,2})(?P<sep1>[./-])(?P<month>\d{1,2})(?P<sep2>[./-])"
+    r"(?P<year>\d{2,4})" + DATE_SUFFIX + r"(?![\w/-])"
+)
+YEAR_FIRST_DATE_CANDIDATE = re.compile(
+    r"(?<![\w./-])(?P<year>\d{4})-(?P<month>\d{1,2})-(?P<day>\d{1,2})"
+    + DATE_SUFFIX + r"(?![\w/-])"
+)
+ALTERNATE_YEAR_FIRST_CANDIDATE = re.compile(
+    r"(?<![\w./-])(?P<year>\d{4})(?P<sep>[./])(?P<month>\d{1,2})(?P=sep)(?P<day>\d{1,2})"
+    + DATE_SUFFIX + r"(?![\w/-])"
+)
+MONTHS = {
+    "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
+    "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
+    "янв": 1, "фев": 2, "мар": 3, "апр": 4, "май": 5, "июн": 6,
+    "июл": 7, "авг": 8, "сен": 9, "сент": 9, "окт": 10, "ноя": 11, "дек": 12,
+}
+MONTH_PATTERN = "|".join(sorted(MONTHS, key=len, reverse=True))
+TEXT_DATE_CANDIDATE = re.compile(
+    r"(?<!\w)(?P<day>\d{1,2})" + DATE_SPACE + r"+(?P<month>" + MONTH_PATTERN + r")\.?[, \u00a0]*"
+    + DATE_SPACE + r"+"
+    r"(?P<year>\d{2,4})" + DATE_SUFFIX + r"(?!\w)", re.I
+)
+DATE = re.compile(
+    r"(?<![\w./-])(?:\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|"
+    r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}" + DATE_SPACE + r"+(?:" + MONTH_PATTERN +
+    r")" + DATE_SPACE + r"+\d{2,4})" + DATE_SUFFIX + r"(?![\w/-])", re.I
 )
 STUDY_TYPE_LABEL = re.compile(r"^[ \t]*область\s+и\s+вид\s+исследования\s*[:：]", re.I | re.M)
 SERVICE_DATE_LABEL_ONLY = re.compile(r"^\s*дата(?:\s+(?:исследования|проведения|выполнения|обследования))?\s*[:：]?\s*$", re.I)
+DATE_OF_BIRTH_LABEL_ONLY = re.compile(r"^\s*дата\s+рождения\s*[:：]?\s*$", re.I)
 SUSPECT_NAME = re.compile(rf"\b{NAME}\s+{NAME}\b")
+SAFE_CLINICAL_PHRASE = re.compile(
+    r"^(?:головной мозг|спинной мозг|срединные структуры|боковые желудочки|синовиальная жидкость|"
+    r"мягкие ткани|позвоночный канал|поясничный отдел|грудной отдел|шейный отдел|"
+    r"межпозвонков(?:ый|ые) диск(?:и|а)?|дугоотростчат(?:ый|ые) сустав(?:ы)?|"
+    r"коленный сустав|тазобедренный сустав|плечевой сустав|локтевой сустав|"
+    r"голеностопный сустав|медиальный мениск|латеральный мениск|суставная щель|"
+    r"передняя крестообразная(?: связка)?|задняя крестообразная(?: связка)?|"
+    r"крестцово-подвздошн(?:ое сочленение|ые сочленения)|"
+    r"мрт позвоночника|кт органов|область и вид исследования)$", re.I
+)
+SAFE_SCANNER_NAME = re.compile(
+    r"^(?:philips\s+(?:achieva|ingenia|intera)|siemens\s+magnetom|"
+    r"ge\s+signa|canon\s+aquilion|toshiba\s+vantage|hitachi\s+echelon)$", re.I
+)
+SAFE_CLINICAL_WORDS = {
+    "головной", "мозг", "спинной", "позвоночный", "межпозвонковый", "межпозвонковые",
+    "дугоотростчатый", "дугоотростчатые", "поясничный", "грудной", "шейный",
+    "мягкий", "суставной", "коленный", "тазобедренный", "плечевой", "локтевой",
+    "голеностопный", "медиальный", "латеральный", "крестообразная", "крестцово-подвздошное",
+    "крестцово-подвздошные", "межмыщелковое", "подколенная", "паравертебральный",
+    "перивентрикулярный", "синовиальный", "ацетабулярный", "вертлужный", "мыщелковый",
+    "мозжечковый", "лобный", "теменной", "затылочный", "височный", "гипофизарный",
+}
 SUSPECT = [
-    ("UNLABELLED_DATE", DATE),
     ("UNLABELLED_IDENTIFIER", re.compile(r"(?<![\d.,])\d{7,}(?![\d.,])")),
     ("POSSIBLE_INITIALS", re.compile(r"\b[А-ЯЁ]\.[ \t]*[А-ЯЁ]\.")),
-    ("POSSIBLE_ADDRESS", re.compile(r"\b(?:ул\.|улица|проспект|пр-т|переулок|область|район|г\.)\s*\S+", re.I)),
+    ("POSSIBLE_ADDRESS", re.compile(r"\b(?:ул\.|улица|проспект|пр-т|переулок|область|район)\s*\S+", re.I)),
+    ("POSSIBLE_ADDRESS", re.compile(r"\bг\.\s+[А-ЯЁ][а-яё-]{2,}\b")),
     ("POSSIBLE_INSTITUTION", re.compile(r"\b(?:ООО|АО|ГБУЗ|ФГБУ|МБУЗ|ГУЗ|ГКБ|ЦРБ|ДКБ|клиник\w*|больниц\w*|медицинск\w*\s+центр\w*)\b", re.I)),
     ("POSSIBLE_LATIN_NAME", re.compile(r"\b[A-Z][a-z]{2,}\s+[A-Z][a-z]{2,}\b")),
 ]
@@ -55,8 +113,60 @@ SUSPECT = [
 @dataclass
 class Redaction:
     count: int = 0
+    replaced_dates: int = 0
     categories: set[str] = field(default_factory=set)
     issues: set[str] = field(default_factory=set)
+
+
+@dataclass(frozen=True)
+class CalendarDateMatch:
+    start: int
+    end: int
+    valid: bool
+
+
+def _normalized_year(value: str) -> int | None:
+    if len(value) == 2:
+        number = int(value)
+        return 1900 + number if number >= 50 else 2000 + number
+    if len(value) == 4 and value.startswith(("19", "20")):
+        return int(value)
+    return None
+
+
+def _valid_date(day: str, month: str | int, year: str) -> bool:
+    normalized_year = _normalized_year(year)
+    if normalized_year is None:
+        return False
+    month_number = MONTHS.get(month.casefold().rstrip(".")) if isinstance(month, str) and not month.isdigit() else int(month)
+    try:
+        date(normalized_year, month_number, int(day))
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def calendar_date_matches(text: str) -> list[CalendarDateMatch]:
+    """Return date-shaped values, distinguishing valid dates from ambiguous candidates."""
+    found = []
+    candidates = (
+        (NUMERIC_DATE_CANDIDATE, lambda m: _valid_date(m["day"], m["month"], m["year"])),
+        (SPACED_NUMERIC_DATE_CANDIDATE, lambda m: m["sep1"] == m["sep2"] and _valid_date(m["day"], m["month"], m["year"])),
+        (MIXED_NUMERIC_DATE_CANDIDATE, lambda m: m["sep1"] == m["sep2"] and _valid_date(m["day"], m["month"], m["year"])),
+        (YEAR_FIRST_DATE_CANDIDATE, lambda m: _valid_date(m["day"], m["month"], m["year"])),
+        (ALTERNATE_YEAR_FIRST_CANDIDATE, lambda m: False),
+        (TEXT_DATE_CANDIDATE, lambda m: _valid_date(m["day"], m["month"], m["year"])),
+    )
+    for pattern, validator in candidates:
+        for match in pattern.finditer(text):
+            found.append(CalendarDateMatch(match.start(), match.end(), validator(match)))
+    # Keep one longest candidate if formats overlap on the same source text.
+    unique = {}
+    for item in found:
+        key = (item.start, item.end)
+        if key not in unique or item.valid:
+            unique[key] = item
+    return sorted(unique.values(), key=lambda item: (item.start, -(item.end - item.start)))
 
 
 def spans(text: str, result: Redaction) -> list[tuple[int, int]]:
@@ -64,6 +174,10 @@ def spans(text: str, result: Redaction) -> list[tuple[int, int]]:
     # Labels terminate at a semicolon, tab, newline, or another labelled field.
     labels = list(LABEL.finditer(text))
     for i, match in enumerate(labels):
+        label_text = re.sub(r"\s*[:：=]\s*$", "", match.group("label")).casefold()
+        if label_text.startswith("дата") and "рождения" not in label_text:
+            # Study/exam dates are neutralized by the calendar-date rule below.
+            continue
         start = match.end()
         end = labels[i + 1].start() if i + 1 < len(labels) else len(text)
         delimiter = re.search(r"[;\t\n]", text[start:end])
@@ -94,20 +208,6 @@ def spans(text: str, result: Redaction) -> list[tuple[int, int]]:
     return merged
 
 
-def service_date_spans(text: str) -> list[tuple[int, int]]:
-    """Only dates explicitly labelled as service/exam dates are removed."""
-    spans = []
-    for match in SERVICE_DATE_FIELD.finditer(text):
-        line_start = text.rfind("\n", 0, match.start()) + 1
-        line_end = text.find("\n", match.end())
-        if line_end < 0:
-            line_end = len(text)
-        if STUDY_TYPE_LABEL.match(text[line_start:line_end]):
-            continue
-        spans.append((match.start(), match.end()))
-    return spans
-
-
 def study_type_lines(text: str) -> list[str]:
     return [line for line in text.splitlines() if STUDY_TYPE_LABEL.match(line)]
 
@@ -120,20 +220,24 @@ def suspicious(text: str) -> set[str]:
     issues = set()
     for name, pattern in SUSPECT:
         candidate = STUDY_TYPE_LABEL.sub("", text) if name == "POSSIBLE_ADDRESS" else text
-        if pattern.search(candidate):
+        if name == "POSSIBLE_LATIN_NAME":
+            if any(not SAFE_SCANNER_NAME.fullmatch(match.group()) for match in pattern.finditer(candidate)):
+                issues.add(name)
+        elif pattern.search(candidate):
             issues.add(name)
-    for match in DATE.finditer(text):
-        context = text[max(0, match.start() - 48):match.start()]
-        if re.search(r"(?:по\s+сравнению|сравнен\w*|динамик\w*|после\s+(?:операц\w*|лечен\w*)|\bот)\s*$", context, re.I):
-            issues.add("CLINICAL_DATE_REVIEW")
+    dates = calendar_date_matches(text)
+    if any(not match.valid for match in dates):
+        issues.add("AMBIGUOUS_DATE_REVIEW")
     for match in SUSPECT_NAME.finditer(text):
-        if not EPONYMS.search(match.group()):
+        phrase = match.group().casefold()
+        if not EPONYMS.search(match.group()) and not SAFE_CLINICAL_PHRASE.fullmatch(phrase):
             issues.add("POSSIBLE_NAME")
     for match in re.finditer(r"\b[А-ЯЁ][а-яё]{2,}(?:ов|ев|ин|ова|ева|ина|ский|ская|цкий|цкая|ович|евич|овна|евна|ична)\b", text):
-        if not EPONYMS.search(match.group()):
+        if match.group().casefold() not in SAFE_CLINICAL_WORDS and not EPONYMS.search(match.group()):
             issues.add("POSSIBLE_NAME")
-    if re.search(r"\b[А-ЯЁ]{2,}(?:ОВ|ЕВ|ИН|ОВА|ЕВА|ИНА|СКИЙ|СКАЯ|ОВИЧ|ЕВИЧ|ОВНА|ЕВНА)\b", text):
-        issues.add("POSSIBLE_NAME")
+    for match in re.finditer(r"\b[А-ЯЁ]{2,}(?:ОВ|ЕВ|ИН|ОВА|ЕВА|ИНА|СКИЙ|СКАЯ|ОВИЧ|ЕВИЧ|ОВНА|ЕВНА)\b", text):
+        if match.group().casefold() not in SAFE_CLINICAL_WORDS and not EPONYMS.search(match.group()):
+            issues.add("POSSIBLE_NAME")
     return issues
 
 
@@ -141,13 +245,17 @@ def redact_nodes(nodes, result: Redaction) -> None:
     """Match across Word runs while retaining formatting of unaffected characters."""
     originals = [node.text or "" for node in nodes]
     text = "".join(originals)
-    changes = []
-    service_dates = service_date_spans(text)
-    if service_dates:
-        apply_ranges(nodes, [(start, end, "") for start, end in service_dates])
+    dates = calendar_date_matches(text)
+    # Even a date-shaped value that cannot be validated is neutralized; its
+    # ambiguity still forces REVIEW_REQUIRED so it can never silently PASS.
+    replaceable = [(match.start, match.end, "дата") for match in dates]
+    if replaceable:
+        apply_ranges(nodes, replaceable)
+        result.replaced_dates += len(replaceable)
+        result.categories.add("CALENDAR_DATES_REPLACED")
         text = "".join(node.text or "" for node in nodes)
-        result.count += len(service_dates)
-        result.categories.add("SERVICE_EXAM_DATE_REMOVED")
+    if any(not match.valid for match in dates):
+        result.issues.add("AMBIGUOUS_DATE_REVIEW")
     pii = spans(text, result)
     if pii:
         replacements = []

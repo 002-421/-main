@@ -19,6 +19,7 @@ with tempfile.TemporaryDirectory(prefix="xrs-synthetic-") as directory:
     if completed.returncode != 0:
         raise SystemExit("Frozen CLI synthetic smoke failed")
     report = json.loads((root / "output" / "Reports" / "summary.json").read_text(encoding="utf-8"))
-    assert report[0]["status"] == "PASS"
+    assert report["records"][0]["status"] == "PASS"
+    assert report["aggregate"]["PASS"] == 1
     assert (root / "output" / "Anonymized" / "CASE-000001.docx").is_file()
 print("Frozen CLI synthetic smoke passed")

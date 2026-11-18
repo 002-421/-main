@@ -11,7 +11,7 @@ import zipfile
 
 from lxml import etree as ET
 
-from .redact import Redaction, REMOVED, SERVICE_DATE_LABEL_ONLY, STANDALONE_LABEL, STUDY_TYPE_LABEL, redact_nodes, service_date_spans, spans, study_type_lines, suspicious
+from .redact import DATE_OF_BIRTH_LABEL_ONLY, Redaction, REMOVED, SERVICE_DATE_LABEL_ONLY, STANDALONE_LABEL, STUDY_TYPE_LABEL, calendar_date_matches, redact_nodes, spans, study_type_lines, suspicious
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -39,7 +39,9 @@ class Result:
     case_id: str
     status: str = "FAILED"
     removed_fields: int = 0
+    replaced_dates: int = 0
     removed_images: int = 0
+    removed_headers: int = 0
     categories: list[str] = field(default_factory=list)
     reason: str = ""
 
@@ -103,8 +105,21 @@ def read_package(path: Path) -> dict[str, bytes]:
 
 
 # Only these package components are understood. Unexpected components fail closed.
-STORY = re.compile(r"word/(?:document|header\d+|footer\d+|footnotes|endnotes)\.xml\Z")
+STORY = re.compile(r"word/(?:document|footnotes|endnotes)\.xml\Z")
+HEADER_FOOTER_PART = re.compile(r"word/(?:header|footer)[^/]*\.xml\Z")
+HEADER_FOOTER_RELS = re.compile(r"word/_rels/(?:header|footer)[^/]*\.xml\.rels\Z")
 DISCARD = re.compile(r"(?:docProps/[^/]+|customXml/.+|word/(?:media|embeddings|activeX|printerSettings|theme|fonts|charts|diagrams|ink|webextensions)/.+|word/(?:comments[^/]*|people|settings|webSettings|fontTable|stylesWithEffects|vbaProject|vbaData|glossary/document)\.(?:xml|bin)|_xmlsignatures/.+)\Z")
+
+SCANNER_SERVICE_LINE = re.compile(
+    r"^\s*(?:исследование|сканирование|томография)\s+"
+    r"(?:выполнено|проведено|осуществлено|проводилось|выполнялось)\b"
+    r"(?=[\s\S]*\b(?:томограф\w*|аппарат\w*|сканер\w*|мрт|кт)\b)", re.I
+)
+SCANNER_CLINICAL_CONTENT = re.compile(
+    r"\b(?:определяется|выявлен\w*|визуализир\w*|очаг\w*|образован\w*|"
+    r"заключени\w*|без\s+признаков|размер\w*|\d[,.]?\d*\s*(?:мм|см)|"
+    r"сравнен\w*|динамик\w*)\b", re.I
+)
 
 # Attribute values cannot contain arbitrary original identifiers in the rebuilt file.
 NUMERIC = {"w", "h", "top", "bottom", "left", "right", "header", "footer", "gutter",
@@ -141,16 +156,23 @@ class Rebuilder:
         self.notes = {"footnote": {}, "endnote": {}}
         self.number_ids = {}
         self.abstract_ids = {}
-        self.header_refs: dict[str, str] = {}
         self.parts: dict[str, bytes] = {}
         self.story_roots = {}
+        self.removed_headers = 0
         self.has_numbering = False
         self.study_type_texts: list[str] = []
         self.study_type_rows: list[tuple[str, ...]] = []
 
     def inspect(self):
         for name, data in self.package.items():
-            if name == "[Content_Types].xml":
+            if HEADER_FOOTER_PART.fullmatch(name):
+                self.removed_headers += 1
+                self.redaction.categories.add("HEADER_FOOTERS_REMOVED")
+            elif HEADER_FOOTER_RELS.fullmatch(name):
+                # These relationships are discarded with their owning
+                # header/footer and are never followed or copied.
+                self.redaction.categories.add("HEADER_FOOTER_RELATIONSHIPS_REMOVED")
+            elif name == "[Content_Types].xml":
                 parse(data)
             elif name.endswith(".rels"):
                 root = parse(data)
@@ -175,7 +197,9 @@ class Rebuilder:
         expected = {"document": "document", "footnotes": "footnotes", "endnotes": "endnotes"}
         for name, root in self.story_roots.items():
             stem = PurePosixPath(name).stem
-            kind = expected.get(stem, "hdr" if stem.startswith("header") else "ftr")
+            kind = expected.get(stem)
+            if kind is None:
+                raise Blocked("UNSUPPORTED_STORY")
             if root.tag != Q(kind):
                 raise Blocked("INVALID_STORY_ROOT")
         if self.story_roots["word/document.xml"].find(Q("body")) is None:
@@ -326,14 +350,8 @@ class Rebuilder:
                 return [text] if node.getparent() is not None and node.getparent().tag == Q("r") else [run]
             return []
         if local in {"headerReference", "footerReference"}:
-            rid = node.get(f"{{{R}}}id", "")
-            if rid not in self.header_refs:
-                raise Blocked("BROKEN_HEADER_REFERENCE")
-            dst = ET.Element(Q(local))
-            dst.set(f"{{{R}}}id", self.header_refs[rid])
-            if node.get(Q("type")) in {"default", "first", "even"}:
-                dst.set(Q("type"), node.get(Q("type")))
-            return [dst]
+            self.redaction.categories.add("HEADER_FOOTER_REFERENCES_REMOVED")
+            return []
         if local in WRAPPERS:
             return self.children(node)
         if local in {"vanish", "webHidden"}:
@@ -366,13 +384,20 @@ class Rebuilder:
                 self.study_type_rows.append(cell_texts)
             for i in range(len(cells) - 1):
                 label = " ".join(cells[i].itertext(Q("t"))).strip()
-                if SERVICE_DATE_LABEL_ONLY.fullmatch(label):
+                if DATE_OF_BIRTH_LABEL_ONLY.fullmatch(label):
                     nodes = list(cells[i].iter(Q("t"))) + list(cells[i + 1].iter(Q("t")))
                     if any((n.text or "").strip() for n in nodes):
                         for n in nodes:
                             n.text = ""
+                        value_nodes = list(cells[i + 1].iter(Q("t")))
+                        if value_nodes:
+                            value_nodes[0].text = REMOVED
                         self.redaction.count += 1
-                        self.redaction.categories.add("SERVICE_EXAM_DATE_REMOVED")
+                        self.redaction.categories.add("TABLE_IDENTITY_FIELD")
+                    continue
+                if SERVICE_DATE_LABEL_ONLY.fullmatch(label):
+                    # The adjacent cell is handled as a date and becomes the
+                    # neutral word "дата". The field label remains intact.
                     continue
                 if STANDALONE_LABEL.fullmatch(label):
                     nodes = list(cells[i + 1].iter(Q("t")))
@@ -382,36 +407,24 @@ class Rebuilder:
                         nodes[0].text = REMOVED
                         self.redaction.count += 1
                         self.redaction.categories.add("TABLE_IDENTITY_FIELD")
-        for paragraph in root.iter(Q("p")):
+        for paragraph in list(root.iter(Q("p"))):
             nodes = text_nodes(paragraph)
             original = "".join(node.text or "" for node in nodes)
             self.study_type_texts.extend(study_type_lines(original))
+            if SCANNER_SERVICE_LINE.match(original) and not SCANNER_CLINICAL_CONTENT.search(original):
+                if paragraph.getparent() is not None:
+                    paragraph.getparent().remove(paragraph)
+                self.redaction.count += 1
+                self.redaction.categories.add("SCANNER_SERVICE_DETAILS_REMOVED")
+                continue
             redact_nodes(nodes, self.redaction)
 
     def build(self) -> dict[str, bytes]:
         self.inspect()
         relationships = []
-        # All header/footer IDs and filenames are regenerated. Orphan stories are discarded.
-        doc_rels = self.package.get("word/_rels/document.xml.rels")
-        used_ids = set(self.story_roots["word/document.xml"].xpath("//w:headerReference/@r:id | //w:footerReference/@r:id", namespaces=NS))
+        # Header/footer parts, references and relationships are all omitted.
+        # Only the document, notes and required local style/numbering parts survive.
         stories = [("word/document.xml", "word/document.xml")]
-        if doc_rels:
-            for relation in parse(doc_rels):
-                rid = relation.get("Id", "")
-                typ = relation.get("Type", "").rsplit("/", 1)[-1]
-                if rid not in used_ids or typ not in {"header", "footer"}:
-                    continue
-                target = relation.get("Target", "")
-                if relation.get("TargetMode") == "External" or not re.fullmatch(r"(?:/word/)?(?:header|footer)\d+\.xml", target):
-                    raise Blocked("UNSAFE_HEADER_TARGET")
-                source = "word/" + target.rsplit("/", 1)[-1]
-                if source not in self.story_roots:
-                    raise Blocked("BROKEN_HEADER_REFERENCE")
-                newrid = f"rId{len(relationships) + 1}"
-                newname = f"{typ}{len(relationships) + 1}.xml"
-                self.header_refs[rid] = newrid
-                relationships.append((newrid, typ, newname))
-                stories.append((source, "word/" + newname))
         for kind in ("footnotes", "endnotes"):
             if f"word/{kind}.xml" in self.story_roots:
                 stories.append((f"word/{kind}.xml", f"word/{kind}.xml"))
@@ -471,18 +484,36 @@ def verify(parts: dict[str, bytes], required_study_types=(), required_study_rows
     """Independent postcondition scan over the actual emitted package."""
     issues = set()
     allowed = {"[Content_Types].xml", "_rels/.rels", "word/_rels/document.xml.rels", "word/styles.xml", "word/numbering.xml"}
-    forbidden = DROP | GRAPHICS | {"vanish", "webHidden", "instrText", "delText", "txbxContent", "hyperlink"}
+    forbidden = DROP | GRAPHICS | {"vanish", "webHidden", "instrText", "delText", "txbxContent", "hyperlink", "headerReference", "footerReference"}
     found_study_types = []
     found_study_rows = []
     for name, data in parts.items():
+        if HEADER_FOOTER_PART.fullmatch(name):
+            raise Blocked("VERIFY_HEADER_FOOTER_REMAINS")
+        if name.startswith("word/media/") or HEADER_FOOTER_RELS.fullmatch(name):
+            raise Blocked("VERIFY_REMOVED_PART_REMAINS")
         if name not in allowed and not STORY.fullmatch(name):
             raise Blocked("VERIFY_UNEXPECTED_PART")
         root = parse(data)
+        if name == "[Content_Types].xml":
+            for node in root:
+                if node.get("ContentType", "").startswith("image/"):
+                    raise Blocked("VERIFY_IMAGE_CONTENT_TYPE_REMAINS")
+                if re.fullmatch(r"/(?:word/(?:header|footer)[^/]*\.xml|word/media/.+)", node.get("PartName", "")):
+                    raise Blocked("VERIFY_REMOVED_CONTENT_TYPE_REMAINS")
+                if node.get("Extension", "").casefold() in {"jpg", "jpeg", "png", "gif", "bmp", "tif", "tiff", "emf", "wmf", "svg"}:
+                    raise Blocked("VERIFY_IMAGE_CONTENT_TYPE_REMAINS")
+            continue
         if name.endswith(".rels"):
             ids = set()
             for node in root:
                 if node.get("TargetMode") is not None:
                     raise Blocked("VERIFY_EXTERNAL_LINK")
+                relation_type = node.get("Type", "")
+                if relation_type.endswith(("/header", "/footer")):
+                    raise Blocked("VERIFY_HEADER_FOOTER_RELATION_REMAINS")
+                if relation_type.endswith("/image"):
+                    raise Blocked("VERIFY_IMAGE_RELATION_REMAINS")
                 target = node.get("Target", "")
                 resolved = target if name == "_rels/.rels" else "word/" + target
                 if resolved not in parts or node.get("Id") in ids:
@@ -499,15 +530,14 @@ def verify(parts: dict[str, bytes], required_study_types=(), required_study_rows
             if not isinstance(node.tag, str) or ET.QName(node).namespace != W:
                 raise Blocked("VERIFY_UNEXPECTED_NAMESPACE")
             local = ET.QName(node).localname
-            if local in forbidden or local not in CONTENT | PROPS | {"headerReference", "footerReference"}:
+            if local in forbidden or local not in CONTENT | PROPS:
                 raise Blocked("VERIFY_FORBIDDEN_ELEMENT")
             parent = node.getparent()
             parentlocal = ET.QName(parent).localname if parent is not None else ""
             parents = {
-                "body": {"document"}, "p": {"body", "tc", "hdr", "ftr", "footnote", "endnote"},
-                "r": {"p"}, "t": {"r"}, "tbl": {"body", "tc", "hdr", "ftr", "footnote", "endnote"},
+                "body": {"document"}, "p": {"body", "tc", "footnote", "endnote"},
+                "r": {"p"}, "t": {"r"}, "tbl": {"body", "tc", "footnote", "endnote"},
                 "tr": {"tbl"}, "tc": {"tr"}, "footnote": {"footnotes"}, "endnote": {"endnotes"},
-                "headerReference": {"sectPr"}, "footerReference": {"sectPr"},
             }
             if local in parents and parentlocal not in parents[local]:
                 raise Blocked("VERIFY_INVALID_STRUCTURE")
@@ -518,8 +548,11 @@ def verify(parts: dict[str, bytes], required_study_types=(), required_study_rows
         for p in root.iter(Q("p")):
             text = "".join(n.text or "" for n in text_nodes(p))
             found_study_types.extend(study_type_lines(text))
-            if service_date_spans(text):
-                raise Blocked("VERIFY_RESIDUAL_SERVICE_DATE")
+            dates = calendar_date_matches(text)
+            if any(match.valid for match in dates):
+                raise Blocked("VERIFY_RESIDUAL_DATE")
+            if any(not match.valid for match in dates):
+                issues.add("AMBIGUOUS_DATE_REVIEW")
             residual = Redaction()
             if spans(text, residual):
                 raise Blocked("VERIFY_RESIDUAL_IDENTIFIER")
@@ -550,7 +583,9 @@ def process(path: Path, case_id: str) -> tuple[Result, bytes | None]:
         builder = Rebuilder(read_package(path))
         parts = builder.build()
         result.removed_fields = builder.redaction.count
+        result.replaced_dates = builder.redaction.replaced_dates
         result.removed_images = builder.images
+        result.removed_headers = builder.removed_headers
         result.categories = sorted(builder.redaction.categories | builder.redaction.issues)
         issues = builder.redaction.issues | verify(parts, builder.study_type_texts, builder.study_type_rows)
         blob = package_bytes(parts)
@@ -560,17 +595,24 @@ def process(path: Path, case_id: str) -> tuple[Result, bytes | None]:
             actual = {n: archive.read(n) for n in archive.namelist()}
         issues |= verify(actual, builder.study_type_texts, builder.study_type_rows)
         result.removed_fields = builder.redaction.count
+        result.replaced_dates = builder.redaction.replaced_dates
         result.removed_images = builder.images
+        result.removed_headers = builder.removed_headers
         result.categories = sorted(builder.redaction.categories | issues)
         result.status = "REVIEW_REQUIRED" if issues else "PASS"
+        result.reason = ";".join(sorted(issues))
         return result, blob
     except Blocked as exc:
         result.reason = str(exc)
+        result.categories = sorted(set(result.categories) | {result.reason})
     except (zipfile.BadZipFile, zipfile.LargeZipFile, EOFError):
         result.reason = "INVALID_ZIP"
+        result.categories = sorted(set(result.categories) | {result.reason})
     except (OSError, PermissionError):
         result.reason = "LOCAL_IO_ERROR"
+        result.categories = sorted(set(result.categories) | {result.reason})
     except Exception:
         # Neither exception messages nor input paths are exposed to logs or reports.
         result.reason = "PROCESSING_FAILED"
+        result.categories = sorted(set(result.categories) | {result.reason})
     return result, None

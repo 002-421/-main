@@ -16,7 +16,7 @@ from lxml import etree as ET
 
 from xrs_anonymizer.batch import BatchError, Session, discover, require_local, run_batch
 from xrs_anonymizer.core import Blocked, Rebuilder, Q, W, R, REL, NS, parse, process, read_package, verify, xml
-from xrs_anonymizer.redact import service_date_spans
+from xrs_anonymizer.redact import calendar_date_matches
 from .fixtures import minimal, rich_fixture, unpack, write
 
 
@@ -84,12 +84,14 @@ class AnonymizerTests(unittest.TestCase):
         self.assertEqual(result.status, "PASS", result)
         parts = unpack(blob)
         self.assertGreaterEqual(result.removed_images, 2)
+        self.assertEqual(result.removed_headers, 2)
         self.assertFalse(any("media" in name for name in parts))
+        self.assertFalse(any(name.startswith(("word/header", "word/footer")) for name in parts))
         output = Document(BytesIO(blob))
         self.assertEqual(output.tables[0].cell(0, 1).text, "[УДАЛЕНО]")
         self.assertEqual(output.tables[0].cell(1, 1).text, "12 × 8 мм")
-        self.assertIn("[УДАЛЕНО]", output.sections[0].header.paragraphs[0].text)
-        self.assertIn("Заключение", output.sections[0].footer.paragraphs[0].text)
+        self.assertEqual(output.sections[0].header.paragraphs[0].text, "")
+        self.assertEqual(output.sections[0].footer.paragraphs[0].text, "")
         for secret in ["Иванов", "Петров", "Сидоров", "СЕКРЕТ_АВТОР", "СЕКРЕТ_РЕДАКТОР", "18415", "1973"]:
             self.assertFalse(any(secret.encode() in data for data in parts.values()), secret)
 
@@ -432,7 +434,7 @@ class AnonymizerTests(unittest.TestCase):
         parts["word/styles.xml"] = xml(styles)
         self.assertEqual(self.run_parts(parts)[0].reason, "STYLE_INHERITANCE_CYCLE")
 
-    def test_35_unsafe_header_target_blocks(self):
+    def test_35_external_header_target_is_removed_with_all_header_references(self):
         parts = minimal()
         root = parse(parts["word/document.xml"])
         sect = ET.SubElement(root.find(Q("body")), Q("sectPr"))
@@ -441,7 +443,12 @@ class AnonymizerTests(unittest.TestCase):
         rels = ET.Element(f"{{{REL}}}Relationships")
         ET.SubElement(rels, f"{{{REL}}}Relationship", Id="rId99", Type=R+"/header", Target="https://patient.invalid/SECRET", TargetMode="External")
         parts["word/_rels/document.xml.rels"] = xml(rels)
-        self.assertEqual(self.run_parts(parts)[0].reason, "UNSAFE_HEADER_TARGET")
+        result, blob = self.run_parts(parts)
+        self.assertEqual(result.status, "PASS", result)
+        output_parts = unpack(blob)
+        self.assertFalse(any(name.startswith(("word/header", "word/footer")) for name in output_parts))
+        self.assertNotIn(b"headerReference", b"".join(output_parts.values()))
+        self.assertNotIn(b"https://patient.invalid/SECRET", b"".join(output_parts.values()))
 
     def test_36_resource_entry_limit(self):
         parts = minimal()
@@ -477,8 +484,8 @@ class AnonymizerTests(unittest.TestCase):
         result, blob = self.run_parts(minimal(source))
         output = self.text(blob)
         self.assertEqual(result.status, "PASS", result)
-        self.assertEqual(output, "Врач: [УДАЛЕНО]")
-        self.assertFalse(service_date_spans(output))
+        self.assertEqual(output, "Врач: [УДАЛЕНО]    дата: дата")
+        self.assertFalse(calendar_date_matches(output))
 
     def test_42_exam_date_split_across_text_runs(self):
         parts = minimal("")
@@ -491,18 +498,20 @@ class AnonymizerTests(unittest.TestCase):
         result, blob = self.run_parts(parts)
         output = self.text(blob)
         self.assertEqual(result.status, "PASS", result)
+        self.assertIn("Дата исследования: дата", output)
         self.assertNotIn("01.02", output)
-        self.assertNotIn("Дата исследования", output)
         self.assertIn("Заключение: без отрицательной динамики.", output)
 
-    def test_43_medical_measurements_and_clinical_date_preserved_review(self):
+    def test_43_medical_measurements_preserved_and_clinical_dates_replaced(self):
         text = "0,65 × 0,40 см; L4/5, L5/S1, C5/6; 73,85°; D>S; DWI. По сравнению с МРТ от 01.10.2025. После операции от 15.03.2024. В динамике с 10.09.2023."
         result, blob = self.run_parts(minimal(text))
         output = self.text(blob)
-        self.assertEqual(result.status, "REVIEW_REQUIRED", result)
-        for value in ["0,65 × 0,40 см", "L4/5", "L5/S1", "C5/6", "73,85°", "D>S", "DWI", "01.10.2025", "15.03.2024", "10.09.2023"]:
+        self.assertEqual(result.status, "PASS", result)
+        for value in ["0,65 × 0,40 см", "L4/5", "L5/S1", "C5/6", "73,85°", "D>S", "DWI"]:
             self.assertIn(value, output)
-        self.assertIn("CLINICAL_DATE_REVIEW", result.categories)
+        self.assertEqual(output.count("дата"), 3)
+        self.assertEqual(result.replaced_dates, 3)
+        self.assertFalse(calendar_date_matches(output))
 
     def test_44_birth_and_service_dates_both_removed(self):
         parts = minimal("Описание: без особенностей.")
@@ -519,8 +528,9 @@ class AnonymizerTests(unittest.TestCase):
         self.assertNotIn("01.01.1980", output)
         self.assertNotIn("16.11.2026", output)
         self.assertIn("Дата рождения: [УДАЛЕНО]", output)
+        self.assertIn("Дата исследования: дата", output)
         self.assertIn("Описание: без особенностей.", output)
-        self.assertFalse(service_date_spans(output))
+        self.assertFalse(calendar_date_matches(output))
 
     def test_45_service_date_in_footer_and_table(self):
         path = rich_fixture(self.source / "footer-date.docx")
@@ -534,9 +544,11 @@ class AnonymizerTests(unittest.TestCase):
         self.assertEqual(result.status, "PASS", result)
         output = self.text(blob)
         self.assertNotIn("12.01.2025", output)
-        self.assertNotIn("13.01.2025", output)
+        self.assertIn("Дата исследования:", output)
+        self.assertIn("дата", output)
         opened = Document(BytesIO(blob))
-        self.assertIn("Заключение без динамики.", opened.sections[0].footer.paragraphs[0].text)
+        self.assertEqual(opened.sections[0].footer.paragraphs[0].text, "")
+        self.assertFalse(any(name.startswith(("word/header", "word/footer")) for name in unpack(blob)))
 
     def test_46_study_type_preserved_through_independent_verifier(self):
         line = "Область и вид исследования: КТ органов брюшной полости"
@@ -586,15 +598,18 @@ class AnonymizerTests(unittest.TestCase):
 
     def test_48_mixed_batch_success_review_and_failure_isolation(self):
         write(self.source / "synthetic-good.docx", minimal("Дата исследования: 01.02.2026\nОбласть и вид исследования: МРТ правого коленного сустава"))
-        write(self.source / "synthetic-review.docx", minimal("По сравнению с МРТ от 01.10.2025"))
+        write(self.source / "synthetic-review.docx", minimal("Дата исследования: 31.02.2025"))
         (self.source / "synthetic-bad.docx").write_bytes(b"bad synthetic zip")
         counts = run_batch(self.source, self.output)
         self.assertEqual((counts["PASS"], counts["REVIEW_REQUIRED"], counts["FAILED"]), (1, 1, 1))
         self.assertEqual(len(list((self.output / "Anonymized").glob("*.docx"))), 1)
         self.assertEqual(len(list((self.output / "Review").glob("*.docx"))), 1)
-        records = json.loads((self.output / "Reports" / "summary.json").read_text())
-        self.assertEqual(len(records), 3)
-        self.assertNotIn("synthetic-good", json.dumps(records))
+        report = json.loads((self.output / "Reports" / "summary.json").read_text())
+        self.assertEqual(len(report["records"]), 3)
+        self.assertNotIn("synthetic-good", json.dumps(report))
+        self.assertEqual(report["aggregate"]["PASS"], 1)
+        self.assertEqual(report["aggregate"]["REVIEW_REQUIRED"], 1)
+        self.assertEqual(report["aggregate"]["FAILED"], 1)
 
 
 if __name__ == "__main__":
