@@ -10,6 +10,7 @@ const options={...(process.env.ELECTRON_PATH?{executablePath:process.env.ELECTRO
 let app,page;
 const rendererErrorNames=[];
 let diagnosticStage='startup';
+let expectedView=null;
 async function launch(){app=await _electron.launch(options);page=await app.firstWindow();page.on('pageerror',error=>rendererErrorNames.push(error.name||'RendererError'));await page.locator('.report-content').waitFor();return page;}
 async function save(page){await page.waitForFunction(()=>document.querySelector('#save-state')?.textContent?.includes('Сохранено'));}
 async function placeCaretInParagraph(page,paragraphIndex,offset=14){
@@ -36,10 +37,10 @@ async function captureFailure(error){
   const canvas=document.querySelector('#canvas'),selection=getSelection(),active=document.querySelector('.report-tab.active'),paragraph=selection?.anchorNode instanceof Element?selection.anchorNode.closest('.report-content p'):selection?.anchorNode?.parentElement?.closest('.report-content p'),activeElement=document.activeElement,workspace=JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1')||'{}'),history=JSON.parse(localStorage.getItem('mri-report-studio.undo-history.v1')||'{}'),activeHistory=history[workspace.activeId];
   let caret=null;
   if(selection?.rangeCount&&paragraph){const range=selection.getRangeAt(0).cloneRange();range.selectNodeContents(paragraph);range.setEnd(selection.anchorNode,selection.anchorOffset);caret={paragraph:[...document.querySelectorAll('.report-content p')].indexOf(paragraph),offset:range.toString().length,collapsed:selection.isCollapsed};}
-  return{reportCount:document.querySelectorAll('.report-tab').length,activeTabIndex:active?[...document.querySelectorAll('.report-tab')].indexOf(active):-1,paragraphCount:document.querySelectorAll('.report-content p').length,scrollTop:canvas?.scrollTop??null,scrollHeight:canvas?.scrollHeight??null,clientHeight:canvas?.clientHeight??null,caret,domSelection:{rangeCount:selection?.rangeCount??0,anchorNode:selection?.anchorNode?.nodeName??null,anchorOffset:selection?.anchorOffset??null},activeElement:{tag:activeElement?.tagName??null,id:activeElement?.id??null,className:typeof activeElement?.className==='string'?activeElement.className:null,contenteditable:activeElement?.getAttribute('contenteditable')??null},workspaceActiveId:workspace.activeId,activeHistoryView:activeHistory?.view?{scrollTop:activeHistory.view.scrollTop,selectionType:activeHistory.view.selection?.type,anchor:activeHistory.view.selection?.anchor,head:activeHistory.view.selection?.head}:null,historyDepth:JSON.parse(localStorage.getItem('mri-alliance.settings.v3')||'{}').historyDepth??null,rendererErrors};
+  return{fontStatus:document.fonts.status,viewport:{width:innerWidth,height:innerHeight},reportCount:document.querySelectorAll('.report-tab').length,activeTabIndex:active?[...document.querySelectorAll('.report-tab')].indexOf(active):-1,paragraphCount:document.querySelectorAll('.report-content p').length,scrollTop:canvas?.scrollTop??null,scrollHeight:canvas?.scrollHeight??null,clientHeight:canvas?.clientHeight??null,caret,domSelection:{rangeCount:selection?.rangeCount??0,anchorNode:selection?.anchorNode?.nodeName??null,anchorOffset:selection?.anchorOffset??null},activeElement:{tag:activeElement?.tagName??null,id:activeElement?.id??null,className:typeof activeElement?.className==='string'?activeElement.className:null,contenteditable:activeElement?.getAttribute('contenteditable')??null},workspaceActiveId:workspace.activeId,activeHistoryView:activeHistory?.view?{scrollTop:activeHistory.view.scrollTop,selectionType:activeHistory.view.selection?.type,anchor:activeHistory.view.selection?.anchor,head:activeHistory.view.selection?.head}:null,reportHistorySummaries:workspace.reports?.map(report=>({id:report.id,active:report.id===workspace.activeId,undo:history[report.id]?.history?.undo?.length,redo:history[report.id]?.history?.redo?.length})),historyDepth:JSON.parse(localStorage.getItem('mri-alliance.settings.v3')||'{}').historyDepth??null,rendererErrors};
  },rendererErrorNames).catch(()=>null);
  await page?.screenshot({path:path.join(root,'test-output/report-history-failure.png'),fullPage:false}).catch(()=>{});
- await writeFile(path.join(root,'test-output/report-history-failure.json'),JSON.stringify({stage:diagnosticStage,errorName:error?.name||'Error',errorCode:error?.code||null,errorMessage:error?.message||String(error),errorStack:error?.stack||null,snapshot},null,2));
+ await writeFile(path.join(root,'test-output/report-history-failure.json'),JSON.stringify({stage:diagnosticStage,errorName:error?.name||'Error',errorCode:error?.code||null,errorMessage:error?.message||String(error),errorStack:error?.stack||null,expectedView,snapshot},null,2));
 }
 try{
  diagnosticStage='launch synthetic report';
@@ -172,13 +173,18 @@ try{
  assert.ok(Math.abs(restoredBView.scrollTop-reportBView.scrollTop)<2,`tab switch restores report B scroll: ${JSON.stringify({expected:reportBView,restored:restoredBView})}`);
  await page.locator(`[data-report-select="${aId}"]`).click();
  assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'patient surname survives switching back from report B');
+ diagnosticStage='persist report A before restart';
  const viewBeforeRestart=reportAView;
+ expectedView={reportId:aId,...viewBeforeRestart};
  stored=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),historyKey);
  assert.equal(stored[aId]?.view?.scrollTop,viewBeforeRestart.scrollTop,'the active report view is persisted with local history');
  assert.equal(stored[aId]?.view?.selection?.anchor,stored[aId]?.view?.selection?.head,'the saved cursor is collapsed at the expected report location');
+ diagnosticStage='restart restores report A view';
  await app.close();
  page=await launch();
  assert.equal(await page.locator('.report-tab').count(),2,'both synthetic report tabs restore after a normal full restart');
+ assert.equal(await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select'),aId,'restart restores the same active report ID');
+ assert.ok((await page.locator('.report-content').innerText()).includes('XRS06_VIEW_A'),'restart preserves active report A content before restoring its view');
  assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'synthetic patient name survives normal application restart');
  await page.waitForFunction(({expectedScroll,expectedParagraph})=>{const canvas=document.querySelector('#canvas'),selection=getSelection(),paragraph=selection?.anchorNode instanceof Element?selection.anchorNode.closest('.report-content p'):selection?.anchorNode?.parentElement?.closest('.report-content p');return Math.abs(canvas.scrollTop-expectedScroll)<2&&paragraph&&[...document.querySelectorAll('.report-content p')].indexOf(paragraph)===expectedParagraph;},{expectedScroll:viewBeforeRestart.scrollTop,expectedParagraph:viewBeforeRestart.paragraph});
  stored=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),historyKey);
@@ -190,6 +196,10 @@ try{
  assert.ok((await page.locator('.report-content').innerText()).includes('XRS06_VIEW_A'),'Redo after restart restores report A view operation');
  await page.locator(`[data-report-select="${bId}"]`).click();
  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>resolve())));
+ diagnosticStage='restart restores report B view';
+ expectedView={reportId:bId,...reportBView};
+ assert.equal(await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select'),bId,'report B keeps its ID after restart');
+ assert.ok((await page.locator('.report-content').innerText()).includes('XRS06_VIEW_B'),'restart preserves report B content before its history actions');
  const restartedBView=await page.evaluate(()=>{const canvas=document.querySelector('#canvas'),selection=getSelection(),paragraph=selection?.anchorNode instanceof Element?selection.anchorNode.closest('.report-content p'):selection?.anchorNode?.parentElement?.closest('.report-content p');return{scrollTop:canvas.scrollTop,paragraph:paragraph?[...document.querySelectorAll('.report-content p')].indexOf(paragraph):-1};});
  assert.equal(restartedBView.paragraph,12,`restart restores report B caret: ${JSON.stringify(restartedBView)}`);
  assert.ok(Math.abs(restartedBView.scrollTop-reportBView.scrollTop)<2,`restart restores report B scroll: ${JSON.stringify({expected:reportBView,restored:restartedBView})}`);
@@ -206,6 +216,8 @@ try{
  });
  await app.close();
 
+ diagnosticStage='restart with corrupt history';
+ expectedView=null;
  page=await launch();
  assert.equal(await page.locator('.report-tab').count(),2,'both report documents survive a restart with corrupt history');
  assert.ok((await page.locator('.report-tab-select').first().getAttribute('title'))?.includes('СверхдлиннаяСинтетическаяФамилия'),'synthetic patient name survives history recovery');

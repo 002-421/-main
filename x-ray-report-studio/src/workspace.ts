@@ -253,7 +253,20 @@ const json=()=>editor.getJSON() as RichNode;
 function restore(doc:RichNode,history:unknown,view?:unknown) { suppress=true;try {editor.commands.setContent(prepareInlineDocument(doc));restoreReportHistory(editor.view,sanitizeReportHistory(history,settings.historyDepth));}finally{suppress=false;}restoreReportView(view);savedSelection=editor.state.selection;setReviewHighlights(editor,review);setLiveProofreading(editor,false);refreshProofreading(editor);renderCounts(); }
 function toast(message:string,error=false) { $('.toast')?.remove();const t=document.createElement('div');t.className=`toast${error?' error':''}`;t.role=error?'alert':'status';t.textContent=message;document.body.append(t);setTimeout(()=>t.remove(),5000); }
 function readReportView(value:unknown):StoredReportView|undefined {if(!value||typeof value!=='object'||Array.isArray(value))return;const view=value as Record<string,unknown>;if(!view.selection||typeof view.selection!=='object'||Array.isArray(view.selection)||typeof view.scrollTop!=='number'||!Number.isFinite(view.scrollTop)||view.scrollTop<0||view.scrollTop>100000)return;return{selection:view.selection as Record<string,unknown>,scrollTop:view.scrollTop};}
-function restoreReportView(value:unknown){const view=readReportView(value);let selection:Selection|undefined;if(view){try{selection=Selection.fromJSON(editor.state.doc,view.selection);editor.view.dispatch(editor.state.tr.setSelection(selection).setMeta('addToHistory',false));}catch{/* Invalid or stale view state cannot affect the document or its history. */}}$('#canvas').scrollTop=view?.scrollTop??0;if(view&&selection)requestAnimationFrame(()=>{editor.view.focus();$('#canvas').scrollTop=view.scrollTop;});}
+function restoreReportView(value:unknown){
+ const view=readReportView(value);let selection:Selection|undefined;
+ if(view){try{selection=Selection.fromJSON(editor.state.doc,view.selection);editor.view.dispatch(editor.state.tr.setSelection(selection).setMeta('addToHistory',false));}catch{/* Invalid or stale view state cannot affect the document or its history. */}}
+ $('#canvas').scrollTop=view?.scrollTop??0;
+ if(view&&selection){
+  const reportId=activeReportId,doc=editor.state.doc,restoredSelection=selection;
+  // The first layout starts loading embedded fonts. Restoring before they are
+  // ready lets font reflow and browser scroll anchoring shift the saved view.
+  requestAnimationFrame(()=>{void document.fonts.ready.then(()=>{
+   if(editor.isDestroyed||activeReportId!==reportId||editor.state.doc!==doc||!editor.state.selection.eq(restoredSelection))return;
+   editor.view.focus();$('#canvas').scrollTop=view.scrollTop;
+  });});
+ }
+}
 function syncActiveReport(){const active=openReports.find(r=>r.id===activeReportId);if(active){active.doc=json();active.templateId=activeTemplateId;active.dirty=changedSinceOpen;historyByReport[active.id]={fingerprint:documentFingerprint(active.doc),history:getReportHistory(editor.state),view:{selection:editor.state.selection.toJSON() as Record<string,unknown>,scrollTop:$('#canvas').scrollTop}};}}
 function saveLocal():boolean {
  if(Reflect.get(window,'xrsFatal'))return false;
