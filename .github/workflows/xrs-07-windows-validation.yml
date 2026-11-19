@@ -280,6 +280,9 @@ jobs:
       - name: Word-oriented preview pagination with synthetic reports
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: node tests/preview-pagination-browser.mjs
+      - name: Oversized Word keep-with-next chain and signature regression
+        if: github.ref_name == 'codex/xrs-preview-geometry-076'
+        run: node tests/preview-keep-chain-browser.mjs
       - name: Actual DOCX and preview geometry, widows and calibration UI
         id: word-preview-geometry
         if: github.ref_name == 'codex/xrs-preview-geometry-076'

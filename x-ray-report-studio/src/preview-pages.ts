@@ -87,6 +87,11 @@ export function paginateBrowserPreview(html: string, doc: RichNode, calibration?
   };
   const withinWidth=()=>{const box=measure.getBoundingClientRect();return [...measure.querySelectorAll('*')].every(element=>{const rect=element.getBoundingClientRect();return rect.width===0&&rect.height===0||rect.right<=box.right+1;});};
   const fits = (node: HTMLElement) => { measure.append(node); const fits = measuredHeight() <= contentHeight - 0.5&&withinWidth(); node.remove(); return fits; };
+  const fitsOnEmptyPage=(nodes:HTMLElement[])=>{
+    const saved=[...measure.childNodes];
+    try{measure.replaceChildren(...nodes.map(node=>node.cloneNode(true)));return measuredHeight()<=contentHeight-.5&&withinWidth();}
+    finally{measure.replaceChildren(...saved);}
+  };
   const append = (node: HTMLElement) => {
     const copy = node.cloneNode(true) as HTMLElement;
     measure.append(copy);
@@ -136,7 +141,13 @@ export function paginateBrowserPreview(html: string, doc: RichNode, calibration?
       if (block.hasAttribute('data-page-break-before') && target.children.length) { target = makePage(); measure.replaceChildren(); }
       if (!fits(block.cloneNode(true) as HTMLElement) && target.children.length && block.tagName !== 'P') {
         const previous:HTMLElement[]=[];
-        while(target.lastElementChild?.matches('[data-keep-next="true"],h1,h2,h3')){previous.unshift(target.lastElementChild as HTMLElement);target.lastElementChild.remove();measure.lastElementChild?.remove();}
+        let preceding=target.lastElementChild;
+        while(preceding?.matches('[data-keep-next="true"],h1,h2,h3')){previous.unshift(preceding as HTMLElement);preceding=preceding.previousElementSibling;}
+        // Word breaks a keep-with-next chain that cannot fit on an empty page.
+        // Carry only its fitting suffix; leave earlier paragraphs on the old
+        // page. Never accept an oversized block or enlarge the printable area.
+        if(wordBox)while(previous.length&&!fitsOnEmptyPage([...previous,block]))previous.shift();
+        for(const node of [...previous].reverse()){node.remove();measure.lastElementChild?.remove();}
         if(target.children.length)target=makePage();measure.replaceChildren();previous.forEach(append);
       }
       if (block.tagName === 'P' && (block.textContent ?? '').length > 0 && !block.querySelector('img') && !fits(block.cloneNode(true) as HTMLElement)) {
