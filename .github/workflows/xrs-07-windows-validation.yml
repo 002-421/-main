@@ -80,6 +80,10 @@ jobs:
       - name: Install Chromium for tab lifecycle scenario
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npx playwright-core install chromium
+      - name: Windows lock readiness diagnosis, repetitions and normal parallel full suite
+        id: backup-lock-076
+        if: github.ref_name == 'codex/xrs-preview-geometry-076'
+        run: node tests/windows-backup-lock-checks.mjs --module-readiness
       - run: npm run build
       - name: Verify Electron runtime for Windows shortcut test
         if: steps.release-channel.outputs.updateHotfix == 'true'
@@ -421,3 +425,10 @@ jobs:
             x-ray-report-studio/release/X-ray_Report_Studio_Windows_x64.zip
             x-ray-report-studio/test-output/X-ray_Report_Studio_Windows_Beta_Setup.zip
             x-ray-report-studio/test-output/XRS-08-beta-candidate.json
+      - name: Preserve Windows lock diagnostics for 0.4.76
+        if: always() && github.ref_name == 'codex/xrs-preview-geometry-076'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-0.4.76-backup-lock-diagnostics-${{ github.run_id }}
+          path: x-ray-report-studio/test-output/windows-backup-lock/
+          if-no-files-found: error
