@@ -1,3 +1,4 @@
+import {capacity, calibratedCapacity, type PreviewCalibration} from './preview-calibration.ts';
 import type { PrintBox } from './print-document.ts';
 import type { RichNode } from './model';
 import { DISCLAIMER_TEXT, EQUIPMENT_TEXT } from './report-footer.ts';
@@ -32,7 +33,7 @@ function createMeasurement(doc: RichNode) {
   const contentHeight = (layout.heightMm - layout.topMm) * 96 / 25.4 - bottom;
   const effectiveCss = css + `;--preview-bottom:${bottom}px`;
 
-  return {scratch, measure, scale, layout, contentHeight, effectiveCss};
+  return {scratch, measure, scale, layout, contentHeight, effectiveCss, footerHeight:footerProbe.getBoundingClientRect().height/scale};
 }
 export function measurePrintBox(doc: RichNode): PrintBox {
   const box = createMeasurement(doc);
@@ -44,7 +45,21 @@ export function measurePrintBox(doc: RichNode): PrintBox {
   finally { box.scratch.remove(); }
 }
 
-export function paginateBrowserPreview(html: string, doc: RichNode): string {
+/** Calibrate only the break calculation, without moving paper margins or footer. */
+export function measurePreviewCapacity(doc:RichNode) {
+  const box=createMeasurement(doc);
+  try {
+    const probe=document.createElement('p');probe.textContent='Аа';
+    const line=typeof doc.attrs?.lineHeight==='number'&&doc.attrs.lineHeight>0?doc.attrs.lineHeight:1.05;
+    probe.style.cssText=`margin:0;padding:0;font-family:${box.layout.fontFamily};font-size:${box.layout.fontSizePt}pt;line-height:${line}`;
+    box.measure.append(probe);
+    const lineHeight=probe.getBoundingClientRect().height/box.scale;
+    const maximum=Math.max(box.contentHeight,Math.min((box.layout.heightMm-box.layout.topMm-box.layout.bottomMm)*96/25.4,(box.layout.heightMm-box.layout.topMm-6.5)*96/25.4-box.footerHeight-1));
+    return capacity(box.contentHeight,maximum,lineHeight);
+  } finally {box.scratch.remove();}
+}
+
+export function paginateBrowserPreview(html: string, doc: RichNode, calibration?:PreviewCalibration): string {
   const source = document.createElement('div');
   source.innerHTML = html;
   const blocks: HTMLElement[] = [];
@@ -55,7 +70,9 @@ export function paginateBrowserPreview(html: string, doc: RichNode): string {
     blocks.push(node.cloneNode(true) as HTMLElement);
   };
   [...source.children].forEach(collect);
-  const {scratch, measure, scale, layout, contentHeight, effectiveCss} = createMeasurement(doc);
+  const adjusted=calibration?.enabled?calibratedCapacity(measurePreviewCapacity(doc),calibration):undefined;
+  const {scratch, measure, scale, layout, contentHeight:standardHeight, effectiveCss} = createMeasurement(doc);
+  const contentHeight=adjusted?.height??standardHeight;
 
   const pages: HTMLElement[] = [];
   const makePage = () => { const paper = document.createElement('article'); paper.className = 'export-preview-paper'; paper.style.cssText = effectiveCss; const content = document.createElement('div'); content.className = 'report-content'; content.style.fontFamily = layout.fontFamily; paper.append(content); pages.push(paper); return content; };

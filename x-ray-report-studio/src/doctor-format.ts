@@ -21,6 +21,8 @@ export class DoctorFormats {
  get(name:string):DoctorFormat|undefined {const p=Object.values(this.state.profiles).find(p=>normalized(p.name)===normalized(name));return p?{...p}:undefined;}
  private write(next:Registry){const value=JSON.stringify(next),previous=this.storage.getItem(DOCTOR_FORMAT_KEY);try{this.storage.setItem(DOCTOR_FORMAT_KEY,value);if(this.storage.getItem(DOCTOR_FORMAT_KEY)!==value)throw new Error('Не удалось проверить настройки оформления');}catch(error){if(previous!==null)try{this.storage.setItem(DOCTOR_FORMAT_KEY,previous);}catch{}throw error;}}
  save(name:string,fontSize:number,optimize:boolean){if(!TEMPLATE_FONT_SIZES.includes(fontSize as any))throw new Error('Недопустимый размер шрифта');const old=structuredClone(this.state);try{const p=this.ensure(name);p.fontSize=fontSize;p.optimize=optimize;this.state.activeId=p.id;this.write(this.state);return{...p};}catch(error){this.state=old;throw error;}}
+ remove(name:string){const profile=this.get(name);if(!profile)return;const old=structuredClone(this.state);try{delete this.state.profiles[profile.id];if(this.state.activeId===profile.id)this.state.activeId=this.ensure('').id;this.write(this.state);}catch(error){this.state=old;throw error;}}
+
 }
 /** Only a freshly created built-in protocol passes through this transform. */
 export function newProtocolFont(input:RichNode,fontSize:number):RichNode {

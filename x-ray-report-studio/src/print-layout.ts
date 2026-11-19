@@ -2,7 +2,7 @@ import type { RichNode } from './model';
 import type { PrintBox } from './print-document.ts';
 export type LayoutMetrics={pages:number;safe:boolean;descriptionOnConclusion:boolean};
 export type PrintVariant={document:RichNode;name:string;delta:number;spacing:number};
-export type PrintPlan=PrintVariant&{html:string;metrics:LayoutMetrics;box?:PrintBox;wordRendering:'unverified'};
+export type PrintPlan=PrintVariant&{html:string;previewSourceHtml?:string;metrics:LayoutMetrics;box?:PrintBox;wordRendering:'unverified'};
 export class PrintLayoutError extends Error {constructor(message:string){super(message);this.name='PrintLayoutError';}}
 const walk=(n:RichNode,visit:(n:RichNode)=>void)=>{visit(n);n.content?.forEach(child=>walk(child,visit));};
 const content=(n:RichNode):string=>n.text??(n.content??[]).map(content).join('');
@@ -29,7 +29,7 @@ export function printVariants(input:RichNode,optimize:boolean):PrintVariant[]{
  return variants;
 }
 /** One deterministic decision, shared by preview and both exports. */
-export function choosePrintLayout(input:RichNode,optimize:boolean,render:(doc:RichNode)=>{html:string;metrics:LayoutMetrics;box?:PrintBox}):PrintPlan{
+export function choosePrintLayout(input:RichNode,optimize:boolean,render:(doc:RichNode)=>{html:string;previewSourceHtml?:string;metrics:LayoutMetrics;box?:PrintBox}):PrintPlan{
  const plans:PrintPlan[]=[];const failures:string[]=[];
  for(const v of printVariants(input,optimize)){try{const result=render(v.document);if(result.metrics.safe&&content(v.document).replace(/\s/gu,'')===content(input).replace(/\s/gu,''))plans.push({...v,...result,wordRendering:'unverified'});}catch(error){failures.push((error as Error).message);}}
  plans.sort((a,b)=>a.metrics.pages-b.metrics.pages||Number(b.metrics.descriptionOnConclusion)-Number(a.metrics.descriptionOnConclusion)||Math.abs(a.delta)-Math.abs(b.delta)||a.spacing-b.spacing||b.delta-a.delta);
