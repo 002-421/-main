@@ -129,3 +129,28 @@ html[data-theme="dark"] .ai-review-panel,html[data-theme="dark"] .ai-review-card
 @media print{.export-only-editor .export-preview-paper::after{display:none!important;content:none!important}}
 
 .preview-calibration-controls{border:1px solid var(--border);border-radius:8px;padding:12px;margin:10px 0;font-size:13px}.preview-calibration-controls h3{font-size:14px;margin-bottom:8px}.calibration-adjust{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0}.calibration-adjust input{width:85px}.calibration-adjust label{display:flex;align-items:center;gap:5px;margin:0}.preview-calibration-controls p{margin:5px 0}.preview-calibration-controls [data-calibration-error],#preview-calibration-warning{color:#a34813}
+
+/* Word-reference screen preview. Export plan/PDF and the source document stay unchanged. */
+.word-reference-preview .report-content{line-height:1.05!important;overflow-wrap:break-word;hyphens:none;word-break:normal}
+.word-reference-preview.preview-measure{width:var(--preview-width,210mm)!important}
+.word-reference-preview .report-content p,.word-reference-preview .report-content h1,.word-reference-preview .report-content h2,.word-reference-preview .report-content h3{orphans:2;widows:2}
+.word-preview-dialog{display:flex;flex-direction:column;overflow:hidden;max-height:calc(100dvh - 32px)}
+.word-preview-dialog>header,.word-preview-dialog>footer{flex:0 0 auto}
+.word-preview-dialog>.dialog-body{min-height:0;overflow:auto;background:#fff;color:#20364b;padding:0 16px 12px}
+.word-preview-dialog .paginated-browser-preview{height:min(52dvh,650px);min-height:180px;max-height:none;overflow:auto;overscroll-behavior:contain}
+.word-preview-dialog .preview-calibration-controls{background:#f1f6fa;color:#20364b;border-color:#758b9a}
+.word-preview-dialog .preview-calibration-controls small,.word-preview-dialog .preview-note{color:#425866}
+.word-preview-dialog .preview-calibration-controls .btn{background:#fff;color:#173b53;border-color:#718694;min-height:34px}
+.word-preview-dialog .preview-calibration-controls input[type=number]{display:inline-block;width:88px;background:#fff;color:#182f40;border-color:#718694}
+.word-preview-dialog .preview-calibration-controls label{color:inherit}
+.word-preview-dialog .preview-calibration-controls .btn:disabled{opacity:1;background:#e0e7eb;color:#536773;cursor:default}
+.word-preview-dialog #preview-calibration-warning,.word-preview-dialog [data-calibration-error]{color:#8c3908}
+html[data-theme=dark] .word-preview-dialog>.dialog-body{background:#192733;color:#e5eef5}
+html[data-theme=dark] .word-preview-dialog .preview-calibration-controls{background:#223440;color:#e5eef5;border-color:#8199aa}
+html[data-theme=dark] .word-preview-dialog .preview-calibration-controls small,html[data-theme=dark] .word-preview-dialog .preview-note{color:#c3d5e1}
+html[data-theme=dark] .word-preview-dialog #preview-calibration-warning,html[data-theme=dark] .word-preview-dialog [data-calibration-error]{color:#ffc18d}
+@media(max-height:650px){.word-preview-dialog>header{padding:10px 16px}.word-preview-dialog>footer{padding:8px 16px}.word-preview-dialog .preview-calibration-controls{padding:8px}.word-preview-dialog .paginated-browser-preview{height:220px}}
+/* Author display rules must not resurrect hidden menus above a modal. */
+[hidden]{display:none!important}
+.dialog-overlay:has(.word-preview-dialog){z-index:1300}
+.word-reference-preview .preview-word-footer{bottom:6.50875mm;line-height:.8333333333}

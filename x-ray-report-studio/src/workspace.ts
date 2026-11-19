@@ -782,14 +782,15 @@ function doctorCalibration(format:DoctorFormat):PreviewCalibration {
  return previewCalibrations?.get(format.id)??{version:1,enabled:false,offset:0,lastTarget:null};
 }
 function calibratedPreview(plan:PrintPlan,value:PreviewCalibration){
- if(!value.enabled||value.offset===0)return{html:plan.html,warning:''};
+ if(!plan.previewSourceHtml)throw new Error('Исходная печатная раскладка недоступна.');
+ const baseline=()=>paginateBrowserPreview(plan.previewSourceHtml!,plan.document,undefined,plan.box);
+ if(!value.enabled||value.offset===0)return{html:baseline(),warning:''};
  try {
-  if(!plan.previewSourceHtml)throw new Error('Исходная печатная раскладка недоступна.');
-  return{html:paginateBrowserPreview(plan.previewSourceHtml,plan.document,value),warning:''};
- }catch(error){return{html:plan.html,warning:`Поправка не применена к этому документу: ${(error as Error).message} Показан базовый предпросмотр; Word и PDF не изменены.`};}
+  return{html:paginateBrowserPreview(plan.previewSourceHtml,plan.document,value,plan.box),warning:''};
+ }catch(error){return{html:baseline(),warning:`Поправка не применена к этому документу: ${(error as Error).message} Показан базовый предпросмотр; Word и PDF не изменены.`};}
 }
 function mountDoctorCalibration(root:HTMLElement,plan:PrintPlan,format:DoctorFormat|undefined,change:()=>void,openPreview?:()=>void){
- const metrics=measurePreviewCapacity(plan.document);root.dataset.doctorId=format?.id??'';
+ const metrics=measurePreviewCapacity(plan.document,plan.box);root.dataset.doctorId=format?.id??'';
  const control=mountCalibrationControls(root,{capacity:metrics,font:`${plan.document.attrs?.fontFamily||'Arial'} ${Number(plan.document.attrs?.fontSizePt)||11} pt; размер врача: ${format?.fontSize??11} pt`,optimize:format?.optimize??true,value:format?doctorCalibration(format):{version:1,enabled:false,offset:0,lastTarget:null},available:Boolean(format&&format.id!=='unsaved'&&previewCalibrations),save:value=>{if(!format||!previewCalibrations)throw new Error(calibrationStorageError||'Сначала сохраните врача.');previewCalibrations.save(format.id,value);},change,openPreview});
  if(calibrationStorageError)root.querySelector('[data-calibration-error]')!.textContent=calibrationStorageError;
  return control;
@@ -814,7 +815,7 @@ async function previewReport(preferred?:'word'|'pdf'){
   const d=dialog('Постраничный предпросмотр',`${body}<p class="preview-note">Предпросмотр рассчитан по размеру страницы, полям и шрифту Word. Оранжевая рамка отмечает блок, перенос которого нужно проверить. Переносы могут отличаться в Microsoft Word: перед отправкой проверьте сохранённый DOCX.</p>`,footer);
   const renderCalibrated=()=>{const result=calibratedPreview(plan,doctorCalibration(currentDoctorFormat()));const scroll=d.querySelector<HTMLElement>('.paginated-browser-preview')!,top=scroll.scrollTop;scroll.innerHTML=result.html;scroll.scrollTop=top;d.querySelector('#preview-calibration-warning')!.textContent=result.warning;scroll.dataset.calibrationApplied=String(!result.warning&&doctorCalibration(currentDoctorFormat()).enabled);const count=scroll.querySelectorAll('.preview-page').length;const note=d.querySelector('.preview-note')!;note.textContent=`Базовый размер: ${base} pt. Печатный базовый размер: ${base+plan.delta} pt. Страниц предпросмотра: ${count}; печатной раскладки Word/PDF: ${plan.metrics.pages}.${plan.metrics.descriptionOnConclusion?'':' Начало заключения не удалось совместить с описанием без ухудшения безопасной раскладки.'}`;};
   mountDoctorCalibration(d.querySelector<HTMLElement>('#preview-calibration-controls')!,plan,currentDoctorFormat(),renderCalibrated);renderCalibrated();
-  d.querySelector('.dialog')!.classList.add('wide-preview');d.querySelector('#preview-save-word')?.addEventListener('click',()=>{closeDialog();void saveWord();});d.querySelector('#preview-save-pdf')?.addEventListener('click',()=>{closeDialog();requestPdfExport();});
+  d.querySelector('.dialog')!.classList.add('wide-preview','word-preview-dialog');d.querySelector('#preview-save-word')?.addEventListener('click',()=>{closeDialog();void saveWord();});d.querySelector('#preview-save-pdf')?.addEventListener('click',()=>{closeDialog();requestPdfExport();});
  }catch(e){if(e instanceof PrintLayoutError)showPrintLimitation(e);else toast(`Не удалось подготовить постраничный предпросмотр: ${(e as Error).message}`,true);}
 }
 $('#preview-report').onclick=()=>void previewReport();

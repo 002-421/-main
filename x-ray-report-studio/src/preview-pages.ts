@@ -5,14 +5,15 @@ import { DISCLAIMER_TEXT, EQUIPMENT_TEXT } from './report-footer.ts';
 
 export { previewPageLayout } from './page-geometry.ts';
 import { previewPageLayout } from './page-geometry.ts';
+import {wordPreviewGeometry,normalizeWordPreview} from './word-preview.ts';
 
 /** The same footer measurement supplies preview and print-only object bounds. */
-function createMeasurement(doc: RichNode) {
-  const layout = previewPageLayout(doc);
+function createMeasurement(doc: RichNode, wordBox?:PrintBox) {
+  const layout = wordBox?wordPreviewGeometry(doc,wordBox):previewPageLayout(doc);
   const css = [layout.widthMm, layout.heightMm, layout.topMm, layout.bottomMm, layout.leftMm, layout.rightMm]
     .map((value, index) => `--preview-${['width', 'height', 'top', 'bottom', 'left', 'right'][index]}:${value}mm`).join(';') + `;--preview-font-size:${layout.fontSizePt}pt`;
   const scratch = document.createElement('article');
-  scratch.className = 'export-preview-paper preview-measure';
+  scratch.className = 'export-preview-paper preview-measure'+(wordBox?' word-reference-preview':'');
   scratch.style.cssText = css;
   const measure = document.createElement('div');
   measure.className = 'report-content';
@@ -21,6 +22,7 @@ function createMeasurement(doc: RichNode) {
   document.body.append(scratch);
   const footerProbe = document.createElement('div');
   footerProbe.className = 'preview-word-footer';
+  if(wordBox)footerProbe.style.fontFamily=layout.fontFamily;
   footerProbe.textContent = DISCLAIMER_TEXT;
   footerProbe.append(document.createElement('div'), document.createElement('div'));
   footerProbe.children[0].textContent = EQUIPMENT_TEXT;
@@ -46,22 +48,24 @@ export function measurePrintBox(doc: RichNode): PrintBox {
 }
 
 /** Calibrate only the break calculation, without moving paper margins or footer. */
-export function measurePreviewCapacity(doc:RichNode) {
-  const box=createMeasurement(doc);
+export function measurePreviewCapacity(doc:RichNode,wordBox?:PrintBox) {
+  const box=createMeasurement(doc,wordBox);
   try {
     const probe=document.createElement('p');probe.textContent='Аа';
     const line=typeof doc.attrs?.lineHeight==='number'&&doc.attrs.lineHeight>0?doc.attrs.lineHeight:1.05;
     probe.style.cssText=`margin:0;padding:0;font-family:${box.layout.fontFamily};font-size:${box.layout.fontSizePt}pt;line-height:${line}`;
     box.measure.append(probe);
+    if(wordBox)normalizeWordPreview(box.measure,doc);
     const lineHeight=probe.getBoundingClientRect().height/box.scale;
     const maximum=Math.max(box.contentHeight,Math.min((box.layout.heightMm-box.layout.topMm-box.layout.bottomMm)*96/25.4,(box.layout.heightMm-box.layout.topMm-6.5)*96/25.4-box.footerHeight-1));
     return capacity(box.contentHeight,maximum,lineHeight);
   } finally {box.scratch.remove();}
 }
 
-export function paginateBrowserPreview(html: string, doc: RichNode, calibration?:PreviewCalibration): string {
+export function paginateBrowserPreview(html: string, doc: RichNode, calibration?:PreviewCalibration, wordBox?:PrintBox): string {
   const source = document.createElement('div');
   source.innerHTML = html;
+  if(wordBox)normalizeWordPreview(source,doc);
   const blocks: HTMLElement[] = [];
   const collect = (node: Element) => {
     if (node.matches('section[data-report-section]')) { [...node.children].forEach(collect); return; }
@@ -70,12 +74,12 @@ export function paginateBrowserPreview(html: string, doc: RichNode, calibration?
     blocks.push(node.cloneNode(true) as HTMLElement);
   };
   [...source.children].forEach(collect);
-  const adjusted=calibration?.enabled?calibratedCapacity(measurePreviewCapacity(doc),calibration):undefined;
-  const {scratch, measure, scale, layout, contentHeight:standardHeight, effectiveCss} = createMeasurement(doc);
+  const adjusted=calibration?.enabled?calibratedCapacity(measurePreviewCapacity(doc,wordBox),calibration):undefined;
+  const {scratch, measure, scale, layout, contentHeight:standardHeight, effectiveCss} = createMeasurement(doc,wordBox);
   const contentHeight=adjusted?.height??standardHeight;
 
   const pages: HTMLElement[] = [];
-  const makePage = () => { const paper = document.createElement('article'); paper.className = 'export-preview-paper'; paper.style.cssText = effectiveCss; const content = document.createElement('div'); content.className = 'report-content'; content.style.fontFamily = layout.fontFamily; paper.append(content); pages.push(paper); return content; };
+  const makePage = () => { const paper = document.createElement('article'); paper.className = 'export-preview-paper'+(wordBox?' word-reference-preview':''); paper.style.cssText = effectiveCss; const content = document.createElement('div'); content.className = 'report-content'; content.style.fontFamily = layout.fontFamily; paper.append(content); pages.push(paper); return content; };
   let target = makePage();
   const measuredHeight = () => {
     const top = measure.getBoundingClientRect().top;
@@ -89,6 +93,15 @@ export function paginateBrowserPreview(html: string, doc: RichNode, calibration?
     if(!withinWidth())throw new Error('Объект превышает ширину печатной области; текст не уменьшен и не обрезан.');
     if (measuredHeight() > contentHeight) throw new Error('Неделимый блок превышает высоту страницы. Текст не уменьшен и не обрезан. Разделите строку таблицы или уменьшите графический объект.');
     target.append(node);
+  };
+  const lineCount=(part:HTMLElement)=>{
+    measure.append(part);const range=document.createRange();range.selectNodeContents(part);
+    const rows:{top:number;bottom:number}[]=[];
+    for(const rect of [...range.getClientRects()].filter(r=>r.width>.1&&r.height>.1).sort((a,b)=>a.top-b.top)){
+      const row=rows.find(row=>Math.min(row.bottom,rect.bottom)-Math.max(row.top,rect.top)>Math.min(row.bottom-row.top,rect.height)*.5);
+      if(row){row.top=Math.min(row.top,rect.top);row.bottom=Math.max(row.bottom,rect.bottom);}else rows.push({top:rect.top,bottom:rect.bottom});
+    }
+    part.remove();return rows.length;
   };
   const paragraphPart = (original: HTMLElement, start: number, end: number, total: number): HTMLElement => {
     const part = original.cloneNode(false) as HTMLElement;
@@ -145,6 +158,19 @@ export function paginateBrowserPreview(html: string, doc: RichNode, calibration?
             if (fits(part)) { selected = middle; low = middle + 1; } else high = middle - 1;
           }
           if (selected < 0 && target.children.length) { target = makePage(); measure.replaceChildren(); continue; }
+          if(wordBox&&selected>=0&&candidates[selected]<text.length){
+            let headLines=lineCount(paragraphPart(block,start,candidates[selected],text.length));
+            // Match Word widowControl: do not strand one visual line on either page.
+            if(headLines<2&&target.children.length){target=makePage();measure.replaceChildren();continue;}
+            if(lineCount(paragraphPart(block,candidates[selected],text.length,text.length))<2){
+              const wanted=headLines-1;let lo=0,hi=selected,best=-1;
+              while(lo<=hi){const mid=(lo+hi)>>1;
+                if(lineCount(paragraphPart(block,start,candidates[mid],text.length))<=wanted){best=mid;lo=mid+1;}else hi=mid-1;
+              }
+              if(best>=0&&lineCount(paragraphPart(block,start,candidates[best],text.length))>=2)selected=best;
+              else if(target.children.length){target=makePage();measure.replaceChildren();continue;}
+            }
+          }
           const end = candidates[Math.max(0, selected)];
           append(paragraphPart(block, start, end, text.length));
           start = end;
@@ -157,6 +183,7 @@ export function paginateBrowserPreview(html: string, doc: RichNode, calibration?
   const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
   return pages.map((paper, index) => {
     const footer = document.createElement('div'); footer.className = 'preview-word-footer';
+    if(wordBox)footer.style.fontFamily=layout.fontFamily;
     footer.innerHTML = `<div>${escape(DISCLAIMER_TEXT)}</div><div><em>${escape(EQUIPMENT_TEXT)}</em></div><div class="preview-word-page-number">${index + 1}</div>`;
     paper.append(footer);
     return `<div class="preview-page" style="width:${layout.widthMm}mm"><span class="preview-page-number">Страница ${index + 1}</span>${paper.outerHTML}</div>`;
