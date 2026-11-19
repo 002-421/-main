@@ -78,6 +78,18 @@ try{
   const result=await page.locator('.word-reference-preview .report-content').allTextContents();assert.equal(result.join('').replace(/\s/gu,''),plain(source).replace(/\s/gu,''));
   assert.ok(await page.locator('.word-reference-preview').evaluateAll(papers=>papers.every(paper=>{const footer=paper.querySelector('.preview-word-footer').getBoundingClientRect();return [...paper.querySelector('.report-content').querySelectorAll('*')].every(n=>n.getBoundingClientRect().bottom<footer.top);})), 'no footer overlap');
  }
+ stage='physician settings after a rejected preview layout';await load(doc);
+ const prior=await page.evaluate(k=>localStorage.getItem(k),calKey),priorText=await page.locator('#editor .report-content').innerText();
+ // Simulate the same safe layout rejection seen with real Windows fonts. Only
+ // detached Word-preview measurements change; editor/export geometry is intact.
+ await page.evaluate(()=>{const original=Element.prototype.getBoundingClientRect;window.__restorePreviewMeasurement=()=>{Element.prototype.getBoundingClientRect=original;};Element.prototype.getBoundingClientRect=function(){const r=original.call(this);return this.matches('.word-reference-preview .report-content')&&this.children.length?new DOMRect(r.x,r.y,r.width,r.height+2000):r;};});
+ await page.locator('#settings').click();await page.locator('#settings-calibration-status').filter({hasText:'Калибровка недоступна:'}).waitFor();
+ await page.locator('#doctor-name').fill('Синтетический новый врач');await page.locator('#apply-doctor-now').check();
+ assert.equal(await page.locator('#xrs-emergency').count(),0,'a rejected preview must not stop autosave or block physician settings');
+ assert.match(await page.locator('#settings-calibration-status').innerText(),/Калибровка недоступна:.*Неделимый блок/);
+ assert.equal(await page.locator('#editor .report-content').innerText(),priorText);assert.equal(await page.evaluate(k=>localStorage.getItem(k),calKey),prior);
+ await page.evaluate(()=>window.__restorePreviewMeasurement());await page.locator('.dialog>footer [data-close]').click();await open();await close();
+ console.log('PASS: rejected preview remains an explicit local warning; physician name/checkbox work, no fatal screen, original text/calibration survive and preview recovers.');
  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);console.log('PASS: real measured line splits, no widows/orphans, no repeated first-indent, every character and physician preserved, footer clear; Word rendering remains unverified.');
  await writeFile(`${output}/word-preview-geometry.json`,JSON.stringify(details,null,2));
 }catch(error){await writeFile(`${output}/word-preview-geometry-failure.json`,JSON.stringify({stage,error:error.stack,...details},null,2));await page?.screenshot({path:`${output}/word-preview-geometry-failure.png`,fullPage:true}).catch(()=>{});console.log(`::error title=Word preview geometry::${(stage+': '+error.message).replaceAll('%','%25').replaceAll('\n','%0A')}`);throw error;}

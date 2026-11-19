@@ -801,9 +801,14 @@ async function settingsCalibration(d:HTMLElement){
   const root=d.querySelector<HTMLElement>('#settings-preview-calibration')!,status=d.querySelector<HTMLElement>('#settings-calibration-status')!;
   const refresh=()=>{
    if(!d.isConnected)return;
-   const name=(d.querySelector('#doctor-name') as HTMLInputElement).value,format=doctorFormats?.get(name);
-   const update=()=>{const result=calibratedPreview(plan,format?doctorCalibration(format):{version:1,enabled:false,offset:0,lastTarget:null});const fragment=document.createElement('div');fragment.innerHTML=result.html;status.textContent=result.warning||`Для текущего протокола: ${fragment.querySelectorAll('.preview-page').length} страниц предпросмотра. Калибровка сохраняется сразу.`;};
-   mountDoctorCalibration(root,plan,format,update,()=>{if(name.trim()!==settings.doctor.trim()){toast('Сначала сохраните выбор врача в настройках.');return;}closeDialog();void previewReport();});update();
+   // A settings input event runs after this async function has returned. Keep
+   // preview-only layout failures inside the settings UI, including subsequent
+   // physician changes; the surrounding initialization catch cannot catch them.
+   try {
+    const name=(d.querySelector('#doctor-name') as HTMLInputElement).value,format=doctorFormats?.get(name);
+    const update=()=>{const result=calibratedPreview(plan,format?doctorCalibration(format):{version:1,enabled:false,offset:0,lastTarget:null});const fragment=document.createElement('div');fragment.innerHTML=result.html;status.textContent=result.warning||`Для текущего протокола: ${fragment.querySelectorAll('.preview-page').length} страниц предпросмотра. Калибровка сохраняется сразу.`;};
+    mountDoctorCalibration(root,plan,format,update,()=>{if(name.trim()!==settings.doctor.trim()){toast('Сначала сохраните выбор врача в настройках.');return;}closeDialog();void previewReport();});update();
+   }catch(error){root.replaceChildren();status.textContent=`Калибровка недоступна: ${(error as Error).message}`;}
   };
   d.querySelector('#doctor-name')!.addEventListener('input',refresh);d.querySelector('#saved-doctor-choice')!.addEventListener('change',()=>queueMicrotask(refresh));d.querySelector('#delete-saved-doctor')!.addEventListener('click',()=>queueMicrotask(refresh));refresh();
  }catch(error){if(d.isConnected)d.querySelector('#settings-preview-calibration')!.textContent=`Калибровка недоступна: ${(error as Error).message}`;}
