@@ -247,9 +247,16 @@ try{
  assert.match(clip.text,/Тестовый Пациент/);assert.match(clip.html,/Arial/);
  const pdfPath=path.join(output,'v3-native.pdf');
  await application.evaluate(({dialog},filePath)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath});},pdfPath);
- await page.locator('#save-menu-toggle').click();await page.locator('#export-pdf').click();assert.equal(await page.locator('#preview-save-word').count(),0,'PDF menu selection stays on the PDF export path');await page.locator('#preview-save-pdf').waitFor();const expectedPdfPages=await page.locator('.preview-page').count();await page.locator('#preview-save-pdf').click();if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
+ await page.locator('#save-menu-toggle').click();await page.locator('#export-pdf').click();assert.equal(await page.locator('#preview-save-word').count(),0,'PDF menu selection stays on the PDF export path');await page.locator('#preview-save-pdf').waitFor();const wordPreviewPages=await page.locator('.preview-page').count();assert.ok(wordPreviewPages>0);assert.equal(await page.locator('.word-reference-preview').count(),wordPreviewPages,'Word preview renders successfully before PDF export');
+ const declaredPlan=Number((await page.locator('.preview-note').first().innerText()).match(/печатной раскладки Word\/PDF: (\d+)/)?.[1]);assert.ok(Number.isInteger(declaredPlan)&&declaredPlan>0);
+ // Word-reference geometry/calibration is intentionally separate from PDF.
+ // Capture the actual export-only DOM before the native PDF IPC, rather than
+ // comparing the unchanged PDF to the independently paginated Word preview.
+ await page.evaluate(()=>{window.__nativePdfPages=null;const observer=new MutationObserver(()=>{const host=document.querySelector('.export-only-editor');if(host){window.__nativePdfPages=host.querySelectorAll('.preview-page').length;observer.disconnect();}});observer.observe(document.querySelector('#editor'),{childList:true,subtree:true});});
+ await page.locator('#preview-save-pdf').click();if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
  await page.getByRole('status').filter({hasText:'PDF сохранён'}).waitFor({timeout:30000});
- const pdfBytes=await readFile(pdfPath);assert.equal(pdfBytes.subarray(0,5).toString(),'%PDF-');assert.equal((pdfBytes.toString('latin1').match(/\/Type\s*\/Page\b/g)||[]).length,expectedPdfPages,'actual Electron PDF page count matches preview');
+ const expectedPdfPages=await page.evaluate(()=>window.__nativePdfPages);assert.ok(Number.isInteger(expectedPdfPages)&&expectedPdfPages>0,'actual PDF input layout was captured');assert.equal(expectedPdfPages,declaredPlan,'PDF input uses the declared unchanged print plan');
+ const pdfBytes=await readFile(pdfPath);assert.equal(pdfBytes.subarray(0,5).toString(),'%PDF-');assert.equal((pdfBytes.toString('latin1').match(/\/Type\s*\/Page\b/g)||[]).length,expectedPdfPages,'actual Electron PDF page count matches its export input');
  console.log('PASS: formatted clipboard and actual desktop PDF export.');
 
  await page.locator('#edit-template').click();

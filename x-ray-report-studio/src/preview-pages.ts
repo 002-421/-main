@@ -139,7 +139,7 @@ export function paginateBrowserPreview(html: string, doc: RichNode, calibration?
       }
       // The Word exporter preserves explicit page breaks and keep-with-next.
       if (block.hasAttribute('data-page-break-before') && target.children.length) { target = makePage(); measure.replaceChildren(); }
-      if (!fits(block.cloneNode(true) as HTMLElement) && target.children.length && block.tagName !== 'P') {
+      if (!fits(block.cloneNode(true) as HTMLElement) && target.children.length && (block.tagName !== 'P' || Boolean(wordBox && (!(block.textContent??'').length || block.querySelector('img'))))) {
         const previous:HTMLElement[]=[];
         let preceding=target.lastElementChild;
         while(preceding?.matches('[data-keep-next="true"],h1,h2,h3')){previous.unshift(preceding as HTMLElement);preceding=preceding.previousElementSibling;}
