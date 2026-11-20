@@ -129,7 +129,11 @@ try{
  assert.ok(await page.locator('[data-template-field]').count()>=4);
  assert.match(await page.locator('.report-content').innerText(),/22,1, после 60 лет 22,6-26,0/);
  assert.match(await page.locator('.report-content').innerText(),/справа 0,0 см, слева 0,0 см/);
- assert.ok(await page.locator('#line-height').count(),'line spacing control is visible');assert.equal(await page.locator('[data-align="justify"]').textContent(),'По ширине');
+ assert.ok(await page.locator('#line-height').isVisible(),'line spacing control is visible');
+ assert.ok(await page.getByRole('button',{name:'Линия',exact:true}).isVisible(),'the formatting toolbar offers a manual rule');
+ assert.equal(await page.locator('[data-align="justify"]').count(),0,'justification is no longer a toolbar command');
+ const descriptionAlignment=await page.locator('.report-content p').filter({hasText:'максимальная размерами'}).first().evaluate(p=>getComputedStyle(p).textAlign);
+ assert.equal(descriptionAlignment,'justify','the built-in report still justifies description paragraphs');
  await captureStartupDom();
  const yellowZero=await waitForYellowZero(),initialYellowZeros=(await yellowZeroSummary()).filter(mark=>mark.text.startsWith('0,0'));console.log('Initial visible yellow zero fields:',JSON.stringify(initialYellowZeros));assert.ok(initialYellowZeros.length>0,'the initial template contains a visible yellow 0,0 placeholder');
  await yellowZero.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.setStart(el.firstChild,1);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.insertText('1,2');
