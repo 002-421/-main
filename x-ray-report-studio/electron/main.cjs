@@ -1,13 +1,32 @@
 const { app, BrowserWindow, ipcMain, dialog, clipboard, ClipboardItem, session, shell } = require('electron');
 const path = require('node:path');
+const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
 const https = require('node:https');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { installUpdateArchive } = require('./update-install.cjs');
-const { activateRendererUpdate, isUsableRenderer } = require('./live-update.cjs');
+const { pathToFileURL, fileURLToPath } = require('node:url');
+const { installUpdateArchive, verifySha256, writeShortcutAtomically } = require('./update-install.cjs');
+const { activateRendererUpdate, isUsableRenderer, smokeTestInstalledApp } = require('./live-update.cjs');
+const { createUserDataBackup } = require('./user-data-backup.cjs');
+const { CURRENT_DATA_SCHEMA, readJson, writeJsonAtomic, ensureDataSchema, canRollback } = require('./install-state.cjs');
+const { isUpdateAvailable } = require('./update-version.cjs');
+const { sanitizeUpdateLogEvent, sanitizeStartupLogEvent } = require('./log-safety.cjs');
 const { summarizeFrame } = require('./startup-diagnostics.cjs');
 const UPDATE_MANIFEST = 'https://raw.githubusercontent.com/002-421/-main/codex/mri-report-studio/x-ray-report-studio/downloads/latest.json';
+const TEST_KIT_MARKER = path.join(process.resourcesPath, 'app', 'xrs-test-mode.json');
+let TEST_KIT_ROOT = '';
+let INVALID_TEST_KIT_LAUNCH = false;
+if (app.isPackaged && fsSync.existsSync(TEST_KIT_MARKER)) {
+  try {
+    const marker = JSON.parse(fsSync.readFileSync(TEST_KIT_MARKER, 'utf8'));
+    const requestedRoot = process.env.XRS_TEST_ROOT ?? '';
+    if (marker.format === 'xrs-isolated-test-kit' && marker.allowLocalUpdateFiles === true) {
+      if (path.isAbsolute(requestedRoot)) TEST_KIT_ROOT = path.resolve(requestedRoot);
+      else INVALID_TEST_KIT_LAUNCH = true;
+    }
+  } catch { INVALID_TEST_KIT_LAUNCH = true; }
+}
 
 // Some Windows display drivers show a blank Electron surface despite the page
 // loading successfully. This text editor is small enough to render in software.
@@ -16,7 +35,11 @@ app.commandLine.appendSwitch('disable-gpu-compositing');
 app.commandLine.appendSwitch('disable-features', 'DirectComposition');
 
 // Keep the existing profile path so the rename preserves drafts and settings.
-if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
+if (TEST_KIT_ROOT) {
+  app.setPath('appData', path.join(TEST_KIT_ROOT, 'AppData'));
+  if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(TEST_KIT_ROOT, 'Profile'));
+  app.setPath('sessionData', path.join(app.getPath('userData'), 'Session Data'));
+} else if (!INVALID_TEST_KIT_LAUNCH && !app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
 app.setName('X-ray Report Studio');
 let mainWindow;
 let rendererUnresponsive = false;
@@ -28,7 +51,9 @@ let startupFailureDialogOpen = false;
 let startupRecoveryAttempted = false;
 const sharedDictionaryDir = process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR
   ? path.resolve(process.env.MRI_REPORT_STUDIO_DICTIONARY_DIR)
-  : path.join(process.env.PUBLIC || path.dirname(app.getPath('appData')), 'Documents', 'MRI Report Studio');
+  : TEST_KIT_ROOT
+    ? path.join(TEST_KIT_ROOT, 'Shared Dictionary')
+    : path.join(process.env.PUBLIC || path.dirname(app.getPath('appData')), 'Documents', 'MRI Report Studio');
 const sharedDictionaryFile = path.join(sharedDictionaryDir, 'dictionary.json');
 const personalDictionaryFile = path.join(app.getPath('userData'), 'dictionary.json');
 let dictionaryQueue = Promise.resolve();
@@ -37,6 +62,12 @@ let latestUpdateLogPath = '';
 let activeApplicationVersion = app.getVersion();
 let pendingRendererReady;
 let liveUpdateInProgress = false;
+let activeApplicationRoot = path.dirname(process.execPath);
+let installStateFile = '';
+let dataSchemaFile = '';
+let startupInstallState = null;
+let currentDataState = null;
+let pendingFirstLaunch = false;
 
 function waitForRendererReady(timeoutMs = 20000) {
   rendererReady = false;
@@ -53,14 +84,21 @@ function waitForRendererReady(timeoutMs = 20000) {
 
 function logStartup(event) {
   if (!startupLogFile) return startupLogQueue;
-  startupLogQueue = startupLogQueue.then(() => fs.appendFile(startupLogFile, `${JSON.stringify({ time: new Date().toISOString(), ...event })}\n`, 'utf8')).catch(() => {});
+  const safe = sanitizeStartupLogEvent(event);
+  startupLogQueue = startupLogQueue.then(() => fs.appendFile(startupLogFile, `${JSON.stringify({ time: new Date().toISOString(), ...safe })}\n`, 'utf8')).catch(() => {});
   return startupLogQueue;
 }
 
 async function showStartupFailure(message) {
   if (startupFailureDialogOpen || !mainWindow || mainWindow.isDestroyed()) return;
   startupFailureDialogOpen = true;
-  await logStartup({ event: 'startup-failure', message, logFile: startupLogFile });
+  const reverted = await restoreShortcutAfterFailedFirstLaunch();
+  if (reverted && startupInstallState?.previous?.executable) {
+    app.relaunch({ execPath: startupInstallState.previous.executable, args: [`--user-data-dir=${app.getPath('userData')}`] });
+    app.exit(0);
+    return;
+  }
+  await logStartup({ event: 'startup-failure' });
   try {
     const result = await dialog.showMessageBox(mainWindow, {
       type: 'error', title: 'X-ray Report Studio', message,
@@ -125,11 +163,76 @@ async function createUpdateLogger() {
   latestUpdateLogPath = filename;
   let queue = Promise.resolve();
   const log = entry => {
-    queue = queue.then(() => fs.appendFile(filename, `${JSON.stringify({ time: new Date().toISOString(), ...entry })}\n`, 'utf8')).catch(() => {});
+    const safe = sanitizeUpdateLogEvent(entry);
+    queue = queue.then(() => fs.appendFile(filename, `${JSON.stringify({ time: new Date().toISOString(), ...safe })}\n`, 'utf8')).catch(() => {});
     return queue;
   };
   await log({ event: 'log-start', applicationVersion: app.getVersion(), platform: process.platform });
   return { filename, log };
+}
+
+function backupRoot() { return path.join(app.getPath('appData'), 'X-ray Report Studio Backups'); }
+function shortcutLocation() { return TEST_KIT_ROOT ? path.join(TEST_KIT_ROOT, 'Shortcuts', 'X-ray Report Studio.lnk') : path.join(app.getPath('desktop'), 'X-ray Report Studio.lnk'); }
+async function pointShortcutTo(executable, root) {
+  const icon = path.join(root, 'resources', 'app', 'dist', 'x-ray-report-studio.ico');
+  await fs.mkdir(path.dirname(shortcutLocation()), { recursive: true });
+  await writeShortcutAtomically({
+    shortcutPath: shortcutLocation(), target: executable, cwd: root, icon,
+    writeShortcutLink: (filename, options) => shell.writeShortcutLink(filename, 'create', options),
+  });
+}
+
+async function restoreShortcutAfterFailedFirstLaunch() {
+  if (!pendingFirstLaunch || !startupInstallState?.previous?.executable) return false;
+  const previous = startupInstallState.previous;
+  if (!(await fs.stat(previous.executable).catch(() => null))) return false;
+  try {
+    await pointShortcutTo(previous.executable, previous.root);
+    startupInstallState = { ...startupInstallState, status: 'startup-reverted', failedAt: new Date().toISOString() };
+    await writeJsonAtomic(installStateFile, startupInstallState);
+    pendingFirstLaunch = false;
+    await logStartup({ event: 'update-first-start-reverted' });
+    return true;
+  } catch (error) {
+    await logStartup({ event: 'update-first-start-revert-failed', errorCode: String(error.code ?? 'shortcut-error') });
+    return false;
+  }
+}
+
+async function markCurrentInstallHealthy() {
+  if (!pendingFirstLaunch || !startupInstallState) return;
+  startupInstallState = { ...startupInstallState, status: 'stable', launchAttempts: 0, healthyAt: new Date().toISOString() };
+  await writeJsonAtomic(installStateFile, startupInstallState);
+  pendingFirstLaunch = false;
+  await logStartup({ event: 'update-first-start-confirmed', version: startupInstallState.current.version });
+}
+
+async function initializeInstallState() {
+  installStateFile = path.join(app.getPath('userData'), 'install-state.json');
+  dataSchemaFile = path.join(app.getPath('userData'), 'data-schema.json');
+  currentDataState = await ensureDataSchema(dataSchemaFile, CURRENT_DATA_SCHEMA);
+  startupInstallState = await readJson(installStateFile, null);
+  activeApplicationRoot = path.dirname(process.execPath);
+  const current = startupInstallState?.current;
+  if (startupInstallState?.status !== 'pending-first-start' || !current || path.resolve(current.root) !== path.resolve(activeApplicationRoot)) return;
+  pendingFirstLaunch = true;
+  if (Number(startupInstallState.launchAttempts) >= 1) {
+    const restored = await restoreShortcutAfterFailedFirstLaunch();
+    if (restored && startupInstallState?.previous?.executable) {
+      app.relaunch({ execPath: startupInstallState.previous.executable, args: [`--user-data-dir=${app.getPath('userData')}`] });
+      app.exit(0);
+      return;
+    }
+    if (!restored) {
+      startupInstallState = { ...startupInstallState, status: 'startup-revert-required' };
+      await writeJsonAtomic(installStateFile, startupInstallState);
+    }
+    pendingFirstLaunch = false;
+    return;
+  }
+  startupInstallState = { ...startupInstallState, launchAttempts: 1, lastLaunchAt: new Date().toISOString() };
+  pendingFirstLaunch = true;
+  await writeJsonAtomic(installStateFile, startupInstallState);
 }
 
 async function openLatestUpdateLog() {
@@ -148,6 +251,28 @@ async function openLatestUpdateLog() {
   if (error) throw new Error(`Не удалось открыть журнал: ${error}`);
 }
 
+async function getRollbackStatus() {
+  try {
+    const state = await readJson(installStateFile, null);
+    const data = await ensureDataSchema(dataSchemaFile, CURRENT_DATA_SCHEMA);
+    if (state?.status !== 'stable') return { available: false, reason: 'Для текущей установки ещё не подтверждён первый успешный запуск.' };
+    const result = canRollback({ installState: state, dataState: data, currentRoot: activeApplicationRoot });
+    if (!result.available) return result;
+    if (!(await fs.stat(result.previousExecutable).catch(() => null))) return { available: false, reason: 'Файлы предыдущей версии не найдены.' };
+    return { available: true, currentVersion: result.currentVersion, previousVersion: result.previousVersion };
+  } catch {
+    return { available: false, reason: 'Не удалось подтвердить совместимость формата пользовательских данных.' };
+  }
+}
+
+async function createVerifiedUserDataBackup() {
+  session.defaultSession.flushStorageData();
+  return createUserDataBackup({
+    userDataDir: app.getPath('userData'), sharedDictionaryFile,
+    backupRoot: backupRoot(), allowedBackupRoot: app.getPath('appData'), forbiddenRoots: [activeApplicationRoot], version: activeApplicationVersion,
+  });
+}
+
 async function renderPdf() {
   mainWindow.setBackgroundColor('#ffffff');
   try {
@@ -161,7 +286,19 @@ async function renderPdf() {
   } finally { mainWindow.setBackgroundColor('#eef1f5'); }
 }
 
-function downloadBuffer(url, limit, redirects = 0, onProgress = () => {}) {
+async function downloadBuffer(url, limit, redirects = 0, onProgress = () => {}) {
+  const testTarget = new URL(url);
+  if (TEST_KIT_ROOT && testTarget.protocol === 'file:') {
+    const filename = path.resolve(fileURLToPath(testTarget));
+    const updatesRoot = await fs.realpath(path.join(TEST_KIT_ROOT, 'Updates'));
+    const realFilename = await fs.realpath(filename);
+    const relative = path.relative(updatesRoot, realFilename);
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('Недопустимый путь к локальному тестовому обновлению.');
+    const bytes = await fs.readFile(realFilename);
+    if (bytes.length > limit) throw new Error('Файл обновления больше допустимого размера.');
+    onProgress({ loaded: bytes.length, total: bytes.length, percent: 100 });
+    return bytes;
+  }
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error('Слишком много перенаправлений при загрузке обновления.'));
     const target = new URL(url);
@@ -181,29 +318,48 @@ function downloadBuffer(url, limit, redirects = 0, onProgress = () => {}) {
     request.on('error', reject);
   });
 }
-function compareVersions(left, right) {
-  const a=String(left).split('.').map(Number), b=String(right).split('.').map(Number);
-  for(let i=0;i<Math.max(a.length,b.length);i++){const delta=(a[i]||0)-(b[i]||0);if(delta)return delta;}
-  return 0;
-}
 async function getUpdateManifest() {
-  const manifestUrl = new URL(UPDATE_MANIFEST);
-  manifestUrl.searchParams.set('check', `${Date.now()}-${crypto.randomUUID()}`);
-  const bytes=await downloadBuffer(manifestUrl.toString(), 32_000);
+  let bytes;
+  if (TEST_KIT_ROOT) {
+    bytes = await fs.readFile(path.join(TEST_KIT_ROOT, 'Updates', 'latest.json'));
+  } else {
+    const manifestUrl = new URL(UPDATE_MANIFEST);
+    manifestUrl.searchParams.set('check', `${Date.now()}-${crypto.randomUUID()}`);
+    bytes = await downloadBuffer(manifestUrl.toString(), 32_000);
+  }
   let manifest; try { manifest=JSON.parse(bytes.toString('utf8')); } catch { throw new Error('Файл обновлений повреждён.'); }
   if (!manifest || typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.version)
-      || typeof manifest.url !== 'string' || typeof manifest.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(manifest.sha256)) throw new Error('Файл обновлений содержит некорректные данные.');
-  const artifact=new URL(manifest.url);
-  if (artifact.protocol!=='https:' || !['raw.githubusercontent.com','github.com'].includes(artifact.hostname) || !artifact.pathname.endsWith('/downloads/X-ray_Report_Studio_Windows_Setup.zip')) throw new Error('Недопустимая ссылка на установочный файл.');
-  return { version: manifest.version, currentVersion: activeApplicationVersion, url: manifest.url, sha256: manifest.sha256.toLowerCase(), available: compareVersions(manifest.version, activeApplicationVersion) > 0 };
+      || typeof manifest.url !== 'string' || typeof manifest.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(manifest.sha256)
+      || (manifest.notes !== undefined && (typeof manifest.notes !== 'string' || manifest.notes.length > 10000))) throw new Error('Файл обновлений содержит некорректные данные.');
+  let artifactUrl = manifest.url;
+  if (TEST_KIT_ROOT) {
+    if (typeof manifest.url !== 'string' || path.basename(manifest.url) !== manifest.url || !/^XRS_Test_Update_\d+\.\d+\.\d+\.zip$/.test(manifest.url)) throw new Error('Недопустимый файл локального тестового обновления.');
+    artifactUrl = pathToFileURL(path.join(TEST_KIT_ROOT, 'Updates', manifest.url)).toString();
+  } else {
+    const artifact=new URL(manifest.url);
+    if (artifact.protocol!=='https:' || !['raw.githubusercontent.com','github.com'].includes(artifact.hostname) || !artifact.pathname.endsWith('/downloads/X-ray_Report_Studio_Windows_Setup.zip')) throw new Error('Недопустимая ссылка на установочный файл.');
+  }
+  return { version: manifest.version, currentVersion: activeApplicationVersion, url: artifactUrl, sha256: manifest.sha256.toLowerCase(), notes: manifest.notes ?? '', available: isUpdateAvailable(manifest.version, activeApplicationVersion) };
 }
 
 app.whenReady().then(async () => {
+  if (INVALID_TEST_KIT_LAUNCH) {
+    dialog.showErrorBox('XRS-05 test kit', 'Запустите эту тестовую копию через Run-Test-App.cmd. Профиль и рабочий ярлык не были открыты.');
+    app.quit();
+    return;
+  }
   const exportSettingsFile = path.join(app.getPath('userData'), 'export-folders.json');
   let lastWordDirectory = '';
   try { const saved = JSON.parse(await fs.readFile(exportSettingsFile, 'utf8')); if (typeof saved.word === 'string' && path.isAbsolute(saved.word)) lastWordDirectory = saved.word; } catch {}
 
   startupLogFile = path.join(app.getPath('userData'), 'logs', `startup-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
+  try { await initializeInstallState(); }
+  catch { currentDataState = { schemaVersion: 0 }; startupInstallState = null; await logStartup({ event: 'install-metadata-unavailable' }); }
+  if (currentDataState?.schemaVersion !== CURRENT_DATA_SCHEMA) {
+    await dialog.showMessageBox({ type: 'error', title: 'X-ray Report Studio', message: 'Эта версия приложения несовместима с форматом сохранённых данных.', detail: 'Данные оставлены без изменений. Запустите приложение через ярлык последней рабочей версии.' });
+    app.quit();
+    return;
+  }
   void fs.mkdir(path.dirname(startupLogFile), { recursive: true }).then(() => logStartup({ event: 'app-start', version: app.getVersion(), platform: process.platform, hardwareAcceleration: false, gpuCompositing: false, directComposition: false, executable: process.execPath, resources: process.resourcesPath }));
   ipcMain.on('app:ready', (event, details) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) return;
@@ -236,7 +392,15 @@ app.whenReady().then(async () => {
         const frame = await mainWindow.webContents.capturePage();
         const summary = summarizeFrame(frame);
         await logStartup({ event: 'startup-frame', ...summary });
-        if (!liveUpdateInProgress && !isUsableRenderer(details, summary)) {
+        const usable = isUsableRenderer(details, summary);
+        const smokeResult = process.env.XRS_SMOKE_TEST_RESULT;
+        if (smokeResult && path.resolve(smokeResult).startsWith(`${path.resolve(os.tmpdir())}${path.sep}`) && path.basename(smokeResult) === 'ready.json') {
+          await fs.writeFile(smokeResult, JSON.stringify({ ready: usable, version: app.getVersion() }), { flag: 'wx' }).catch(() => {});
+          app.quit();
+          return;
+        }
+        if (usable && !liveUpdateInProgress) await markCurrentInstallHealthy().catch(() => {});
+        if (!liveUpdateInProgress && !usable) {
           if (!startupRecoveryAttempted) {
             startupRecoveryAttempted = true;
             rendererReady = false;
@@ -288,13 +452,13 @@ app.whenReady().then(async () => {
   startupWatchdog = setTimeout(() => { if (!rendererReady) void showStartupFailure('Интерфейс не запустился за 30 секунд.'); }, 30000);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
-  mainWindow.webContents.on('did-finish-load', () => { void logStartup({ event: 'page-finished-loading', url: mainWindow.webContents.getURL() }); });
+  mainWindow.webContents.on('did-finish-load', () => { void logStartup({ event: 'page-finished-loading' }); });
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
-    void logStartup({ event: 'page-load-failed', errorCode, errorDescription, validatedURL, isMainFrame });
+    void logStartup({ event: 'page-load-failed', errorCode, isMainFrame });
     if (isMainFrame && errorCode !== -3 && !liveUpdateInProgress) void showStartupFailure(`Не удалось загрузить интерфейс приложения (${errorCode}).`);
   });
   mainWindow.webContents.on('console-message', (_event, details) => {
-    if (details?.level >= 2) void logStartup({ event: 'renderer-console-error', level: details.level, message: details.message, line: details.lineNumber, source: details.sourceId });
+    if (details?.level >= 2) void logStartup({ event: 'renderer-console-error', level: details.level, line: details.lineNumber });
   });
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     void logStartup({ event: 'renderer-process-gone', details });
@@ -308,6 +472,10 @@ app.whenReady().then(async () => {
   });
   mainWindow.webContents.on('responsive', () => { rendererUnresponsive = false; });
   mainWindow.on('close', event => {
+    if (updateInstalling) {
+      event.preventDefault();
+      return;
+    }
     if (rendererUnresponsive) {
       event.preventDefault();
       mainWindow.destroy();
@@ -346,21 +514,55 @@ app.whenReady().then(async () => {
     requireMain(event);
     return openLatestUpdateLog();
   });
-  ipcMain.handle('updates:install', async (event, force = false) => {
+  ipcMain.handle('updates:rollback-info', async event => {
+    requireMain(event);
+    return getRollbackStatus();
+  });
+  ipcMain.handle('updates:open-backups', async event => {
+    requireMain(event);
+    await fs.mkdir(backupRoot(), { recursive: true });
+    const error = await shell.openPath(backupRoot());
+    if (error) throw new Error(`Не удалось открыть папку резервных копий: ${error}`);
+  });
+  ipcMain.handle('updates:rollback', async event => {
+    requireMain(event);
+    if (process.platform !== 'win32') throw new Error('Мягкий откат ярлыка поддерживается в Windows-версии приложения.');
+    if (updateInstalling) throw new Error('Обновление или откат уже выполняется.');
+    updateInstalling = true;
+    let state, previous, current;
+    try {
+    const info = await getRollbackStatus();
+    if (!info.available) throw new Error(info.reason);
+    state = await readJson(installStateFile, null);
+    const backup = await createVerifiedUserDataBackup();
+    previous = state.previous; current = state.current;
+      await pointShortcutTo(previous.executable, previous.root);
+      await writeJsonAtomic(installStateFile, { ...state, status: 'pending-first-start', launchAttempts: 0, current: previous, previous: current, lastRollbackAt: new Date().toISOString() });
+      app.relaunch({ execPath: previous.executable, args: [`--user-data-dir=${app.getPath('userData')}`] });
+      app.exit(0);
+      return { starting: true, backupFiles: backup.files };
+    } catch (error) {
+      if (current?.executable && current?.root) await pointShortcutTo(current.executable, current.root).catch(() => {});
+      if (state) await writeJsonAtomic(installStateFile, state).catch(() => {});
+      throw error;
+    } finally { updateInstalling = false; }
+  });
+  ipcMain.handle('updates:install', async event => {
     requireMain(event);
     if (updateInstalling) throw new Error('Установка обновления уже запущена.');
     if (process.platform !== 'win32') throw new Error('Автообновление установщика поддерживается в Windows-версии приложения.');
-    if (typeof force !== 'boolean') throw new Error('Некорректный режим установки обновления.');
-    const update=await getUpdateManifest();
-    if (!update.available && !force) return { available:false };
-    const { filename: logFile, log } = await createUpdateLogger();
-    await log({ event: 'update-requested', currentVersion: app.getVersion(), targetVersion: update.version, archiveUrl: update.url });
+    updateInstalling = true;
+    let logFile = '', log = async () => {};
     const sendProgress = progress => { if (!event.sender.isDestroyed()) event.sender.send('updates:progress', progress); };
     let file = '';
     let archiveBytes = 0;
     try {
+      const update=await getUpdateManifest();
+      if (!update.available) return { available:false };
+      ({ filename: logFile, log } = await createUpdateLogger());
+      await log({ event: 'update-requested', currentVersion: activeApplicationVersion, targetVersion: update.version });
       sendProgress({stage:'downloading',loaded:0,total:0,percent:0});
-      await log({ event: 'download-start', url: update.url });
+      await log({ event: 'download-start' });
       let lastLoggedPercent = -10;
       const archive=await downloadBuffer(update.url, 250_000_000, 0, progress => {
         sendProgress({stage:'downloading',...progress});
@@ -374,31 +576,33 @@ app.whenReady().then(async () => {
       sendProgress({stage:'verifying',loaded:archive.length,total:archive.length,percent:100});
       const checksum=crypto.createHash('sha256').update(archive).digest('hex');
       await log({ event: 'checksum-check', expected: update.sha256, actual: checksum });
-      if(checksum!==update.sha256) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
+      if(!verifySha256(archive,update.sha256)) throw new Error('Контрольная сумма обновления не совпала. Установка остановлена.');
       await log({ event: 'checksum-verified' });
       file=path.join(os.tmpdir(),`X-ray_Report_Studio_${update.version}_${crypto.randomUUID()}.zip`);
       await fs.writeFile(file,archive,{flag:'wx'});
       sendProgress({stage:'installing',loaded:archive.length,total:archive.length,percent:100});
+      currentDataState = await ensureDataSchema(dataSchemaFile, CURRENT_DATA_SCHEMA);
+      const userBackup=await createVerifiedUserDataBackup();
+      await log({ event: 'user-data-backup-verified', bytes: userBackup.bytes, files: userBackup.files });
+      const previousRoot=activeApplicationRoot,previousVersion=activeApplicationVersion;
+      const previousState=await readJson(installStateFile,null);
+      if (previousState && (previousState.status !== 'stable' || !previousState.current || path.resolve(previousState.current.root) !== path.resolve(previousRoot)))
+        throw new Error('Текущая установка не подтверждена как стабильная. Обновление отменено.');
+      const previousDataSchema = previousState?.current?.dataSchemaVersion ?? CURRENT_DATA_SCHEMA;
+      const previousExecutable=path.join(previousRoot,'X-ray Report Studio.exe');
       const installed = await installUpdateArchive({
         archive: file,
-        currentRoot: path.dirname(process.execPath),
+        currentRoot: previousRoot,
         version: update.version,
         log,
-        writeShortcut: async (target, cwd, icon) => {
-          const shortcut = path.join(app.getPath('desktop'), 'X-ray Report Studio.lnk');
-          const options = { target, cwd, icon, description: 'X-ray Report Studio' };
-          const written = shell.writeShortcutLink(shortcut, 'replace', options)
-            || shell.writeShortcutLink(shortcut, 'create', options);
-          if (!written) throw new Error('Не удалось обновить ярлык приложения на рабочем столе.');
-          await fs.unlink(path.join(app.getPath('desktop'), 'MRI Report Studio.lnk')).catch(() => {});
-        },
       });
-      await log({ event: 'update-files-ready', root: installed.root, targetVersion: update.version });
-      const previousApplicationVersion = activeApplicationVersion;
+      const smoke=await smokeTestInstalledApp({executable:installed.executable});
+      if(smoke.version!==update.version)throw new Error('Проверка первого запуска сообщила неожиданную версию.');
+      await log({ event: 'new-version-smoke-test-passed', targetVersion: update.version });
       activeApplicationVersion = update.version;
       rendererReady = false;
       liveUpdateInProgress = true;
-      const previousIndex = path.join(__dirname, '..', 'dist', 'index.html');
+      const previousIndex = path.join(previousRoot, 'resources', 'app', 'dist', 'index.html');
       const installedIndex = path.join(installed.root, 'resources', 'app', 'dist', 'index.html');
       try {
         await activateRendererUpdate({
@@ -407,32 +611,37 @@ app.whenReady().then(async () => {
           previousIndex,
           waitForReady: waitForRendererReady,
         });
+        const nextState={
+          status:'pending-first-start',launchAttempts:0,installedAt:new Date().toISOString(),
+          current:{version:update.version,root:installed.root,executable:installed.executable,dataSchemaVersion:CURRENT_DATA_SCHEMA},
+          previous:{version:previousVersion,root:previousRoot,executable:previousExecutable,dataSchemaVersion:previousDataSchema},
+        };
+        await writeJsonAtomic(installStateFile,nextState);
+        await pointShortcutTo(installed.executable,installed.root);
+        startupInstallState=nextState;
+        activeApplicationRoot=installed.root;
+        liveUpdateInProgress = false;
+        await log({ event: 'shortcut-committed', targetVersion:update.version });
       } catch (activationError) {
         liveUpdateInProgress = false;
-        activeApplicationVersion = previousApplicationVersion;
-        const oldExecutable = process.execPath;
-        const oldRoot = path.dirname(oldExecutable);
-        const oldIcon = path.join(oldRoot, 'resources', 'app', 'dist', 'x-ray-report-studio.ico');
-        const oldShortcut = path.join(app.getPath('desktop'), 'X-ray Report Studio.lnk');
-        const oldShortcutOptions = { target: oldExecutable, cwd: oldRoot, icon: oldIcon, description: 'X-ray Report Studio' };
-        const shortcutRestored = shell.writeShortcutLink(oldShortcut, 'replace', oldShortcutOptions)
-          || shell.writeShortcutLink(oldShortcut, 'create', oldShortcutOptions);
+        activeApplicationVersion = previousVersion;
+        activeApplicationRoot = previousRoot;
+        await writeJsonAtomic(installStateFile,startupInstallState??{status:'stable'}).catch(()=>{});
+        await activateRendererUpdate({loadFile:filename=>mainWindow.loadFile(filename),installedIndex:previousIndex,previousIndex,waitForReady:waitForRendererReady}).catch(()=>{});
+        const shortcutRestored = await pointShortcutTo(previousExecutable,previousRoot).then(()=>true,()=>false);
         await mainWindow.webContents.executeJavaScript(`(()=>{const label=document.querySelector('#application-version');if(label)label.textContent=${JSON.stringify(activeApplicationVersion)}})()`).catch(() => {});
-        await log({ event: 'live-renderer-update-failed', message: activationError.message, rollbackError: activationError.rollbackError?.message });
-        await log({ event: 'shortcut-rollback', restored: shortcutRestored, target: oldExecutable });
+        await log({ event: 'update-switch-failed', restored: shortcutRestored });
         if (!rendererReady) void showStartupFailure('Не удалось загрузить новую и предыдущую версии интерфейса.');
-        throw new Error(`Файлы установлены, но новый интерфейс не запустился. Открыта предыдущая версия. ${activationError.message}`);
+        throw activationError;
       }
-      liveUpdateInProgress = false;
-      await log({ event: 'live-renderer-update-complete', targetVersion: update.version });
+      await log({ event: 'update-switch-complete', targetVersion: update.version });
     } catch (error) {
-      await log({ event: 'update-error', message: error.message, stack: error.stack, logFile });
+      await log({ event: 'update-error' });
       sendProgress({stage:'error',loaded:0,total:0,percent:0,message:error.message,logFile});
-      throw new Error(`${error.message} Журнал обновления: ${logFile}`);
-    } finally { if (file) await fs.unlink(file).catch(() => {}); }
-    updateInstalling=false;
+      throw new Error(logFile?`${error.message} Журнал обновления: ${logFile}`:error.message);
+    } finally { if (file) await fs.unlink(file).catch(() => {}); updateInstalling=false; }
     sendProgress({stage:'installed',loaded:archiveBytes,total:archiveBytes,percent:100});
-    return { available:true, installing:false, version:update.version };
+    return { available:true, installing:false, version:activeApplicationVersion };
   });
   ipcMain.handle('report:copy', async (event, html, text) => {
     requireMain(event);
