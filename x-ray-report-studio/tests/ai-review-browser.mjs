@@ -60,6 +60,10 @@ try {
   assert.equal(await page.locator('.ai-review-card').count(),0,'switching tabs closes the review menu');
   await page.locator('.report-tab-select').first().click();
   await marks.first().waitFor();
+  assert.equal(await page.locator('.statusbar button,.statusbar details').count(),0,'bottom status line has no review controls');
+  assert.equal(await page.locator('#ai-review-tools-menu').isVisible(),false,'review menu stays closed while editing');
+  await page.locator('#ai-review-tools-toggle').click();
+  assert.equal(await page.locator('#ai-review-tools-menu [data-ai-category]').count(),6,'all six local categories remain available');
   await page.locator('.ai-review-panel summary').click();
   const panelIssue=page.locator('.ai-review-finding').first();
   await panelIssue.focus();await page.keyboard.press('Enter');
@@ -138,6 +142,31 @@ try {
   await page.keyboard.press('Delete');assert.equal(await page.locator('.ai-review-card').count(),0,'Delete edits without opening a popup');
   await page.keyboard.press('Control+z');
   assert.equal(await page.locator('[data-ai-category]').count(),6);
+  for(const theme of ['light','dark'])for(const size of [{width:1400,height:900},{width:640,height:480}]){
+    await page.setViewportSize(size);await page.evaluate(value=>document.documentElement.dataset.theme=value,theme);
+    await page.locator('#ai-review-tools-toggle').click();
+    const menu=await page.locator('#ai-review-tools-menu').evaluate(node=>{const r=node.getBoundingClientRect(),s=getComputedStyle(node);return{left:r.left,right:r.right,top:r.top,bottom:r.bottom,color:s.color,background:s.backgroundColor};});
+    assert.ok(menu.left>=0&&menu.right<=size.width+1&&menu.top>=0&&menu.bottom<=size.height+1,`${theme}: AI Review menu stays within viewport ${JSON.stringify(menu)}`);
+    assert.notEqual(menu.color,menu.background,`${theme}: review menu text remains visible`);
+    assert.equal(await page.locator('.statusbar button,.statusbar details').count(),0);
+    await page.locator('#ai-review-tools-toggle').click();
+  }
+  await page.setViewportSize({width:1400,height:900});await page.locator('#ai-review-tools-toggle').click();await page.locator('.ai-review-category-settings summary').click();
+  const styleCategory=page.locator('[data-ai-category="style"]');await styleCategory.uncheck();
+  assert.ok(!(await page.evaluate(()=>JSON.parse(localStorage.getItem('xrs.ai-review.categories.v1')||'[]'))).includes('style'));
+  await page.reload();await page.locator('#ai-review-tools-toggle').click();await page.locator('.ai-review-category-settings summary').click();
+  assert.equal(await page.locator('[data-ai-category="style"]').isChecked(),false,'category choice persists after restart');
+  await page.locator('[data-ai-category="style"]').check();
+  const sourceDoc=await page.evaluate(()=>{const workspace=JSON.parse(localStorage.getItem('mri-report-studio.workspace.v1'));return workspace.reports.find(report=>report.id===workspace.activeId).doc;});
+  const flatDoc=structuredClone(sourceDoc);flatDoc.content=flatDoc.content.flatMap(node=>node.type==='reportSection'?node.content: [node]);
+  const flat=await browser.newPage();flat.on('request',request=>{if(!request.url().startsWith(`http://127.0.0.1:${server.address().port}/`))external.push(request.url());});await flat.addInitScript(doc=>{localStorage.setItem('mri-report-studio.workspace.v1',JSON.stringify({activeId:'synthetic-flat',reports:[{id:'synthetic-flat',templateId:'head-gm',doc,dirty:false}]}));},flatDoc);
+  await flat.goto(`http://127.0.0.1:${server.address().port}`);
+  await flat.locator('#ai-review-status').filter({hasText:'Необходимо уточнить границы'}).waitFor({timeout:15000});
+  const flatBefore=await flat.locator('#editor .report-content').innerText();
+  await flat.locator('#ai-review-tools-toggle').click();assert.equal(await flat.locator('#ai-migrate-open').isVisible(),true,'flat report exposes manual boundaries from the upper AI Review menu');
+  await flat.locator('#ai-migrate-open').click();assert.equal(await flat.locator('[role=dialog] h2').innerText(),'Границы AI Review');
+  await flat.locator('[role=dialog] [data-close]').first().click();assert.equal(await flat.locator('#editor .report-content').innerText(),flatBefore,'cancelling manual boundaries preserves the flat report');
+  assert.equal(await flat.locator('.statusbar button,.statusbar details').count(),0);await flat.close();
   assert.deepEqual(external,[]);
   console.log('PASS: automatic all-category contextual review and card, local-only review, rejection, workspace isolation and no network requests.');
 } finally { await browser?.close(); await new Promise(resolve=>server.close(resolve)); }

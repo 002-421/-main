@@ -29,7 +29,7 @@ try{
  const doc=makeTemplateDocument('head-gm');doc.attrs={...doc.attrs,marginLeftMm:23.3,marginRightMm:19.1};doc.content=[
   p('Plain '+sentence.repeat(3)),p('Left '+sentence.repeat(3),{leftIndentPt:28.35,rightIndentPt:14.2}),p('First '+sentence.repeat(3),{firstLineIndentPt:28.35}),
   p('Mixed '+sentence,{fontSizePt:14,lineHeight:1.3,spaceBeforePt:12,spaceAfterPt:12}),
-  {type:'paragraph',content:[{type:'text',text:'Inherited '+sentence.repeat(2)}]},p('ЗАКЛЮЧЕНИЕ: синтетический результат.'),p('Врач: Синтетический. Дата: 01.01.2000')];
+  {type:'paragraph',content:[{type:'text',text:'Inherited '+sentence.repeat(2)}]},{type:'paragraph',attrs:{fontFamily:'Arial',fontSizePt:11,lineHeight:1.05,spaceAfterPt:5},content:[{type:'text',text:'ЗАКЛЮЧЕНИЕ: '+sentence.repeat(4),marks:[{type:'bold'}]},{type:'text',text:' Рекомендация: синтетический контроль.'}]},p('Врач: Синтетический. Дата: 01.01.2000')];
  stage='actual DOCX vs screen geometry in mm';await load(doc);const savedCalibration=await page.evaluate(k=>localStorage.getItem(k),calKey);await open();
  const geometry=await page.locator('.word-reference-preview').first().evaluate(paper=>{
   const px=25.4/96,body=paper.querySelector('.report-content'),s=getComputedStyle(paper),b=body.getBoundingClientRect(),r=paper.getBoundingClientRect();
@@ -47,7 +47,20 @@ try{
   assert.match(spacing,/w:lineRule="atLeast"/);assert.ok(Math.abs(actual.line-millimetres(spacing,'line')*72/25.4)<.03,prefix+'line minimum follows OOXML');
   assert.ok(Math.abs(actual.before-millimetres(spacing,'before')*72/25.4)<.03);assert.ok(Math.abs(actual.after-millimetres(spacing,'after')*72/25.4)<.03);
  }
- details.geometry=geometry;console.log('PASS: actual downloaded DOCX and visible preview match A4/margins/useful width/left-right-first indents, spacing and line minimum in mm/pt.');
+ await open();
+ const boldPreview=await page.locator('.word-reference-preview p').filter({hasText:'ЗАКЛЮЧЕНИЕ:'}).first().evaluate(paragraph=>{
+  const marked=paragraph.querySelector('strong'),weight=marked?Number.parseInt(getComputedStyle(marked).fontWeight,10):0;
+  const rows=new Map();const walker=document.createTreeWalker(paragraph,NodeFilter.SHOW_TEXT);
+  while(walker.nextNode()){const node=walker.currentNode;for(let i=0;i<node.textContent.length;i++){const range=document.createRange();range.setStart(node,i);range.setEnd(node,i+1);const rect=range.getBoundingClientRect();if(!rect.width)continue;const key=Math.round(rect.top);rows.set(key,(rows.get(key)||'')+node.textContent[i]);}}
+  return{weight,font:getComputedStyle(marked).fontFamily,size:getComputedStyle(marked).fontSize,lines:[...rows.values()].map(line=>line.trim().split(/\s+/).at(-1))};
+ });
+ const conclusionXml=paragraphs.find(p=>p.includes('>ЗАКЛЮЧЕНИЕ:'));
+ assert.ok(conclusionXml&&/<w:b\b[^>]*\/?\s*>/.test(conclusionXml),'DOCX marks the conclusion run bold');
+ assert.ok(boldPreview.weight>=600&&boldPreview.lines.length>=2,'preview uses bold Arial and wraps the long conclusion');
+ assert.ok(boldPreview.font.includes('Arial')&&Math.abs(parseFloat(boldPreview.size)*.75-11)<.02,'preview conclusion font and size match the OOXML run');
+ assert.ok(conclusionXml.includes('w:sz')&&conclusionXml.includes('w:val="22"'),'DOCX conclusion uses 11 pt runs');
+ details.boldConclusion=boldPreview;await close();
+ details.geometry=geometry;console.log('PASS: actual DOCX and preview match A4/margins/indents, spacing, 11 pt Arial and bold conclusion; measured line endings recorded (real Word unavailable).');
  stage='calibration preservation and responsive theme UI';await open();
  for(const theme of ['light','dark'])for(const viewport of [{width:1500,height:1000},{width:900,height:600},{width:640,height:480}]){
   await page.setViewportSize(viewport);await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
@@ -83,10 +96,10 @@ try{
  // Simulate the same safe layout rejection seen with real Windows fonts. Only
  // detached Word-preview measurements change; editor/export geometry is intact.
  await page.evaluate(()=>{const original=Element.prototype.getBoundingClientRect;window.__restorePreviewMeasurement=()=>{Element.prototype.getBoundingClientRect=original;};Element.prototype.getBoundingClientRect=function(){const r=original.call(this);return this.matches('.word-reference-preview .report-content')&&this.children.length?new DOMRect(r.x,r.y,r.width,r.height+2000):r;};});
- await page.locator('#settings').click();await page.locator('#settings-calibration-status').filter({hasText:'Калибровка недоступна:'}).waitFor();
+ await page.locator('#settings').click();await page.locator('#settings-preview-calibration,#settings-calibration-status').filter({hasText:'Калибровка недоступна:'}).first().waitFor();
  await page.locator('#doctor-name').fill('Синтетический новый врач');await page.locator('#apply-doctor-now').check();
  assert.equal(await page.locator('#xrs-emergency').count(),0,'a rejected preview must not stop autosave or block physician settings');
- assert.match(await page.locator('#settings-calibration-status').innerText(),/Калибровка недоступна:.*Неделимый блок/);
+ assert.match(await page.locator('#settings-preview-calibration,#settings-calibration-status').filter({hasText:'Калибровка недоступна:'}).first().innerText(),/Калибровка недоступна:.*Неделимый блок/);
  assert.equal(await page.locator('#editor .report-content').innerText(),priorText);assert.equal(await page.evaluate(k=>localStorage.getItem(k),calKey),prior);
  await page.evaluate(()=>window.__restorePreviewMeasurement());await page.locator('.dialog>footer [data-close]').click();await open();await close();
  console.log('PASS: rejected preview remains an explicit local warning; physician name/checkbox work, no fatal screen, original text/calibration survive and preview recovers.');

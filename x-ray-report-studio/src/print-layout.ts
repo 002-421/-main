@@ -32,7 +32,10 @@ export function printVariants(input:RichNode,optimize:boolean):PrintVariant[]{
 export function choosePrintLayout(input:RichNode,optimize:boolean,render:(doc:RichNode)=>{html:string;previewSourceHtml?:string;metrics:LayoutMetrics;box?:PrintBox}):PrintPlan{
  const plans:PrintPlan[]=[];const failures:string[]=[];
  for(const v of printVariants(input,optimize)){try{const result=render(v.document);if(result.metrics.safe&&content(v.document).replace(/\s/gu,'')===content(input).replace(/\s/gu,''))plans.push({...v,...result,wordRendering:'unverified'});}catch(error){failures.push((error as Error).message);}}
- plans.sort((a,b)=>a.metrics.pages-b.metrics.pages||Number(b.metrics.descriptionOnConclusion)-Number(a.metrics.descriptionOnConclusion)||Math.abs(a.delta)-Math.abs(b.delta)||a.spacing-b.spacing||b.delta-a.delta);
+ // A shorter plan is not useful when it separates the conclusion from the
+ // last part of the description. The renderer measures this on actual pages,
+ // after long paragraphs and tables have been split.
+ plans.sort((a,b)=>Number(b.metrics.descriptionOnConclusion)-Number(a.metrics.descriptionOnConclusion)||a.metrics.pages-b.metrics.pages||Math.abs(a.delta)-Math.abs(b.delta)||a.spacing-b.spacing||b.delta-a.delta);
  if(!plans.length)throw new PrintLayoutError('Не найдена безопасная печатная раскладка. '+(failures[0]??'Объект перекрывает область печати.'));
  return plans[0];
 }

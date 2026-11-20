@@ -18,6 +18,7 @@ function createMeasurement(doc: RichNode, wordBox?:PrintBox) {
   const measure = document.createElement('div');
   measure.className = 'report-content';
   measure.style.fontFamily = layout.fontFamily;
+  if(wordBox)measure.style.lineHeight=String(Number(doc.attrs?.lineHeight)||1.05);
   scratch.append(measure);
   document.body.append(scratch);
   const footerProbe = document.createElement('div');
@@ -79,7 +80,7 @@ export function paginateBrowserPreview(html: string, doc: RichNode, calibration?
   const contentHeight=adjusted?.height??standardHeight;
 
   const pages: HTMLElement[] = [];
-  const makePage = () => { const paper = document.createElement('article'); paper.className = 'export-preview-paper'+(wordBox?' word-reference-preview':''); paper.style.cssText = effectiveCss; const content = document.createElement('div'); content.className = 'report-content'; content.style.fontFamily = layout.fontFamily; paper.append(content); pages.push(paper); return content; };
+  const makePage = () => { const paper = document.createElement('article'); paper.className = 'export-preview-paper'+(wordBox?' word-reference-preview':''); paper.style.cssText = effectiveCss; const content = document.createElement('div'); content.className = 'report-content'; content.style.fontFamily = layout.fontFamily; if(wordBox)content.style.lineHeight=String(Number(doc.attrs?.lineHeight)||1.05); paper.append(content); pages.push(paper); return content; };
   let target = makePage();
   const measuredHeight = () => {
     const top = measure.getBoundingClientRect().top;
