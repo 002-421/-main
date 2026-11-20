@@ -53,7 +53,15 @@ jobs:
           }
       - run: npm run build
       - name: Targeted Stable updater tests
+        id: updater-tests
         run: node --test tests/update-channel.test.mjs tests/update-version.test.mjs tests/update-install.test.mjs tests/install-state.test.mjs tests/update-settings.test.mjs tests/user-data-backup.test.mjs tests/log-safety.test.mjs tests/windows-integration.test.mjs
+      - name: Preserve Windows file lock diagnostics after a test failure
+        if: failure() && steps.updater-tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-stable-lock-diagnostics-${{ github.run_id }}
+          path: x-ray-report-studio/test-output/windows-backup-lock/
+          if-no-files-found: ignore
       - name: Package and verify Windows Setup ZIP
         shell: pwsh
         env:

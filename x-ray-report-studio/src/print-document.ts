@@ -1,6 +1,15 @@
 import { previewPageLayout } from './page-geometry.ts';
 import type { RichNode } from './model';
 const text = (n: RichNode): string => n.text ?? (n.content ?? []).map(text).join('');
+function compactManualRuleNeighbors(nodes: RichNode[]) {
+ for (let i = 0; i < nodes.length; i++) {
+  const node = nodes[i];
+  if (node.type === 'paragraph' || node.type === 'heading') {
+   if (nodes[i - 1]?.type === 'horizontalRule' && nodes[i - 1]?.attrs?.manual) node.attrs = {...node.attrs, spaceBeforePt: 0};
+   if (nodes[i + 1]?.type === 'horizontalRule' && nodes[i + 1]?.attrs?.manual) node.attrs = {...node.attrs, spaceAfterPt: 0};
+  }
+ }
+}
 /** Print-only copy. Preserve text, explicit fonts and the editor's saved document. */
 export type PrintBox = {width:number;height:number;imageHeight?:number};
 export function preparePrintDocument(input: RichNode, box?: PrintBox): RichNode {
@@ -10,6 +19,11 @@ export function preparePrintDocument(input: RichNode, box?: PrintBox): RichNode 
  const images=(n:RichNode)=>{if(n.type==='image'&&typeof n.attrs?.width==='number'&&typeof n.attrs?.height==='number'){const ratio=Math.min(1,maxWidth/n.attrs.width,maxHeight/n.attrs.height);if(ratio<1)n.attrs={...n.attrs,width:n.attrs.width*ratio,height:n.attrs.height*ratio};}n.content?.forEach(images);};images(doc);
  const flatten=(nodes:RichNode[]):RichNode[]=>nodes.flatMap(n=>n.type==='reportSection'?flatten(n.content??[]):[n]);
  const nodes=flatten(doc.content??[]);
+ const compactRules = (children: RichNode[]) => {
+  compactManualRuleNeighbors(children);
+  for (const child of children) if (child.content) compactRules(child.content);
+ };
+ compactRules(nodes);
  const conclusion=nodes.findIndex(n=>/^\s*ЗАКЛЮЧЕНИЕ\s*[.:]/iu.test(text(n)));
  if(conclusion>0){
   let previous=conclusion-1;

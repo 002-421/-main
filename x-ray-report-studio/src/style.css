@@ -155,3 +155,16 @@ html[data-theme=dark] .word-preview-dialog #preview-calibration-warning,html[dat
 [hidden]{display:none!important}
 .dialog-overlay:has(.word-preview-dialog){z-index:1300}
 .word-reference-preview .preview-word-footer{bottom:6.50875mm;line-height:.8333333333}
+
+
+/* The 2 pt gaps belong to the new rule. Adjacent paragraph margins must not
+   enlarge them. Legacy/template rules retain their original presentation. */
+.report-content hr[data-manual-rule] {
+  border: 0;
+  height: .5pt;
+  margin: 2pt 0;
+  background: #8c9cae;
+  print-color-adjust: exact;
+}
+#editor .report-content :is(p,h1,h2,h3):has(+ hr[data-manual-rule]) { margin-bottom: 0 !important; }
+#editor .report-content hr[data-manual-rule] + :is(p,h1,h2,h3):not([data-page-break-before=true]) { margin-top: 0 !important; }

@@ -342,7 +342,14 @@ function blocks(nodes: RichNode[], context: Context): (Paragraph | Table)[] {
     if (node.type === 'paragraph' || node.type === 'heading') return [paragraph(node, context)];
     if (node.type === 'table') return [table(node, context)];
     if (node.type === 'bulletList' || node.type === 'orderedList') return list(node, context);
-    if (node.type === 'horizontalRule') return [new Paragraph({ ...(node.attrs?.keepNext?{keepNext:true}:{}), border: { bottom: { style: BorderStyle.SINGLE, color: 'CDD6E2', size: 6 } }, spacing: { before: 100, after: 100 } })];
+    if (node.type === 'horizontalRule') {
+      const manual = node.attrs?.manual === true;
+      return [new Paragraph({
+        ...(node.attrs?.keepNext ? {keepNext: true} : {}),
+        border: {bottom: {style: BorderStyle.SINGLE, color: manual ? '8C9CAE' : 'CDD6E2', size: manual ? 4 : 6, ...(manual ? {space: 0} : {})}},
+        spacing: manual ? {before: 40, after: 40, line: 1, lineRule: LineRuleType.EXACT} : {before: 100, after: 100},
+      })];
+    }
     if (node.type === 'blockquote') return blocks(node.content ?? [], { ...context, indent: (context.indent ?? 0) + 360 });
     if (node.type === 'codeBlock') return [paragraph(node, { ...context, inherited: { ...context.inherited, font: 'Consolas' } })];
     if (node.type === 'text' || node.type === 'reportField' || node.type === 'hardBreak') return [paragraph({ type: 'paragraph', content: [node] }, context)];
@@ -462,7 +469,13 @@ function parseWordParagraph(node: XmlElement): RichNode {
       else if (item.name === 'w:br' || item.name === 'w:cr') content.push({ type: 'hardBreak' });
     }
   }
-  if (!content.length && first(props ?? node, 'w:pBdr')) return { type: 'horizontalRule' };
+  const border = first(props ?? node, 'w:pBdr');
+  if (!content.length && border) {
+    const bottom = first(border, 'w:bottom');
+    const manual = bottom?.attrs['w:color']?.toUpperCase() === '8C9CAE' && bottom.attrs['w:sz'] === '4' &&
+      spacing?.attrs['w:before'] === '40' && spacing.attrs['w:after'] === '40';
+    return {type: 'horizontalRule', ...(manual ? {attrs: {manual: true}} : {})};
+  }
   return { type: level ? 'heading' : 'paragraph', ...(Object.keys(attrs).length ? { attrs } : {}), content };
 }
 function parseWordTable(node: XmlElement): RichNode {

@@ -5,6 +5,7 @@ import {spawn} from 'node:child_process';
 
 if(process.platform!=='win32')throw new Error('This acceptance runner requires real Windows file sharing locks');
 const moduleReadiness=process.argv.includes('--module-readiness');
+const nativeLock=process.argv.includes('--native-lock');
 const output=path.resolve('test-output/windows-backup-lock');
 await fs.mkdir(output,{recursive:true});
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -94,7 +95,7 @@ if(moduleReadiness)await probeModuleReadiness();
 const a='^Windows backup does not skip a locked user data file;',b='^an open Windows LevelDB LOCK does not block a verified backup$';
 const file='tests/user-data-backup.test.mjs';
 const scenarios=[['locked user data file',['--test','--test-name-pattern='+a,file]],['open LevelDB LOCK',['--test','--test-name-pattern='+b,file]],...Array.from({length:3},(_,i)=>['both Windows locks repetition '+(i+1),['--test','--test-name-pattern='+a+'|'+b,file]]),['release updater suite (original parallel command)',['--test','tests/update-channel.test.mjs','tests/update-version.test.mjs','tests/update-install.test.mjs','tests/install-state.test.mjs','tests/update-settings.test.mjs','tests/user-data-backup.test.mjs','tests/log-safety.test.mjs','tests/windows-integration.test.mjs']]];
-if(moduleReadiness){
+if(moduleReadiness||nativeLock){
  const files=(await fs.readdir('tests')).filter(name=>name.endsWith('.test.mjs')).sort().map(name=>'tests/'+name);
  scenarios.push(['full unit suite (normal parallel npm test command)',['--test',...files]]);
 }else{
@@ -117,10 +118,10 @@ for(const [name,args] of scenarios){
  await fs.writeFile(path.join(output,'checks.log'),log);await fs.writeFile(path.join(output,'results.json'),JSON.stringify(results,null,2));
  if(result.code!==0){console.error('::error title=Windows backup lock acceptance::'+(result.stdout+result.stderr).slice(-12000).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A'));process.exitCode=1;break;}
 }
-const probes=moduleReadiness?[]:await Promise.all([probe('-Command',false),probe('-Command',false,true),probe('-EncodedCommand',false,true),probe('-Command',true,true),probe('-EncodedCommand',true,true)]);
+const probes=moduleReadiness||nativeLock?[]:await Promise.all([probe('-Command',false),probe('-Command',false,true),probe('-EncodedCommand',false,true),probe('-Command',true,true),probe('-EncodedCommand',true,true)]);
 await fs.writeFile(path.join(output,'legacy-transport.json'),JSON.stringify(probes,null,2));
 for(const p of probes){const message=JSON.stringify(p).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A');console.log('::warning title=PowerShell lock transport diagnosis::'+message);}
 
 if(process.env.GITHUB_STEP_SUMMARY)await fs.appendFile(process.env.GITHUB_STEP_SUMMARY,'\n## Real Windows backup lock acceptance\n\n```json\n'+JSON.stringify(results,null,2)+'\n```\n');
 
-if(moduleReadiness)console.log('::notice title=Windows lock acceptance results::'+JSON.stringify(results).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A'));
+if(moduleReadiness||nativeLock)console.log('::notice title=Windows lock acceptance results::'+JSON.stringify(results).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A'));

@@ -1,3 +1,4 @@
+import { isSpacingReference } from './paragraph-spacing.ts';
 import templates from './templates.json' with { type: 'json' };
 
 export type RichNode = {
@@ -343,6 +344,7 @@ export function validateTemplate(input: unknown): RichNode {
       if (['left', 'center', 'right', 'justify'].includes(a.align)) attrs.align = a.align;
     }
     if (['paragraph', 'heading'].includes(type) && ['left', 'center', 'right', 'justify'].includes(a.textAlign)) attrs.textAlign = a.textAlign;
+    if (type === 'horizontalRule' && a.manual === true) attrs.manual = true;
     if (type === 'paragraph' && a.moduleRef != null) attrs.moduleRef = id(a.moduleRef);
     if (['doc', 'paragraph', 'heading'].includes(type)) {
       if (a.fontFamily != null && /^[\p{L}\d\s,'"_-]+$/u.test(string(a.fontFamily, 200))) attrs.fontFamily = a.fontFamily;
@@ -352,6 +354,11 @@ export function validateTemplate(input: unknown): RichNode {
         attrs[key] = a[key];
       }
       for (const key of ['keepNext', 'pageBreakBefore']) if (typeof a[key] === 'boolean') attrs[key] = a[key];
+      if (['paragraph', 'heading'].includes(type) && a.spacingReference != null) {
+        if (!isSpacingReference(a.spacingReference)) return fail();
+        const {lineHeight, beforePt, afterPt} = a.spacingReference;
+        attrs.spacingReference = {lineHeight, beforePt, afterPt};
+      }
       if (a.templateOriginal != null) attrs.templateOriginal = string(a.templateOriginal, 100000);
       if (a.sourceFormat === 'alliance-template') attrs.sourceFormat = a.sourceFormat;
       if (['Title', 'Subtitle', 'Normal', 'Heading1', 'Heading2', 'Heading3'].includes(a.sourceStyle)) attrs.sourceStyle = a.sourceStyle;

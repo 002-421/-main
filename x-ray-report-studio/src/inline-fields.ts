@@ -276,7 +276,7 @@ export const SourceFormat = Extension.create({
   name: 'sourceFormat',
   addGlobalAttributes() {
     const attr = (defaultValue: unknown = null) => ({ default: defaultValue, renderHTML: () => ({}) });
-    const paragraphAttrs: Record<string, any> = { templateOriginal: attr(), sourceStyle: { default: null, renderHTML: (a: Record<string,any>) => a.sourceStyle ? { 'data-source-style':a.sourceStyle } : {} } };
+    const paragraphAttrs: Record<string, any> = { templateOriginal: attr(), spacingReference: attr(), sourceStyle: { default: null, renderHTML: (a: Record<string,any>) => a.sourceStyle ? { 'data-source-style':a.sourceStyle } : {} } };
     for (const [name, property, unit] of [
       ['fontFamily', 'font-family', ''], ['fontSizePt', 'font-size', 'pt'], ['spaceBeforePt', 'margin-top', 'pt'], ['spaceAfterPt', 'margin-bottom', 'pt'], ['lineHeight', 'line-height', ''], ['firstLineIndentPt', 'text-indent', 'pt'], ['leftIndentPt', 'margin-left', 'pt'], ['rightIndentPt', 'margin-right', 'pt'],
     ]) paragraphAttrs[name] = { default: null, renderHTML: (a: Record<string, any>) => a[name] != null ? { style: `${property}:${a[name]}${unit}` } : {} };

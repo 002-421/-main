@@ -61,6 +61,19 @@ const ModuleReference = Extension.create({
   },
 });
 
+const ManualReportRule = Extension.create({
+  name: 'manualReportRule',
+  addGlobalAttributes() {
+    return [{ types: ['horizontalRule'], attributes: {
+      manual: {
+        default: false,
+        parseHTML: element => element.hasAttribute('data-manual-rule'),
+        renderHTML: attrs => attrs.manual ? { 'data-manual-rule': '' } : {},
+      },
+    } }];
+  },
+});
+
 const ParagraphPresentation = Extension.create({
   name: 'paragraphPresentation',
   addGlobalAttributes() {
@@ -86,7 +99,7 @@ export function makeEditor(element: HTMLElement, content: RichNode, options: Rep
         link: { openOnClick: false, autolink: false, defaultProtocol: 'https' },
       }),
       TextStyleKit,
-      ParagraphPresentation,
+      ParagraphPresentation, ManualReportRule,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Highlight.configure({ multicolor: true }),
       Superscript,

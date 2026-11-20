@@ -3,7 +3,11 @@ import type { RichNode } from './model';
 /** Keep the two report boundaries visible in both the editor and exports. */
 export function addReportSeparators(input: RichNode): RichNode {
   const doc = structuredClone(input);
-  const raw = (doc.content ?? []).filter(node => node.type !== 'horizontalRule');
+  const blocks = doc.content ?? [];
+  // A report with a manual rule is already formatted. Preserve its legacy
+  // rules too so restoring it cannot silently replace a neighboring rule.
+  const raw = blocks.some(node => node.type === 'horizontalRule' && node.attrs?.manual)
+    ? blocks : blocks.filter(node => node.type !== 'horizontalRule');
   const content: RichNode[] = [];
   for (const node of raw) {
     if (node.type === 'paragraph' && !(node.content ?? []).some(child => child.type !== 'text' || child.text?.trim())) continue;
