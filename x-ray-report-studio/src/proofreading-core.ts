@@ -17,7 +17,8 @@ export type ProofIssue = {
 };
 
 export const MAX_PROOF_ISSUES = 200;
-const normalize = (word: string) => word.toLocaleLowerCase('ru-RU').replace(/ё/g, 'е');
+const dictionaryForm = (word: string) => word.normalize('NFC').replace(/[\u0300\u0301]/gu, '');
+const normalize = (word: string) => dictionaryForm(word).toLocaleLowerCase('ru-RU').replace(/ё/g, 'е');
 const pause = () => new Promise(resolve => setTimeout(resolve, 0));
 const abbreviation = (word: string) => word.length <= 6 && word === word.toLocaleUpperCase('ru-RU');
 
@@ -95,9 +96,11 @@ export function createRussianChecker(aff: string, dic: string, englishAff = '', 
       const parts = word.split(/[-‑]/u);
       return parts.length > 1 && parts.every(part => correct(part, english));
     };
-    for (const match of text.matchAll(/[А-Яа-яЁё]+(?:[-‑][А-Яа-яЁё]+)*/gu)) {
+    // A copied Russian word can include combining stress or decomposed й/ё.
+    // Normalize only the dictionary lookup; offsets and report text stay exact.
+    for (const match of text.matchAll(/(?:[А-Яа-яЁё][\u0300\u0301\u0306\u0308]*)+(?:[-‑](?:[А-Яа-яЁё][\u0300\u0301\u0306\u0308]*)+)*/gu)) {
       if (issues.length >= MAX_PROOF_ISSUES) break;
-      const word = match[0];
+      const word = dictionaryForm(match[0]);
       if (word.length < 3 || abbreviation(word) || personal.has(normalize(word)) || sourceMedicalForms.has(normalize(word))) continue;
       if (++examined % 24 === 0) { await pause(); signal?.throwIfAborted(); }
       let result = spellingCache.get(word);
@@ -115,11 +118,11 @@ export function createRussianChecker(aff: string, dic: string, englishAff = '', 
       }
       if (result.correct) continue;
       const start = match.index!;
-      const end = start + word.length;
+      const end = start + match[0].length;
       // An overlapping contextual grammar warning is more useful than a
       // second spelling warning for the same fragment.
       if (issues.some(issue => issue.start < end && issue.end > start)) continue;
-      issues.push({ id: `spelling.${start}.${end}`, start, end, text: word, kind: 'spelling', message: 'Слово не найдено в русском словаре. Проверьте написание или добавьте свой термин в словарь.', suggestions: result.suggestions });
+      issues.push({ id: `spelling.${start}.${end}`, start, end, text: match[0], kind: 'spelling', message: 'Слово не найдено в русском словаре. Проверьте написание или добавьте свой термин в словарь.', suggestions: result.suggestions });
     }
     if (latinSpell) for (const match of text.matchAll(/[A-Za-z]+(?:[-‑][A-Za-z]+)*/gu)) {
       if (issues.length >= MAX_PROOF_ISSUES) break;

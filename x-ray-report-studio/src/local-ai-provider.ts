@@ -5,11 +5,12 @@ import { medicalLexicon } from './medical-lexicon.ts';
 export type LocalChecker = (text: string, personalWords?: string[], signal?: AbortSignal) => Promise<ProofIssue[]>;
 
 const punctuationRules = new Set(['spaces', 'before-punctuation', 'after-punctuation', 'punctuation-repeat']);
-const sensitive = /(?:справа|слева|правосторонн\p{L}*|левосторонн\p{L}*|(?<!\p{L})не(?!\p{L})|выявлен\p{L}*|отсутств\p{L}*|\d+(?:[,.]\d+)?\s*(?:мм|см|мл)(?!\p{L})|\b(?:T1|T2|FLAIR|DWI|ADC|STIR|C[1-7]|Th(?:1[0-2]|[1-9])|L[1-5]|S1)\b)/iu;
+const sensitive = /(?:справа|слева|правосторонн\p{L}*|левосторонн\p{L}*|(?<!\p{L})не(?!\p{L})|выявлен\p{L}*|отсутств\p{L}*|(?:гипо|гипер|изо)(?:интенсивн|денсивн)\p{L}*|\d+(?:[,.]\d+)?\s*(?:мм|см|мл)(?!\p{L})|\b(?:T1|T2|FLAIR|DWI|ADC|STIR|C[1-7]|Th(?:1[0-2]|[1-9])|L[1-5]|S1)\b)/iu;
 const knownMedical = new Set<string>(medicalLexicon);
 
 function meaningSensitive(original: string, proposed: string): boolean {
-  return sensitive.test(`${original} ${proposed}`) || [original, proposed].some(word => knownMedical.has(word.toLocaleLowerCase('ru-RU')));
+  const text = `${original} ${proposed}`;
+  return sensitive.test(text) || Boolean(text.toLocaleLowerCase('ru-RU').match(/\p{L}+/gu)?.some(word => knownMedical.has(word)));
 }
 
 function convert(issue: ProofIssue, blockId: ReviewBlockId, text: string): Finding | null {
@@ -20,13 +21,13 @@ function convert(issue: ProofIssue, blockId: ReviewBlockId, text: string): Findi
   // Dictionary guesses and contextual grammar rules can change medical meaning.
   // A comment can show the candidate, but cannot be accepted as an edit.
   const context = text.slice(Math.max(0, issue.start - 18), Math.min(text.length, issue.end + 18));
-  // Even one Hunspell candidate is a spelling guess, not a medically verified
-  // replacement. Keep it visible, but require the physician to edit manually.
   const spacingOnly = ['spaces','before-punctuation','after-punctuation'].includes(rule)
     && issue.text.replace(/[\p{L}\p{N}]/gu,'')!==proposed.replace(/[\p{L}\p{N}]/gu,'')
     && issue.text.replace(/[^\p{L}\p{N}]/gu,'')===proposed.replace(/[^\p{L}\p{N}]/gu,'');
-  const risk = issue.kind === 'spelling' || (!spacingOnly && meaningSensitive(context, proposed)) || rule === 'repeat' || rule === 'punctuation-repeat' || rule === 'morph';
-  const operation = !risk && issue.suggestions.length && proposed !== issue.text ? (proposed ? 'replace' : 'delete') : 'comment';
+  const risk = (!spacingOnly && meaningSensitive(context, proposed)) || rule === 'repeat' || rule === 'punctuation-repeat' || rule === 'morph';
+  // Dictionary candidates remain comments until the physician chooses their
+  // own edit. Low confidence alone does not assert a clinical meaning change.
+  const operation = issue.kind !== 'spelling' && !risk && issue.suggestions.length && proposed !== issue.text ? (proposed ? 'replace' : 'delete') : 'comment';
   return {
     operation, blockId, original: issue.text, proposed,
     explanation: issue.message, category, priority: 'low',

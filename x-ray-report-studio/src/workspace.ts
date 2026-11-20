@@ -20,7 +20,8 @@ import packageInfo from '../package.json' with { type: 'json' };
 import { canRedoReport, canUndoReport, configureReportHistoryDepth, getReportHistory, REPORT_HISTORY_DEPTHS, restoreReportHistory, runReportHistoryCommand, sanitizeReportHistory, setDefaultReportHistoryDepth, type ReportHistoryDepth, type StoredReportHistory } from './report-history';
 import { EditorState, Selection } from '@tiptap/pm/state';
 import { ReviewEngine, TrackChangesEngine, LocalAIProvider, reviewCategories, categoryGroup, type ReviewCategory } from './ai-review';
-import { applyReviewSuggestion, isSafeReviewReplacement, resolveReviewRange } from './ai-review-editor';
+import { applyReviewSuggestion, isSafeReviewReplacement, resolveReviewRange, ReviewEditError } from './ai-review-editor';
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { setAiReviewDecorations } from './ai-review-decorations';
 import type { ReviewDecorationRange } from './ai-review-decorations';
 import { structurePreparedBuiltin } from './ai-review-structure';
@@ -456,6 +457,7 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
   let findings:import('./ai-review.ts').Suggestion[]=[];
   let reviewedBlocks:import('./ai-review.ts').ReviewBlocks|undefined;
   let reviewedReport='';
+  let reviewedDoc:ProseMirrorNode|undefined;
   let card:HTMLElement|undefined;
   let cardPositionHandler:(()=>void)|undefined;
   let cardResizeObserver:ResizeObserver|undefined;
@@ -485,7 +487,8 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
     closeCard();
     const ids=(target.dataset.aiReviewIds??'').split(',').filter(Boolean);
     const items=findings.filter(item=>ids.includes(item.id)&&item.state==='pending');
-    if(!items.length)return;
+    const blocks=reviewedBlocks,tabId=reviewedReport,checkedDocument=reviewedDoc;
+    if(!items.length||!blocks||!checkedDocument||tabId!==activeReportId)return;
     const pop=document.createElement('section');card=pop;pop.className='ai-review-card';pop.setAttribute('role','menu');pop.setAttribute('aria-label','Замечания AI Review');
     for(const item of items){
       const section=document.createElement('article');section.className='ai-review-card-item';
@@ -494,30 +497,61 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
       section.append(title,explanation);
       if(item.related){const related=document.createElement('p');related.textContent=`Связанный фрагмент: ${item.related}`;explanation.append(related);}
       const excerpt=document.createElement('small');excerpt.textContent=`Фрагмент: ${item.original||'позиция вставки'}`;explanation.append(excerpt);
-      if((item.operation==='delete'||item.proposed)&&isSafeReviewReplacement(item)){const replace=document.createElement('button');replace.className='btn small primary';replace.textContent=item.operation==='delete'?'Удалить лишний пробел':'Заменить';replace.onclick=()=>{
-        if(reviewedReport!==activeReportId||!reviewedBlocks){toast('Откройте документ, который проверяли.',true);return;}
-        try{applyReviewSuggestion(editor,item,reviewedBlocks,reviewedReport,activeReportId);tracks.markAccepted(reviewedReport,item.id);findings=[];reviewedBlocks=undefined;setAiReviewDecorations(editor,[]);closeCard();toast('Исправление применено.');}
-        catch{closeCard();toast('Текст изменился. Повторите проверку этого фрагмента.',true);}
-      };section.append(replace);}
+      const confirmation=document.createElement('div');
+      confirmation.hidden=true;
+      confirmation.className='ai-review-safety';
+      const apply=(spellingText?:string,medicalConfirmed=false)=>{
+        try{
+          if(tabId!==activeReportId)throw new ReviewEditError('wrong-document');
+          if(card!==pop||reviewedBlocks!==blocks||!findings.some(finding=>finding===item))throw new ReviewEditError('stale-text');
+          applyReviewSuggestion(editor,item,blocks,tabId,activeReportId,{checkedDocument,spellingText,medicalConfirmed});
+          tracks.markAccepted(tabId,item.id);
+          closeCard();
+          toast('Исправление применено.');
+        }catch(error){
+          if(error instanceof ReviewEditError&&error.code==='medical-confirmation'){
+            if(spellingText===undefined)return;
+            const warning=document.createElement('p');
+            warning.setAttribute('role','alert');
+            warning.textContent=error.message;
+            const comparison=document.createElement('p');
+            comparison.textContent=`«${item.original}» → «${spellingText}»`;
+            const confirm=document.createElement('button');confirm.type='button';confirm.className='btn small primary';
+            confirm.textContent='Подтвердить замену';confirm.onclick=()=>apply(spellingText,true);
+            const cancel=document.createElement('button');cancel.type='button';cancel.className='btn small';
+            cancel.textContent='Отмена';cancel.onclick=()=>{confirmation.hidden=true;confirmation.replaceChildren();section.querySelector('input')?.focus();};
+            confirmation.replaceChildren(warning,comparison,confirm,cancel);
+            confirmation.hidden=false;
+            cancel.focus();
+          }else{
+            if(error instanceof ReviewEditError&&error.code!=='invalid-operation'&&card===pop)closeCard();
+            toast(error instanceof ReviewEditError?error.message:'Не удалось применить исправление. Повторите проверку.',true);
+          }
+        }
+      };
+      if((item.operation==='delete'||item.proposed)&&isSafeReviewReplacement(item)){
+        const replace=document.createElement('button');replace.type='button';replace.className='btn small primary';
+        replace.textContent=item.operation==='delete'?'Удалить лишний пробел':'Заменить';replace.onclick=()=>apply();section.append(replace);
+      }
       if(item.category==='spelling'){
-        const input=document.createElement('input');input.placeholder='Заменить на...';input.setAttribute('aria-label','Заменить на...');input.value=item.candidates?.[0]??item.proposed;
-        const apply=document.createElement('button');apply.className='btn small';apply.textContent='Применить';
-        apply.onclick=()=>{if(!reviewedBlocks||reviewedReport!==activeReportId)return;const chosen={...item,operation:'replace' as const,proposed:input.value,meaningRisk:false,confidence:'high' as const};try{applyReviewSuggestion(editor,chosen,reviewedBlocks,reviewedReport,activeReportId);closeCard();}catch{toast('Изменение устарело или может затрагивать медицинский смысл. Исправьте текст вручную.',true);}};section.append(input,apply);
-      }
-      if(item.category==='spelling')for(const candidate of item.candidates??[]){
-        const chosen={...item,operation:'replace' as const,proposed:candidate,meaningRisk:false,confidence:'high' as const};
-        if(!isSafeReviewReplacement(chosen))continue;
-        const replace=document.createElement('button');replace.className='btn small';replace.textContent=candidate;
-        replace.onclick=()=>{if(reviewedReport!==activeReportId||!reviewedBlocks)return;try{applyReviewSuggestion(editor,chosen,reviewedBlocks,reviewedReport,activeReportId);tracks.markAccepted(reviewedReport,item.id);findings=[];reviewedBlocks=undefined;setAiReviewDecorations(editor,[]);closeCard();toast('Исправление применено.');}catch{closeCard();toast('Текст изменился. Повторите проверку.',true);}};
-        section.append(replace);
-      }
-      if(item.operation==='comment'||(item.operation!=='delete'&&!item.proposed)||!isSafeReviewReplacement(item)){
-        const assess=document.createElement('p');assess.className='ai-review-safety';assess.textContent=item.operation==='comment'?'Предупреждение для оценки врачом. Текст не изменяется.':'Предложение может затрагивать медицинский смысл. Исправьте вручную после проверки.';section.append(assess);
+        const input=document.createElement('input');input.placeholder='Заменить на...';input.setAttribute('aria-label','Заменить на...');
+        input.value=item.candidates?.[0]??item.proposed;
+        input.oninput=()=>{confirmation.hidden=true;confirmation.replaceChildren();};
+        const submit=document.createElement('button');submit.type='button';submit.className='btn small';submit.textContent='Применить';
+        submit.onclick=()=>apply(input.value);section.append(input,submit);
+        for(const candidate of item.candidates??[]){
+          const choice=document.createElement('button');choice.type='button';choice.className='btn small';choice.textContent=candidate;
+          choice.onclick=()=>{input.value=candidate;apply(candidate);};
+          section.append(choice);
+        }
+        section.append(confirmation);
+      }else if(item.operation==='comment'||(item.operation!=='delete'&&!item.proposed)||!isSafeReviewReplacement(item)){
+        const assess=document.createElement('p');assess.className='ai-review-safety';assess.textContent='Предупреждение для оценки врачом. Текст не изменяется.';section.append(assess);
       }
       const actions=document.createElement('div');actions.className='ai-review-card-actions';
-      const reject=document.createElement('button');reject.className='btn small';reject.textContent='Отклонить';reject.onclick=()=>{if(reviewedBlocks){const keys=rejectedReviewKeys.get(reviewedReport)??new Set<string>();keys.add(reviewRejectionKey(item,reviewedBlocks));rejectedReviewKeys.set(reviewedReport,keys);}tracks.reject(reviewedReport,item.id);findings=findings.filter(x=>x.id!==item.id);closeCard();renderDecorations();};actions.append(reject);
+      const reject=document.createElement('button');reject.className='btn small';reject.textContent='Отклонить';reject.onclick=()=>{if(card!==pop||tabId!==activeReportId||reviewedBlocks!==blocks)return;const keys=rejectedReviewKeys.get(tabId)??new Set<string>();keys.add(reviewRejectionKey(item,blocks));rejectedReviewKeys.set(tabId,keys);tracks.reject(tabId,item.id);findings=findings.filter(x=>x.id!==item.id);closeCard();renderDecorations();};actions.append(reject);
       const remember=/^[а-яёa-z-]{2,80}$/iu.test(item.original.trim())&&(item.category==='spelling'||item.category==='terminology');
-      if(remember){const save=document.createElement('button');save.className='btn small';save.textContent='Запомнить термин';save.onclick=async()=>{const term=item.original.trim().toLocaleLowerCase('ru');if(personalWords.some(x=>x.toLocaleLowerCase('ru')===term)){toast('Термин уже есть в личном словаре.');return;}try{removedDictionaryWords.delete(term);localStorage.setItem('xrs.dictionary.removed.v1',JSON.stringify([...removedDictionaryWords]));const next=[...personalWords,term];let merged=next;if(window.desktop){const saved=await window.desktop.dictionaryMergeSave(next);merged=filterPersonalWords(saved.words);sharedDictionaryAvailable=saved.shared;}localStorage.setItem(KEYS.dictionary,JSON.stringify(merged));personalWords=merged;document.dispatchEvent(new Event('xrs-dictionary-changed'));refreshProofreading(editor);tracks.reject(reviewedReport,item.id);findings=findings.filter(x=>x.id!==item.id);closeCard();renderDecorations();toast('Термин добавлен в личный словарь. Удалить его можно в настройках словаря.');}catch(error){toast(dictionarySaveError(error),true);}};actions.append(save);}
+      if(remember){const save=document.createElement('button');save.className='btn small';save.textContent='Запомнить термин';save.onclick=async()=>{if(card!==pop||tabId!==activeReportId||reviewedBlocks!==blocks)return;save.disabled=true;const term=item.original.trim().toLocaleLowerCase('ru');if(personalWords.some(x=>x.toLocaleLowerCase('ru')===term)){toast('Термин уже есть в личном словаре.');save.disabled=false;return;}try{removedDictionaryWords.delete(term);localStorage.setItem('xrs.dictionary.removed.v1',JSON.stringify([...removedDictionaryWords]));const next=[...personalWords,term];let merged=next;if(window.desktop){const saved=await window.desktop.dictionaryMergeSave(next);merged=filterPersonalWords(saved.words);sharedDictionaryAvailable=saved.shared;}localStorage.setItem(KEYS.dictionary,JSON.stringify(merged));personalWords=merged;document.dispatchEvent(new Event('xrs-dictionary-changed'));refreshProofreading(editor);toast('Термин добавлен в личный словарь. Удалить его можно в настройках словаря.');}catch(error){save.disabled=false;toast(dictionarySaveError(error),true);}};actions.append(save);}
       section.append(actions);pop.append(section);
     }
     const dismiss=document.createElement('button');dismiss.className='ai-review-card-close';dismiss.type='button';dismiss.textContent='Закрыть';dismiss.onclick=closeCard;pop.append(dismiss);
@@ -541,19 +575,19 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
   let reviewAbort:AbortController|undefined;
   const runReview=async()=>{
     clearTimeout(reviewTimer);reviewAbort?.abort();const abort=new AbortController();reviewAbort=abort;
-    const generation=++reviewGeneration,reportId=activeReportId,snapshot=JSON.stringify(json());
+    const generation=++reviewGeneration,reportId=activeReportId,checkedDocument=editor.state.doc;
     status.textContent='Проверка…';status.setAttribute('aria-busy','true');migrateButton.hidden=true;
     try{
-      const result=await new ReviewEngine(new LocalAIProvider(undefined,()=>personalWords)).review(json(),enabledCategories,abort.signal);
-      if(abort.signal.aborted||generation!==reviewGeneration||reportId!==activeReportId||snapshot!==JSON.stringify(json()))return;
+      const result=await new ReviewEngine(new LocalAIProvider(undefined,()=>personalWords)).review(checkedDocument.toJSON() as RichNode,enabledCategories,abort.signal);
+      if(abort.signal.aborted||generation!==reviewGeneration||reportId!==activeReportId||checkedDocument!==editor.state.doc)return;
       tracks.set(reportId,result.suggestions);const rejected=rejectedReviewKeys.get(reportId)??new Set<string>();
-      findings=result.suggestions.filter(item=>!rejected.has(reviewRejectionKey(item,result.blocks))&&!(['spelling','terminology'].includes(item.category)&&personalWords.includes(item.original.toLocaleLowerCase('ru-RU'))));reviewedBlocks=result.blocks;reviewedReport=reportId;
+      findings=result.suggestions.filter(item=>!rejected.has(reviewRejectionKey(item,result.blocks))&&!(['spelling','terminology'].includes(item.category)&&personalWords.includes(item.original.toLocaleLowerCase('ru-RU'))));reviewedBlocks=result.blocks;reviewedReport=reportId;reviewedDoc=checkedDocument;
       renderDecorations();status.textContent=result.boundaryWarning?'Необходимо уточнить границы описания и заключения. Откройте AI Review в верхней панели.':findings.length?`Замечаний: ${findings.length}`:'Замечаний не найдено';migrateButton.hidden=!result.boundaryWarning;
     }catch(error){if(!abort.signal.aborted){const boundaries=/границ|структур|формат документа|пустой разрешённый блок/i.test((error as Error)?.message??'');status.textContent=boundaries?'Необходимо уточнить границы описания и заключения. Откройте AI Review в верхней панели.':'Проверка недоступна.';migrateButton.hidden=!boundaries;}}
     finally{if(generation===reviewGeneration)status.removeAttribute('aria-busy');}
   };
   const scheduleReview=()=>{
-    reviewAbort?.abort();reviewGeneration++;clearTimeout(reviewTimer);findings=[];reviewedBlocks=undefined;closeCard();setAiReviewDecorations(editor,[]);
+    reviewAbort?.abort();reviewGeneration++;clearTimeout(reviewTimer);findings=[];reviewedBlocks=undefined;reviewedDoc=undefined;closeCard();setAiReviewDecorations(editor,[]);
     status.textContent='';migrateButton.hidden=true;reviewTimer=window.setTimeout(()=>void runReview(),650);
   };
   editor.on('update',scheduleReview);

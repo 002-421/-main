@@ -1,4 +1,5 @@
 import { normalizeDateInput } from './date-input.ts';
+import { reportHistoryKey } from './report-history.ts';
 import { Extension, Mark, mergeAttributes, type Editor } from '@tiptap/core';
 import { Mapping } from '@tiptap/pm/transform';
 import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
@@ -227,6 +228,9 @@ export const InlineFieldEditing = Extension.create({
       // prompt is still marked as filled, in the same undo event as the input.
       appendTransaction(transactions, oldState, state) {
         if (!transactions.some(t => t.docChanged) || transactions.some(t => t.getMeta('inline-field-fix'))) return null;
+        // History already includes every normalization step. Reapplying field
+        // cleanup during replay can drop a highlight that Undo just restored.
+        if (transactions.some(t => ['undo', 'redo'].includes(t.getMeta(reportHistoryKey)?.type))) return null;
         const mapping = new Mapping();
         for (const transaction of transactions) mapping.appendMapping(transaction.mapping);
         const yellowRanges: Array<{ from: number; to: number; text: string; mark: PMMark }> = [];
@@ -235,7 +239,10 @@ export const InlineFieldEditing = Extension.create({
         // marks from unrelated text in the newly inserted template.
         const replacesWholeDocument = transactions.some(transaction => transaction.steps.some(step =>
           'from' in step && 'to' in step && step.from === 0 && step.to === oldState.doc.content.size));
-        if (!replacesWholeDocument) oldState.doc.descendants((node, pos) => {
+        // An accepted review correction keeps authored highlighting. Ordinary
+        // typing over yellow template prompts still clears their fill.
+        const preserveYellow = transactions.some(t => t.getMeta('preserve-yellow-highlight') === true);
+        if (!replacesWholeDocument && !preserveYellow) oldState.doc.descendants((node, pos) => {
           if (!node.isText) return;
           const mark = node.marks.find(m => m.type.name === 'highlight' && String(m.attrs.color ?? '').toLowerCase() === '#ffff00');
           if (!mark) return;

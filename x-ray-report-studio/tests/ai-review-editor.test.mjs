@@ -4,14 +4,14 @@ import { Schema } from '@tiptap/pm/model';
 import { EditorState } from '@tiptap/pm/state';
 import { history, undo, redo } from '@tiptap/pm/history';
 import { applyReviewSuggestion, resolveReviewRange, isSafeReviewReplacement } from '../src/ai-review-editor.ts';
-import { ReportBlockExtractor, TrackChangesEngine, ReviewEngine, MockAIProvider } from '../src/ai-review.ts';
+import { ReportBlockExtractor, TrackChangesEngine, ReviewEngine, MockAIProvider, proofreadingBlocks } from '../src/ai-review.ts';
 
 const schema = new Schema({ nodes: {
   doc: { content:'reportSection+' },
   reportSection: { content:'paragraph+', group:'block', attrs:{ id:{default:''} } },
   paragraph: { content:'text*', group:'block' },
   text: { group:'inline' },
-}, marks: { bold: {} } });
+}, marks: { bold: {}, italic: {}, highlight: {attrs:{color:{default:'#ffff00'}}} } });
 const paragraph = (text, bold=false) => schema.nodes.paragraph.create(null, [schema.text(text, bold ? [schema.marks.bold.create()] : [])]);
 const section = (id, p) => schema.nodes.reportSection.create({id}, [p]);
 const document = () => schema.nodes.doc.create(null, [
@@ -60,7 +60,7 @@ test('one transaction replaces text across formatting runs, preserving neighbour
   const e=editor(schema.nodes.doc.create(null,parts));
   const blocks=new ReportBlockExtractor().extract(e.state.doc.toJSON()),before=e.state.doc.toJSON();
   const s=suggestion('Ошибкка','Ошибка',0,7);
-  assert.throws(()=>applyReviewSuggestion(e,s,blocks,'tab-a','tab-b'),/другая вкладка/);
+  assert.throws(()=>applyReviewSuggestion(e,s,blocks,'tab-a','tab-b'),{code:'wrong-document'});
   applyReviewSuggestion(e,s,blocks,'tab-a','tab-a');
   const after=e.state.doc.toJSON(),runs=after.content[1].content[0].content;
   assert.equal(e.state.doc.content.child(1).textContent,'Ошибка в тексте.');
@@ -77,7 +77,7 @@ test('cross-paragraph ranges require manual editing',()=>{
   const doc=document(),parts=[...doc.content.content];parts[1]=schema.nodes.reportSection.create({id:'description'},[paragraph('Ошибкка'),paragraph('в тексте.')]);
   const e=editor(schema.nodes.doc.create(null,parts)),blocks=new ReportBlockExtractor().extract(e.state.doc.toJSON());
   const source='Ошибкка\nв тексте.';const s=suggestion(source,'Ошибка',0,source.length);
-  assert.throws(()=>applyReviewSuggestion(e,s,blocks),/ручного редактирования/);
+  assert.throws(()=>applyReviewSuggestion(e,s,blocks),{code:'unmapped-range'});
 });
 
 test('six category filters work with synthetic mock findings without network', async () => {
@@ -128,4 +128,80 @@ test('review maps exact text inside nested table cells without crossing cells',(
  applyReviewSuggestion(e,suggestion('Ошибкка','Ошибка',0,7),blocks);
  assert.equal(e.state.doc.child(1).child(0).child(0).child(0).textContent,'Ошибка');
  assert.equal(e.state.doc.child(1).child(0).child(0).child(1).textContent,'Тест');
+});
+
+test('manual multi-edit spelling replacement requires review and keeps bold, italic, highlight and history', () => {
+  const doc = document();
+  const parts = [...doc.content.content];
+  const marks = [schema.marks.bold.create(), schema.marks.italic.create(), schema.marks.highlight.create()];
+  const original = 'диаметрамм', spellingText = 'диаметром';
+  parts[1] = section('description', schema.nodes.paragraph.create(null, [
+    schema.text(original, marks), schema.text(' в синтетическом отчёте.'),
+  ]));
+  const e = editor(schema.nodes.doc.create(null, parts));
+  const checkedDocument = e.state.doc;
+  const blocks = new ReportBlockExtractor().extract(checkedDocument.toJSON());
+  const finding = {...suggestion(original, '', 0, original.length), operation:'comment', confidence:'limited'};
+  assert.equal(isSafeReviewReplacement({...finding, operation:'replace', proposed:spellingText, confidence:'high'}), false);
+  assert.throws(() => applyReviewSuggestion(e, finding, blocks, 'one', 'one', {checkedDocument, spellingText}), {code:'medical-confirmation'});
+  assert.equal(e.state.doc, checkedDocument);
+  applyReviewSuggestion(e, finding, blocks, 'one', 'one', {checkedDocument, spellingText, medicalConfirmed:true});
+  const replacement = e.state.doc.child(1).child(0).child(0);
+  assert.equal(replacement.text, spellingText);
+  assert.deepEqual(replacement.marks, marks);
+  assert.equal(e.state.doc.child(1).child(0).child(1).text, ' в синтетическом отчёте.');
+  assert.equal(undo(e.state, tr => e.view.dispatch(tr)), true);
+  assert.ok(e.state.doc.eq(checkedDocument));
+  assert.equal(redo(e.state, tr => e.view.dispatch(tr)), true);
+  assert.equal(e.state.doc.child(1).child(0).child(0).text, spellingText);
+});
+
+test('plain manual correction uses the checked occurrence, even after an empty preceding paragraph', () => {
+  const parts = [...document().content.content];
+  const original = 'Ошибкка', fixed = 'Ошибка';
+  parts[1] = schema.nodes.reportSection.create({id:'description'}, [
+    schema.nodes.paragraph.create(), paragraph(original + ' / ' + original), paragraph('Соседний абзац.'),
+  ]);
+  const e = editor(schema.nodes.doc.create(null, parts));
+  const checkedDocument = e.state.doc;
+  const blocks = proofreadingBlocks(checkedDocument.toJSON());
+  const [id] = Object.entries(blocks).find(([,value]) => value.startsWith(original + ' / '));
+  const from = original.length + 3;
+  const finding = {...suggestion(original, '', from, from + original.length), blockId:id, operation:'comment', confidence:'limited'};
+  const range = resolveReviewRange(e, finding, blocks);
+  assert.equal(checkedDocument.textBetween(range.from, range.to), original);
+  assert.throws(() => applyReviewSuggestion(e, finding, blocks, 'one', 'other', {checkedDocument, spellingText:fixed}), {code:'wrong-document'});
+  const beforeNeighborChange = e.state.doc;
+  e.view.dispatch(e.state.tr.insertText('Вставка. ', range.to + 2));
+  const changed = e.state.doc;
+  assert.throws(() => applyReviewSuggestion(e, finding, blocks, 'one', 'one', {checkedDocument, spellingText:fixed}), {code:'stale-text'});
+  assert.equal(e.state.doc, changed);
+  undo(e.state, tr => e.view.dispatch(tr));
+  assert.ok(e.state.doc.eq(beforeNeighborChange));
+  applyReviewSuggestion(e, finding, proofreadingBlocks(e.state.doc.toJSON()), 'one', 'one', {checkedDocument:e.state.doc, spellingText:fixed});
+  assert.equal(e.state.doc.child(1).child(1).textContent, 'Ошибкка / Ошибка');
+  assert.equal(e.state.doc.child(1).child(2).textContent, 'Соседний абзац.');
+});
+
+test('medical substitutions need confirmation; unsafe operations do not become valid on confirmation', () => {
+  const clinicalChanges = [
+    ['справа','слева'], ['не','да'], ['не выявлено','выявлено'], ['2','3'],
+    ['2,5 см','3,5 см'], ['см','мм'], ['L4','L5'], ['гипофиз','гипоталамус'],
+    ['экструзия','протрузия'], ['диагноз','заключение'],
+  ];
+  for (const [original, spellingText] of clinicalChanges) {
+    const parts = [...document().content.content];
+    parts[1] = section('description', paragraph(original));
+    const e = editor(schema.nodes.doc.create(null, parts));
+    const checkedDocument = e.state.doc;
+    const blocks = new ReportBlockExtractor().extract(checkedDocument.toJSON());
+    const finding = {...suggestion(original, '', 0, original.length), operation:'comment'};
+    assert.throws(() => applyReviewSuggestion(e, finding, blocks, 'one', 'one', {checkedDocument, spellingText}), {code:'medical-confirmation'});
+    assert.throws(() => applyReviewSuggestion(e, {...finding, category:'clinical'}, blocks, 'one', 'one', {checkedDocument, spellingText, medicalConfirmed:true}), {code:'invalid-operation'});
+    assert.throws(() => applyReviewSuggestion(e, finding, blocks, 'one', 'one', {checkedDocument, spellingText:'другое\nсодержание', medicalConfirmed:true}), {code:'invalid-operation'});
+    assert.equal(e.state.doc, checkedDocument, original);
+    applyReviewSuggestion(e, finding, blocks, 'one', 'one', {checkedDocument, spellingText, medicalConfirmed:true});
+    assert.equal(e.state.doc.child(1).textContent, spellingText);
+    assert.throws(() => applyReviewSuggestion(e, finding, blocks, 'one', 'one', {checkedDocument, spellingText, medicalConfirmed:true}), {code:'stale-text'});
+  }
 });

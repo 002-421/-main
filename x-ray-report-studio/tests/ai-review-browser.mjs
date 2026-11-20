@@ -167,6 +167,101 @@ try {
   await flat.locator('#ai-migrate-open').click();assert.equal(await flat.locator('[role=dialog] h2').innerText(),'Границы AI Review');
   await flat.locator('[role=dialog] [data-close]').first().click();assert.equal(await flat.locator('#editor .report-content').innerText(),flatBefore,'cancelling manual boundaries preserves the flat report');
   assert.equal(await flat.locator('.statusbar button,.statusbar details').count(),0);await flat.close();
+  // Exercise the real spelling provider and contextual actions in a separate workspace.
+  const manual=await browser.newPage({viewport:{width:1300,height:900}});
+  manual.on('request',request=>{if(!request.url().startsWith(`http://127.0.0.1:${server.address().port}/`))external.push(request.url());});
+  await manual.addInitScript(()=>{
+    const p=(text,marks=[])=>({type:'paragraph',...(text?{content:[{type:'text',text,marks}]}:{})});
+    const section=(id,content)=>({type:'reportSection',attrs:{id},content});
+    const doc={type:'doc',content:[
+      section('header',[p('Синтетический отчёт')]),
+      section('description',[p(''),p('Ошибкка.'),p('Диаметрамм',[{type:'bold'},{type:'italic'},{type:'highlight',attrs:{color:'#ffff00'}}]),p('Модель диаме\u0301тром 2 см.'),p('Соседний абзац.')]),
+      section('conclusion',[p('Заключение: синтетическая запись.')]),
+      section('signature',[p('Синтетическая подпись.')]),
+    ]};
+    localStorage.setItem('mri-report-studio.workspace.v1',JSON.stringify({activeId:'manual-a',reports:[
+      {id:'manual-a',templateId:'head-gm',doc,dirty:false},{id:'manual-b',templateId:'head-gm',doc,dirty:false},
+    ]}));
+  });
+  await manual.goto(`http://127.0.0.1:${server.address().port}`);
+  const reviewCard=manual.locator('.ai-review-card');
+  const replacement=reviewCard.getByRole('textbox',{name:'Заменить на...'});
+  const submit=reviewCard.getByRole('button',{name:'Применить',exact:true});
+  const confirm=reviewCard.getByRole('button',{name:'Подтвердить замену',exact:true});
+  const reportBody=manual.locator('#editor .report-content');
+  const cardFor=async word=>{
+    const mark=manual.locator('.ai-review-spelling').filter({hasText:word}).first();
+    await mark.waitFor({timeout:15000});
+    await mark.click({button:'right'});
+    await replacement.waitFor();
+  };
+  await cardFor('Ошибкка');
+  assert.equal(await manual.locator('.ai-review-spelling').filter({hasText:/диаме\u0301тром/iu}).count(),0);
+  await replacement.fill('Ошибка');
+  const firstText=await reportBody.innerText();
+  const staleTabButton=await submit.elementHandle();
+  await manual.locator('[data-report-select="manual-b"]').click();
+  await staleTabButton.evaluate(button=>button.click());
+  await manual.getByText('Открыт другой документ. Вернитесь к проверенной вкладке.',{exact:true}).waitFor();
+  assert.equal(await reportBody.innerText(),firstText);
+  await manual.locator('[data-report-select="manual-a"]').click();
+
+  await cardFor('Ошибкка');
+  await replacement.fill('Ошибкка');
+  await submit.click();
+  await manual.getByText('Этот вариант нельзя применить к выбранному фрагменту.',{exact:true}).waitFor();
+  assert.equal(await reportBody.innerText(),firstText);
+  await reviewCard.getByRole('button',{name:'Закрыть',exact:true}).click();
+  assert.equal(await reportBody.innerText(),firstText);
+  await cardFor('Ошибкка');
+  await replacement.fill('Ошибка');
+  await submit.click();
+  await manual.getByText('Исправление применено.',{exact:true}).waitFor();
+  assert.match(await reportBody.innerText(),/Ошибка\./);
+  await manual.keyboard.press('Control+z');
+  assert.match(await reportBody.innerText(),/Ошибкка\./);
+  await manual.keyboard.press('Control+y');
+  assert.match(await reportBody.innerText(),/Ошибка\./);
+
+  await cardFor('Диаметрамм');
+  await replacement.fill('Диаметром');
+  await submit.click();
+  await confirm.waitFor();
+  assert.match(await reviewCard.innerText(),/может изменить медицинский смысл/);
+  assert.match(await reportBody.innerText(),/Диаметрамм/);
+  await reviewCard.getByRole('button',{name:'Отмена',exact:true}).click();
+  assert.equal(await confirm.count(),0);
+  assert.match(await reportBody.innerText(),/Диаметрамм/);
+  await submit.click();
+  const staleConfirmButton=await confirm.elementHandle();
+  const neighbor=reportBody.locator('p').filter({hasText:'Соседний абзац.'});
+  await neighbor.evaluate(async el=>{
+    el.closest('[contenteditable]').focus();
+    const range=document.createRange();range.selectNodeContents(el);range.collapse(false);
+    getSelection().removeAllRanges();getSelection().addRange(range);
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  });
+  await manual.keyboard.insertText(' Правка.');
+  await staleConfirmButton.evaluate(button=>button.click());
+  await manual.getByText('Текст изменился после проверки. Дождитесь повторной проверки.',{exact:true}).waitFor();
+  assert.match(await reportBody.innerText(),/Диаметрамм/);
+  assert.match(await neighbor.innerText(),/Правка\./);
+
+  await cardFor('Диаметрамм');
+  await replacement.fill('Диаметром');
+  await submit.click();
+  await confirm.click();
+  await manual.getByText('Исправление применено.',{exact:true}).waitFor();
+  const styled=reportBody.locator('p').filter({hasText:'Диаметром'});
+  assert.equal(await styled.locator('strong').innerText(),'Диаметром');
+  assert.equal(await styled.locator('em').innerText(),'Диаметром');
+  assert.equal(await styled.locator('mark[data-color="#ffff00"]').innerText(),'Диаметром');
+  await manual.keyboard.press('Control+z');
+  assert.match(await reportBody.innerText(),/Диаметрамм/);
+  await manual.keyboard.press('Control+y');
+  assert.equal(await styled.locator('mark[data-color="#ffff00"]').innerText(),'Диаметром');
+  assert.match(await neighbor.innerText(),/Правка\./);
+  await manual.close();
   assert.deepEqual(external,[]);
   console.log('PASS: automatic all-category contextual review and card, local-only review, rejection, workspace isolation and no network requests.');
 } finally { await browser?.close(); await new Promise(resolve=>server.close(resolve)); }

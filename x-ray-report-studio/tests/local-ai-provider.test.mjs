@@ -16,7 +16,7 @@ const doc = (description, conclusion='Без особенностей.') => ({ty
 test('local checker converts spelling, punctuation and style into review findings', async () => {
   const text='Иследование  выполнено ,очаг очаг не выявлен.';
   const result=await new ReviewEngine(provider).review(doc(text),new Set(['spelling','punctuation','style']));
-  assert.ok(result.suggestions.some(s=>s.category==='spelling'&&s.original==='Иследование'&&s.operation==='comment'&&s.meaningRisk));
+  assert.ok(result.suggestions.some(s=>s.category==='spelling'&&s.original==='Иследование'&&s.operation==='comment'&&s.confidence==='limited'&&!s.meaningRisk));
   assert.ok(result.suggestions.some(s=>s.category==='punctuation'&&s.original==='  '));
   assert.ok(result.suggestions.some(s=>s.category==='style'&&s.original.toLowerCase().includes('очаг очаг')));
   for(const s of result.suggestions) assert.equal(text.slice(s.from,s.to),s.original);
@@ -101,4 +101,18 @@ test('QUALITY-02 inflections and intensity terms are accepted without a personal
  const findings=await provider.review({description:text,conclusion:'Без особенностей.'});
  assert.deepEqual(findings.filter(f=>f.category==='spelling').map(f=>f.original),[]);
  assert.ok(!findings.some(f=>/гипоинтенсивн/iu.test(f.proposed)),'no intensity-changing spelling guess');
+});
+
+test('AI Review recognizes Russian диаметром with or without copied combining stress', async () => {
+  for (const word of ['диаметр','диаметром','Диаметром','диаме\u0301тром','диаметро\u0301м']) {
+    const text = `Модель ${word} 2 см.`;
+    const result = await new ReviewEngine(provider).review(doc(text), new Set(['spelling']));
+    assert.deepEqual(result.suggestions, [], word);
+  }
+  const typo = 'диамме\u0301тром';
+  const text = `Модель ${typo} 2 см.`;
+  const result = await new ReviewEngine(provider).review(doc(text), new Set(['spelling']));
+  const item = result.suggestions.find(f => f.original === typo);
+  assert.ok(item?.candidates.includes('диаметром'));
+  assert.equal(result.blocks[item.blockId].slice(item.from, item.to), typo);
 });
