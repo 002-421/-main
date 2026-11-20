@@ -9,6 +9,7 @@ const prepareInlineDocument = (doc: RichNode, trackOriginal = true) => prepareIn
 import packageInfo from '../package.json' with { type: 'json' };
 import { TextSelection } from '@tiptap/pm/state';
 import { history, redoDepth, undoDepth } from '@tiptap/pm/history';
+import { ReviewEngine, TrackChangesEngine } from './ai-review';
 import DOMPurify from 'dompurify';
 import { makeEditor } from './editor';
 import { prepareInlineDocument as prepareInlineDocumentBase, initializeTemplateTracking, promoteInlineTemplate, resetInlineTemplate, collectInlineFields, countUnchangedParts, setReviewHighlights } from './inline-fields';
@@ -236,6 +237,37 @@ document.querySelectorAll<HTMLElement>('[data-block-filter]').forEach(b=>b.oncli
 
 function dialog(title:string,body:string,footer='') {closeDialog();const overlay=document.createElement('div');overlay.className='dialog-overlay';overlay.innerHTML=`<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><header><h2 id="dialog-title">${esc(title)}</h2><button data-close aria-label="Закрыть">×</button></header><div class="dialog-body">${body}</div>${footer?`<footer>${footer}</footer>`:''}</section>`;document.body.append(overlay);overlay.addEventListener('click',e=>{if(e.target===overlay||(e.target as HTMLElement).closest('[data-close]'))closeDialog();});overlay.addEventListener('keydown',e=>{if(e.key==='Tab'){const nodes=[...overlay.querySelectorAll<HTMLElement>('button,input,textarea,select')].filter(n=>!n.hasAttribute('disabled'));if(e.shiftKey&&document.activeElement===nodes[0]){e.preventDefault();nodes.at(-1)?.focus();}else if(!e.shiftKey&&document.activeElement===nodes.at(-1)){e.preventDefault();nodes[0]?.focus();}}});setTimeout(()=>overlay.querySelector<HTMLElement>('input,textarea,button')?.focus(),0);return overlay;}
 function closeDialog(){$('.dialog-overlay')?.remove();}
+// Experimental local prototype. Existing flat catalog documents intentionally fail extraction.
+if (localStorage.getItem('xrs.ai-review.experimental') === 'enabled') {
+  const trigger=document.createElement('button');
+  trigger.className='btn';trigger.textContent='AI Review';trigger.id='ai-review-open';
+  document.querySelector('.top-actions')?.append(trigger);
+  const tracks=new TrackChangesEngine();
+  trigger.onclick=()=>{
+    const d=dialog('AI Review', '<label>Режим <select id="ai-mode"><option value="local">Локальный ИИ (mock)</option><option value="cloud" disabled>Облачный ИИ (отключён)</option></select></label><p>Экспериментальный режим. Правки применяются только после решения врача.</p><div id="ai-results"></div>', '<button class="btn" data-close>Закрыть</button><button class="btn primary" id="ai-check">Проверить протокол</button>');
+    d.querySelector<HTMLButtonElement>('#ai-check')!.onclick=async()=>{
+      const output=d.querySelector<HTMLElement>('#ai-results')!;
+      output.textContent='Проверка…';
+      try {
+        const reportId=activeReportId;
+        const result=await new ReviewEngine().review(json());
+        if(reportId!==activeReportId){output.textContent='Вкладка изменилась. Повторите проверку.';return;}
+        tracks.set(reportId,result.suggestions);
+        output.replaceChildren();
+        if(!result.suggestions.length)output.textContent='Замечаний не найдено.';
+        for(const item of result.suggestions){
+          const row=document.createElement('div');row.className='notice';
+          const title=document.createElement('p');title.textContent=`${item.category}: ${item.explanation}`;
+          const excerpt=document.createElement('p');excerpt.textContent=`Фрагмент: ${item.original || '(позиция вставки)'} → ${item.proposed || '(без замены)'}`;
+          const reject=document.createElement('button');reject.className='btn small';reject.textContent='Отклонить';
+          reject.onclick=()=>{tracks.reject(reportId,item.id);row.remove();};
+          const accept=document.createElement('button');accept.className='btn small';accept.textContent='Принять';accept.disabled=true;accept.title='Применение к редактору требует структурных границ и интеграции с историей';
+          row.append(title,excerpt,accept,reject);output.append(row);
+        }
+      }catch { output.textContent='Проверка заблокирована: границы блоков не подтверждены или возможны персональные данные.'; }
+    };
+  };
+}
 function calculatorDialog(){
  const keys=[
   ['C','clear',''],['⌫','backspace',''],['±','sign',''],['÷','operator','÷'],
