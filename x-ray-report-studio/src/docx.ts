@@ -1,3 +1,4 @@
+import { LEGACY_RULE_THICKNESS, RULE_GAP_PT, manualFillColor, ruleThickness } from './report-format-options.ts';
 import { previewPageLayout } from './page-geometry.ts';
 import { preparePrintDocument, type PrintBox } from './print-document.ts';
 import {
@@ -26,6 +27,7 @@ export type EmbeddedDocxFont = { name: string; data: Uint8Array; bold?: Uint8Arr
 export type DocxOptions = {
   /** Measured printable bounds from the shared browser plan, in CSS pixels. */
   printBox?: PrintBox;
+  breakBeforeDescription?: boolean;
   profile?: string;
   customModules?: Module[];
   cache?: Record<string, { body: RichNode; conclusion?: RichNode }>;
@@ -94,6 +96,10 @@ function runOptions(node: RichNode, inherited: IRunOptions = {}, omitHighlight =
     if (field.attrs?.filled !== true) options.highlight = 'yellow';
   }
   if (omitHighlight) { delete options.highlight; delete options.shading; }
+  const manual = manualFillColor(node.marks?.find(mark => mark.type === 'textStyle')?.attrs?.backgroundColor);
+  if (manual && !options.highlight && (field?.attrs?.filled === true || !node.marks?.some(mark => mark.type === 'highlight'))) {
+    options.shading = { type: ShadingType.CLEAR, fill: manual.slice(1).toUpperCase(), color: 'auto' };
+  }
   return options;
 }
 
@@ -191,7 +197,7 @@ function list(node: RichNode, context: Context): (Paragraph | Table)[] {
   const ordered = node.type === 'orderedList';
   context.numbering.push({ reference, levels: Array.from({ length: 9 }, (_, level) => ({
     level, format: ordered ? LevelFormat.DECIMAL : LevelFormat.BULLET,
-    text: ordered ? `%${level + 1}.` : ['•', '◦', '▪'][level % 3],
+    text: ordered ? `%${level + 1}.` : ({dash:'-', asterisk:'*', disc:'•'} as Record<string,string>)[String(node.attrs?.bulletStyle)] ?? ['•', '◦', '▪'][level % 3],
     start: ordered && level === depth ? Math.max(1, Math.floor(Number(node.attrs?.start) || 1)) : 1,
     alignment: AlignmentType.LEFT,
     style: { paragraph: { indent: { left: 360 + level * 360, hanging: 240 } }, run: { font: 'Arial' } },
@@ -345,10 +351,11 @@ function blocks(nodes: RichNode[], context: Context): (Paragraph | Table)[] {
     if (node.type === 'bulletList' || node.type === 'orderedList') return list(node, context);
     if (node.type === 'horizontalRule') {
       const manual = node.attrs?.manual === true;
+      const thickness = ruleThickness(node.attrs?.thicknessPt) ?? LEGACY_RULE_THICKNESS;
       return [new Paragraph({
         ...(node.attrs?.keepNext ? {keepNext: true} : {}),
-        border: {bottom: {style: BorderStyle.SINGLE, color: manual ? '8C9CAE' : 'CDD6E2', size: manual ? 4 : 6, ...(manual ? {space: 0} : {})}},
-        spacing: manual ? {before: 40, after: 40, line: 1, lineRule: LineRuleType.EXACT} : {before: 100, after: 100},
+        border: {bottom: {style: BorderStyle.SINGLE, color: manual ? '8C9CAE' : 'CDD6E2', size: manual ? thickness * 8 : 6, ...(manual ? {space: 0} : {})}},
+        spacing: manual ? {before: RULE_GAP_PT * 20, after: RULE_GAP_PT * 20, line: 1, lineRule: LineRuleType.EXACT} : {before: 100, after: 100},
       })];
     }
     if (node.type === 'blockquote') return blocks(node.content ?? [], { ...context, indent: (context.indent ?? 0) + 360 });
@@ -473,9 +480,11 @@ function parseWordParagraph(node: XmlElement): RichNode {
   const border = first(props ?? node, 'w:pBdr');
   if (!content.length && border) {
     const bottom = first(border, 'w:bottom');
-    const manual = bottom?.attrs['w:color']?.toUpperCase() === '8C9CAE' && bottom.attrs['w:sz'] === '4' &&
-      spacing?.attrs['w:before'] === '40' && spacing.attrs['w:after'] === '40';
-    return {type: 'horizontalRule', ...(manual ? {attrs: {manual: true}} : {})};
+    const thicknessPt = ruleThickness(Number(bottom?.attrs['w:sz']) / 8);
+    const before = spacing?.attrs['w:before'], after = spacing?.attrs['w:after'];
+    const manual = bottom?.attrs['w:color']?.toUpperCase() === '8C9CAE' &&
+      thicknessPt && before === after && (before === '60' || before === '40' && thicknessPt === LEGACY_RULE_THICKNESS);
+    return {type: 'horizontalRule', ...(manual ? {attrs: {manual: true, ...(before === '60' ? {thicknessPt} : {})}} : {})};
   }
   return { type: level ? 'heading' : 'paragraph', ...(Object.keys(attrs).length ? { attrs } : {}), content };
 }
@@ -587,7 +596,7 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
     numbering: [], depth: 0, source, width: pageWidth - marginLeft - marginRight,
     ...(source ? { inherited: { font, size: fontSize, color: '000000' }, lineHeight: Number(a.lineHeight) || 1.05, spaceAfterPt: Number(a.spaceAfterPt) || 5 } : {}),
   };
-  const children = blocks((options.kind === 'template' ? doc : preparePrintDocument(doc,options.printBox)).content ?? [], context);
+  const children = blocks((options.kind === 'template' ? doc : preparePrintDocument(doc,options.printBox,options.breakBeforeDescription)).content ?? [], context);
   if (!children.length) children.push(new Paragraph({}));
   const file = new Document({
     creator: 'МРТ Альянс', title: cleanText(options.title ?? 'Протокол МРТ-исследования'),

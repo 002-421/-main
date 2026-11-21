@@ -13,7 +13,7 @@
 .report-tabs{color:#24394a}html[data-theme="dark"] .report-tabs{background:#18222d;border-color:#34414f}html[data-theme="dark"] .report-tab{background:#202c39;border-color:#34414f}html[data-theme="dark"] .report-tab.active{background:#263744;border-color:#39717a}html[data-theme="dark"] .report-tab-select,html[data-theme="dark"] .zoom-control output{color:#e4eaf2}
 .movable-calculator>header{user-select:none;cursor:move!important}.movable-calculator>header:active{cursor:grabbing!important}
 .report-tabs{display:flex;align-items:stretch;gap:4px;min-height:38px;padding:3px 12px 0;background:#eef3f6;border-bottom:1px solid #dce5eb;overflow-x:auto;flex-shrink:0}.report-tab{display:flex;align-items:center;flex:0 0 auto;max-width:280px;border:1px solid #dce5eb;border-bottom:0;border-radius:6px 6px 0 0;background:#f7fafb}.report-tab.active{background:#fff;border-color:#b8d6d7}.report-tab-select{flex:0 1 auto;min-width:0;max-width:244px;padding:8px 9px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.report-tab-close{display:grid;place-items:center;flex:0 0 34px;min-width:34px;min-height:34px;padding:0;color:#8597a2;font-size:21px;line-height:1}.report-tab-close:hover{color:#a33}.zoom-control{display:flex;align-items:center;gap:6px;font-size:10px;color:#69818d;white-space:nowrap}.zoom-control input[type=range]{width:100px;padding:0;margin:0;accent-color:#168d91}.zoom-control output{min-width:34px;color:#263e50;font-weight:650}.wide-preview{width:min(1100px,96vw)}.wide-preview .dialog-body{padding:0;background:#fff}.export-preview-scroll{height:min(72dvh,800px);overflow:auto;padding:20px;background:#fff}.export-preview-paper{width:210mm;min-height:297mm;margin:0 auto;background:#fff;border:1px solid #d8d8d8;box-shadow:none;padding:43mm 18mm 24mm}.export-preview-spacer{display:none}.export-preview-paper .report-content{padding:0!important;min-height:0!important;overflow:visible!important;font-size:11pt;line-height:1.05;color:#000}.export-preview-paper .template-field.is-empty,.export-preview-paper .report-field.is-empty{background:#ffff00}.export-preview-paper mark[data-color="#ffff00"]{background:#ffff00}
-#highlight-yellow{position:relative;font-size:16px!important;padding-bottom:7px!important}#highlight-yellow:after{content:"";position:absolute;left:4px;right:4px;bottom:2px;height:3px;border-radius:2px;background:#ffff00}
+
 
 /* The report paper stays white so its on-screen layout matches Word/PDF output. */
 html[data-theme="dark"]{color-scheme:dark;color:#e4eaf2;background:#111821;--navy:#142d43;--border:#34414f}
@@ -88,7 +88,7 @@ html[data-theme="dark"] .report-tab-add{background:#202c39;border-color:#34414f;
 .update-progress details{margin-top:12px;font-size:11px}.update-progress details pre{max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;color:#a34250;font:11px/1.5 Consolas,monospace}.update-progress details[hidden]{display:none}
 html[data-theme="dark"] .brand-text strong{color:#f3f7fa}html[data-theme="dark"] .brand-text em{color:#73d4ca}html[data-theme="dark"] .brand-text small{color:#9aafbd}
 .doctor-choice-row{display:flex;align-items:center;gap:8px}.doctor-choice-row select{flex:1}.doctor-delete{flex:0 0 44px;height:42px;border:1px solid #c94f5d;border-radius:6px;color:#c94f5d;font-size:26px;line-height:1}.doctor-delete:hover:not(:disabled){background:#fff0f1;color:#a91f31}.doctor-delete:disabled{opacity:.4;cursor:default}html[data-theme="dark"] .doctor-delete:hover:not(:disabled){background:#4b2b35;color:#ff9aa5}
-.tool-group #highlight-yellow.active{background:#ffe526!important;color:#302900!important;box-shadow:0 0 0 2px #d5a900;font-weight:700}.report-content.show-yellow-selection ::selection{background:#ffe36a;color:#172333}.line-height-control{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#677f8a;white-space:nowrap}
+.line-height-control{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#677f8a;white-space:nowrap}
 .report-content hr{border:0;border-top:1px solid #aeb8c2;margin:10pt 0;clear:both}
 .report-content .doctor-signature-row{flex-wrap:wrap}.report-content .doctor-signature-doctor{flex:0 0 67%}.report-content .doctor-signature-date{flex:0 0 100%;text-align:left;order:2}.report-content .doctor-stamp-image{left:auto;right:calc(0px - var(--stamp-x,0px));transform:none}
 .sticky-note{position:fixed;z-index:180;width:240px;background:#fff;color:#000;border:1px solid #bac8d2;border-radius:5px;box-shadow:0 5px 20px #0003}.sticky-note header{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;cursor:move;touch-action:none;user-select:none;font-size:12px;font-weight:600}.sticky-note header button{font-size:25px;padding:0 3px;line-height:1}.sticky-note textarea{display:block;box-sizing:border-box;width:100%;min-height:150px;max-height:60vh;resize:vertical;background:#fff;color:#000;border:0;border-radius:0;padding:8px 10px;font:14px/1.4 Arial,sans-serif}@media print{.sticky-note{display:none!important}}
@@ -157,12 +157,12 @@ html[data-theme=dark] .word-preview-dialog #preview-calibration-warning,html[dat
 .word-reference-preview .preview-word-footer{bottom:6.50875mm;line-height:.8333333333}
 
 
-/* The 2 pt gaps belong to the new rule. Adjacent paragraph margins must not
+/* The gaps belong to the rule. Adjacent paragraph margins must not
    enlarge them. Legacy/template rules retain their original presentation. */
 .report-content hr[data-manual-rule] {
   border: 0;
   height: .5pt;
-  margin: 2pt 0;
+  margin: 3pt 0;
   background: #8c9cae;
   print-color-adjust: exact;
 }
@@ -190,3 +190,29 @@ html[data-theme=dark] .word-preview-dialog #preview-calibration-warning,html[dat
 
 .export-preview-paper[style*="--preview-wrap-width"] .report-content { width:var(--preview-wrap-width)!important; }
 .preview-calibration-controls h4 {margin:12px 0 6px;font-size:13px;}
+
+.format-menu { position:relative; display:inline-flex; white-space:nowrap; }
+.format-options {
+  display:grid; min-width:max-content; position:absolute; inset:100% auto auto 0;
+  z-index:20; padding:4px; border:1px solid var(--border); border-radius:5px;
+  background:#fff; color:#20364b; box-shadow:0 6px 15px #0003;
+}
+.format-options button { text-align:start; }
+.format-options button[aria-pressed=true] { box-shadow:inset 3px 0 var(--mint); }
+.format-swatch { display:inline-block; width:12px; height:12px; margin-right:5px; vertical-align:baseline;
+  border:1px solid #626c77; border-radius:2px; background:var(--swatch); }
+.report-content [data-manual-fill] { print-color-adjust:exact; }
+[data-theme=dark] #editor .report-content [data-manual-fill] { color:#172c40; }
+.report-content mark[data-color] [data-manual-fill] { background-color:transparent!important; }
+.report-content ul[data-bullet-style=dash] { list-style-type:"-  "; }
+.report-content ul[data-bullet-style=asterisk] { list-style-type:"*  "; }
+.report-content ul[data-bullet-style=disc] { list-style-type:disc; }
+.report-content ul[data-bullet-style] { padding-inline-start:1.5em; }
+#table-tools svg { display:block; }
+.doctor-profile-group { border-top:1px solid var(--border); margin-block:14px 0; padding-top:8px; }
+.doctor-profile-group h3 { margin:4px 0 10px; font-size:14px; }
+.doctor-settings-dialog > footer { display:block; }
+.settings-update-row,.settings-dialog-actions { display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:wrap; }
+.settings-update-row { justify-content:space-between; padding-bottom:8px; margin-bottom:8px; border-bottom:1px solid var(--border); }
+.settings-update-row small { flex-basis:100%; }
+[data-theme=dark] .format-options { background:#202b38; color:#e3edf6; }

@@ -1,9 +1,19 @@
 import type { Editor } from '@tiptap/core';
+import { NodeSelection } from '@tiptap/pm/state';
+import { DEFAULT_RULE_THICKNESS } from './report-format-options.ts';
 import { isSpacingReference, spacingAtLineHeight } from './paragraph-spacing.ts';
 
-export function insertReportLine(editor: Editor) {
+export function insertReportLine(editor: Editor, thicknessPt = DEFAULT_RULE_THICKNESS) {
   return editor.chain().focus().command(({tr, dispatch}) => {
-    const {$head} = tr.selection;
+    const selection = tr.selection;
+    if (selection instanceof NodeSelection && selection.node.type.name === 'horizontalRule') {
+      if (dispatch) {
+        tr.setNodeMarkup(selection.from, undefined, {...selection.node.attrs, manual: true, thicknessPt});
+        tr.setSelection(NodeSelection.create(tr.doc, selection.from));
+      }
+      return true;
+    }
+    const {$head} = selection;
     for (let depth = $head.depth; depth > 0; depth--) {
       const node = $head.node(depth);
       if (!node.isTextblock) continue;
@@ -15,7 +25,10 @@ export function insertReportLine(editor: Editor) {
         if (!insertBefore && parent === tr.doc && index === parent.childCount - 1) continue;
         const at = index + (insertBefore ? 0 : 1);
         if (!parent.canReplaceWith(at, at, rule)) continue;
-        if (dispatch) tr.insert(insertBefore ? $head.before(depth) : $head.after(depth), rule.create({manual: true}));
+        if (dispatch) {
+          const pos = insertBefore ? $head.before(depth) : $head.after(depth);
+          tr.insert(pos, rule.create({manual: true, thicknessPt}));
+        }
         return true;
       }
     }

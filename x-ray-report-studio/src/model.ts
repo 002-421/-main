@@ -1,3 +1,4 @@
+import { BULLET_STYLES, ruleThickness } from './report-format-options.ts';
 import { isSpacingReference } from './paragraph-spacing.ts';
 import templates from './templates.json' with { type: 'json' };
 
@@ -344,7 +345,12 @@ export function validateTemplate(input: unknown): RichNode {
       if (['left', 'center', 'right', 'justify'].includes(a.align)) attrs.align = a.align;
     }
     if (['paragraph', 'heading'].includes(type) && ['left', 'center', 'right', 'justify'].includes(a.textAlign)) attrs.textAlign = a.textAlign;
-    if (type === 'horizontalRule' && a.manual === true) attrs.manual = true;
+    if (type === 'horizontalRule' && a.manual === true) {
+      attrs.manual = true;
+      const thickness = ruleThickness(a.thicknessPt);
+      if (thickness) attrs.thicknessPt = thickness;
+    }
+    if (type === 'bulletList' && BULLET_STYLES.includes(a.bulletStyle)) attrs.bulletStyle = a.bulletStyle;
     if (type === 'paragraph' && a.moduleRef != null) attrs.moduleRef = id(a.moduleRef);
     if (['doc', 'paragraph', 'heading'].includes(type)) {
       if (a.fontFamily != null && /^[\p{L}\d\s,'"_-]+$/u.test(string(a.fontFamily, 200))) attrs.fontFamily = a.fontFamily;

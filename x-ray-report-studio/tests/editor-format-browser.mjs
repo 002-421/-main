@@ -61,8 +61,7 @@ try {
   const undo = page.locator('[data-command=undo]');
   const redo = page.locator('[data-command=redo]');
   const interval = page.locator('#line-height');
-  assert.equal(await page.locator('[data-align=justify]').count(), 0);
-  assert.equal(await page.locator('[data-align]').count(), 3);
+  assert.equal(await page.locator('[data-format=align]').count(), 4);
   const checkAfter = expected => page.waitForFunction(({key, expected}) => {
     const stored = JSON.parse(localStorage.getItem(key)).reports.find(r => r.id === 'format-test').doc;
     return Math.abs(stored.content[0].attrs.spaceAfterPt - expected) < .001;
@@ -110,8 +109,8 @@ try {
       paragraphWidth: previous.getBoundingClientRect().width, previousMargin: getComputedStyle(previous).marginBottom};
   });
   assert.ok(placement.afterA && placement.caret);
-  assert.ok(Math.abs(placement.height - .5 * 4 / 3) < .02);
-  assert.ok(Math.abs(parseFloat(placement.gap) - 2 * 4 / 3) < .02);
+  assert.ok(Math.abs(placement.height - 1.5 * 4 / 3) < .02);
+  assert.ok(Math.abs(parseFloat(placement.gap) - 3 * 4 / 3) < .02);
   assert.equal(placement.color, 'rgb(140, 156, 174)');
   assert.equal(placement.width, placement.paragraphWidth);
   assert.equal(placement.previousMargin, '0px');
@@ -157,9 +156,9 @@ try {
   const wordParagraphs = [...xml.matchAll(/<w:p(?: [^>]*)?>.*?<\/w:p>/gs)].map(match => match[0]);
   const wordRule = wordParagraphs.find(p => p.includes('w:color="8C9CAE"'));
   assert.ok(wordRule);
-  assert.match(wordRule, /w:sz="4"/);
-  assert.match(wordRule, /w:before="40"/);
-  assert.match(wordRule, /w:after="40"/);
+  assert.match(wordRule, /w:sz="12"/);
+  assert.match(wordRule, /w:before="60"/);
+  assert.match(wordRule, /w:after="60"/);
   assert.match(wordRule, /w:lineRule="exact"/);
   assert.match(wordParagraphs.find(p => p.includes('строка В.')), /w:after="98"/);
   assert.match(wordParagraphs.find(p => p.includes('строка В.')), /w:line="231"/);
@@ -182,7 +181,99 @@ try {
   assert.deepEqual(printStyle, {visible: true, color: 'rgb(140, 156, 174)', colorAdjust: 'exact'});
   const pdf = await page.pdf({preferCSSPageSize: true, printBackground: true});
   assert.match(pdf.toString('latin1'), /\/Type\s*\/Page\b/);
-  console.log('PASS: manual line, cursor, delete/Undo/Redo, workspace restore, paragraph intervals, preview, real DOCX and Chromium PDF.');
+  await page.emulateMedia({media: 'screen'});
+  await page.evaluate(() => {
+    document.querySelector('.export-only-editor').remove();
+    document.querySelector('#app').style.display = '';
+  });
+  await page.locator('.word-preview-dialog [data-close]').last().click();
+
+  const choose = async (menu, value) => {
+    await page.locator(`[data-format-toggle=${menu}]`).click();
+    await page.locator(`[data-format=${menu}][data-value="${value}"]`).click();
+  };
+  await line.click();
+  await body.locator('hr.ProseMirror-selectednode').waitFor();
+  for (const value of [0.5, 1, 2, 3, 1.5]) {
+    await choose('rule', value);
+    assert.equal(await line.count(), 1, 'changing the selected rule avoids extra nodes');
+    assert.equal(Number(await line.getAttribute('data-rule-thickness')), value);
+  }
+
+  await select(1, 2, 3, 5);
+  assert.equal(await page.locator('[data-format-toggle=align]').getAttribute('title'), 'По левому краю');
+  for (const value of ['right','justify','center','left']) {
+    await choose('align', value);
+    assert.equal(await paragraphs.nth(1).evaluate(el => getComputedStyle(el).textAlign), value);
+    assert.equal(await paragraphs.nth(2).evaluate(el => getComputedStyle(el).textAlign), value);
+  }
+  await undo.click();
+  assert.equal(await paragraphs.nth(1).evaluate(el => getComputedStyle(el).textAlign), 'center');
+  await redo.click();
+  assert.equal(await paragraphs.nth(1).evaluate(el => getComputedStyle(el).textAlign), 'left');
+
+  await select(1,2,3,5);
+  for (const [value, element, marker] of [['dash','ul','"-  "'],['asterisk','ul','"*  "'],['disc','ul','disc'],['ordered','ol','decimal']]) {
+    await choose('list',value);
+    const list = body.locator(element).first();
+    assert.equal(await list.locator(':scope > li').count(), 2);
+    assert.equal(await list.evaluate(el => getComputedStyle(el).listStyleType), marker);
+  }
+  await choose('list','off');
+  assert.equal(await body.locator('li').count(),0);
+  await undo.click();
+  assert.equal(await body.locator('ol > li').count(),2);
+  await redo.click();
+  assert.equal(await body.locator('li').count(),0);
+  await select(1,2,3,5);
+  await choose('list','asterisk');
+
+  await select(1,1,1,6);
+  await choose('fill','#b7f7b7');
+  const green = body.locator('[data-manual-fill="#b7f7b7"]');
+  await green.waitFor();
+  for (const theme of ['dark','light']) {
+    await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+    assert.equal(await green.evaluate(el=>getComputedStyle(el).backgroundColor), 'rgb(183, 247, 183)');
+  }
+  await select(2,2,1,6);
+  await page.locator('#fill-text').click();
+  assert.equal(await green.count(),2);
+  await choose('fill','off');
+  assert.equal(await green.count(),1);
+  await undo.click();
+  assert.equal(await green.count(),2);
+  await page.reload();
+  await page.waitForFunction(()=>document.querySelector('#fill-text')?.title.includes('Светло-зелёный'));
+  assert.equal(await green.count(),2);
+
+  await page.locator('#preview-report').click();
+  await page.locator('.paginated-browser-preview').waitFor();
+  const downloadWithFormatting = page.waitForEvent('download');
+  await page.locator('#preview-save-word').click();
+  const formatted = unzipSync(await readFile(await (await downloadWithFormatting).path()));
+  assert.match(strFromU8(formatted['word/document.xml']), /w:fill="B7F7B7"/);
+  assert.match(strFromU8(formatted['word/numbering.xml']), /<w:lvlText w:val="\*"/);
+  assert.match(strFromU8(formatted['word/numbering.xml']), /w:hanging="240"/);
+
+  await page.locator('#preview-report').click();
+  await page.locator('.paginated-browser-preview li').first().waitFor();
+  await page.evaluate(() => {
+    document.querySelector('#app').style.display = 'none';
+    const copy = document.createElement('div');
+    copy.className = 'export-only-editor';
+    copy.innerHTML = document.querySelector('.paginated-browser-preview').innerHTML;
+    document.body.append(copy);
+  });
+  await page.emulateMedia({media:'print'});
+  const marker = page.locator('.export-only-editor ul[data-bullet-style=asterisk]');
+  assert.equal(await marker.evaluate(el=>getComputedStyle(el).listStyleType), '"*  "');
+  const pdfFill = page.locator('.export-only-editor [data-manual-fill="#b7f7b7"]').first();
+  assert.equal(await pdfFill.evaluate(el=>getComputedStyle(el).backgroundColor), 'rgb(183, 247, 183)');
+  const formattedPdf = await page.pdf({preferCSSPageSize:true,printBackground:true});
+  assert.match(formattedPdf.toString('latin1'), /\/Type\s*\/Page\b/);
+
+  console.log('PASS: four list markers and removal, four alignments, all line thicknesses, fill across themes, Undo/Redo, reload, real DOCX and Chromium PDF.');
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));

@@ -131,7 +131,7 @@ try{
  assert.match(await page.locator('.report-content').innerText(),/справа 0,0 см, слева 0,0 см/);
  assert.ok(await page.locator('#line-height').isVisible(),'line spacing control is visible');
  assert.ok(await page.getByRole('button',{name:'Линия',exact:true}).isVisible(),'the formatting toolbar offers a manual rule');
- assert.equal(await page.locator('[data-align="justify"]').count(),0,'justification is no longer a toolbar command');
+ assert.equal(await page.locator('[data-format=align][data-value=justify]').count(),1,'the alignment menu includes justification');
  const descriptionAlignment=await page.locator('.report-content p').filter({hasText:'максимальная размерами'}).first().evaluate(p=>getComputedStyle(p).textAlign);
  assert.equal(descriptionAlignment,'justify','the built-in report still justifies description paragraphs');
  await captureStartupDom();
@@ -372,10 +372,13 @@ try{
  const editableReportBefore=await page.locator('.report-content').innerText();
  await insertedField.click();await page.keyboard.press('End');await page.keyboard.insertText('!');
  assert.notEqual(await page.locator('.report-content').innerText(),editableReportBefore,'editing remains available after closing boundary help');await page.keyboard.press('Backspace');
- await selectField(await insertedField.getAttribute('data-field-id'));await page.locator('#highlight-yellow').click();
- assert.equal(await page.locator('#highlight-yellow').getAttribute('aria-pressed'),'true');assert.match(await page.locator('.toast').textContent(),/залит жёлтым/);assert.equal(await page.locator('.report-content').evaluate(el=>el.classList.contains('show-yellow-selection')),true);
- assert.ok((await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')),'yellow text highlighter can be applied');
- await selectField(await insertedField.getAttribute('data-field-id'));await page.locator('#highlight-yellow').click();assert.ok(!(await page.locator('.report-content mark[data-color="#ffff00"]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')),'yellow text highlighter can be removed from the selected text');
+ await selectField(await insertedField.getAttribute('data-field-id'));await page.locator('#fill-text').click();
+ assert.equal(await page.locator('#fill-text').getAttribute('aria-pressed'),'true');
+ assert.ok((await page.locator('.report-content [data-manual-fill="#ffff00"]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')));
+ await selectField(await insertedField.getAttribute('data-field-id'));
+ await page.locator('[data-format-toggle=fill]').click();
+ await page.locator('[data-format=fill][data-value=off]').click();
+ assert.ok(!(await page.locator('.report-content [data-manual-fill]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')),'manual fill can be removed');
  assert.match(await page.locator('.report-content strong').allTextContents().then(t=>t.join(' ')),/ЗАКЛЮЧЕНИЕ/);
  console.log('PASS: searchable previews and insertion, live spelling/grammar corrections and existing report formatting.');
  await insertedField.click();await page.keyboard.press('Control+End');

@@ -38,7 +38,7 @@ export function firstPrintedConclusionBlock(doc:RichNode) {
 }
 /** Print-only copy. Preserve text, explicit fonts and the editor's saved document. */
 export type PrintBox = {width:number;height:number;imageHeight?:number};
-export function preparePrintDocument(input: RichNode, box?: PrintBox): RichNode {
+export function preparePrintDocument(input: RichNode, box?: PrintBox, breakBeforeDescription = false): RichNode {
  const doc=structuredClone(input);
  const geometry=previewPageLayout(doc),maxWidth=box?.width??(geometry.widthMm-geometry.leftMm-geometry.rightMm)*96/25.4,maxHeight=box?.imageHeight??box?.height??(geometry.heightMm-geometry.topMm-geometry.bottomMm)*96/25.4;
  if(maxWidth<=0||maxHeight<=0)throw new Error('Поля не оставляют безопасной области печати.');
@@ -71,7 +71,7 @@ export function preparePrintDocument(input: RichNode, box?: PrintBox): RichNode 
    if (at === heading && heading !== body) node.attrs.keepLines = true;
    if (at === body) node.attrs.keepLines = false;
    if (at !== start && node.attrs.pageBreakBefore) node.attrs.pageBreakBefore = false;
-   if (at === start && explicitBreak && node.type !== 'horizontalRule') node.attrs.pageBreakBefore = true;
+   if (at === start && (explicitBreak || breakBeforeDescription && start === description) && node.type !== 'horizontalRule') node.attrs.pageBreakBefore = true;
   }
  }
  doc.content=nodes;

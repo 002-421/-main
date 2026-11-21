@@ -1,6 +1,6 @@
 import { Editor, Node, Extension, mergeAttributes } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
-import { TextStyleKit } from '@tiptap/extension-text-style';
+import { TextStyleKit, BackgroundColor } from '@tiptap/extension-text-style';
 import TextAlign from '@tiptap/extension-text-align';
 import Highlight from '@tiptap/extension-highlight';
 import Superscript from '@tiptap/extension-superscript';
@@ -11,6 +11,37 @@ import { TemplateField, InlineFieldEditing, TemplateReview, SourceFormat, prepar
 import { LiveProofreading, type ProofStatus } from './live-proofreading';
 import { ReportHistory } from './report-history';
 import { AiReviewDecorations } from './ai-review-decorations';
+import { BULLET_STYLES, manualFillColor, ruleThickness } from './report-format-options';
+
+const BulletPresentation = Extension.create({
+  name: 'bulletPresentation',
+  addGlobalAttributes() {
+    return [{ types: ['bulletList'], attributes: {
+      bulletStyle: {
+        default: null,
+        parseHTML: element => BULLET_STYLES.find(style => style === element.dataset.bulletStyle) ?? null,
+        renderHTML: attrs => attrs.bulletStyle ? { 'data-bullet-style': attrs.bulletStyle } : {},
+      },
+    } }];
+  },
+});
+
+const ReportFill = BackgroundColor.extend({
+  addGlobalAttributes() {
+    return [{types: ['textStyle'], attributes: {
+      backgroundColor: {
+        default: null,
+        parseHTML: element => element.style.backgroundColor ? element.getAttribute('data-manual-fill') || element.style.backgroundColor : null,
+        renderHTML: attrs => {
+          const color = manualFillColor(attrs.backgroundColor);
+          if (color) return {'data-manual-fill': color, style: `background-color:${color}`};
+          const background = String(attrs.backgroundColor ?? '');
+          return /^(#[\da-f]{3,8}|[a-z]+|(?:rgb|hsl)a?\([\d.,%\s+-]+\))$/i.test(background) ? {style: `background-color:${background}`} : {};
+        },
+      },
+    }}];
+  },
+});
 
 export const ReportSection = Node.create({
   name: 'reportSection',
@@ -70,6 +101,14 @@ const ManualReportRule = Extension.create({
         parseHTML: element => element.hasAttribute('data-manual-rule'),
         renderHTML: attrs => attrs.manual ? { 'data-manual-rule': '' } : {},
       },
+      thicknessPt: {
+        default: null,
+        parseHTML: element => ruleThickness(element.dataset.ruleThickness) ?? null,
+        renderHTML: attrs => {
+          const thickness = ruleThickness(attrs.thicknessPt);
+          return attrs.manual && thickness ? {'data-rule-thickness': thickness, style: `height:${thickness}pt`} : {};
+        },
+      },
     } }];
   },
 });
@@ -98,8 +137,9 @@ export function makeEditor(element: HTMLElement, content: RichNode, options: Rep
         heading: { levels: [1, 2, 3] },
         link: { openOnClick: false, autolink: false, defaultProtocol: 'https' },
       }),
-      TextStyleKit,
-      ParagraphPresentation, ManualReportRule,
+      TextStyleKit.configure({backgroundColor:false}),
+      ReportFill,
+      ParagraphPresentation, ManualReportRule, BulletPresentation,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Highlight.configure({ multicolor: true }),
       Superscript,

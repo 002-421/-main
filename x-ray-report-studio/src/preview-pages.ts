@@ -68,14 +68,9 @@ export function measurePreviewCapacity(doc:RichNode,wordBox?:PrintBox) {
 export function measurePreviewWidth(doc:RichNode,wordBox?:PrintBox) {
  const box=createMeasurement(doc,wordBox);
  try {
-  const sample='Аа Бб Вв Гг Дд Её Жж Зз Ии Йй Кк Лл Мм Нн Оо Пп Рр Сс Тт Уу Фф Хх Цц Чч Шш Щщ Ъъ Ыы Ьь Ээ Юю Яя 0123456789,.:—';
-  const probe=document.createElement('span');
-  probe.style.cssText='display:inline-block;white-space:pre';
-  probe.style.fontFamily=box.layout.fontFamily;probe.style.fontSize=`${box.layout.fontSizePt}pt`;
-  probe.textContent=sample;box.measure.append(probe);
   const standard=box.measure.getBoundingClientRect().width/box.scale;
   const maximum=Math.max(standard,(box.layout.widthMm-box.layout.leftMm-5)*96/25.4);
-  return widthCapacity(standard,maximum,probe.getBoundingClientRect().width/box.scale/[...sample].length);
+  return widthCapacity(standard,maximum);
  } finally {box.scratch.remove();}
 }
 
@@ -98,7 +93,7 @@ export function paginateBrowserPreview(html: string, doc: RichNode, calibration?
   };
   [...source.children].forEach(collect);
   const adjusted=calibration?.enabled?calibratedCapacity(measurePreviewCapacity(doc,wordBox),calibration):undefined;
-  const width=calibration?.characterOffset?calibratedWidth(measurePreviewWidth(doc,wordBox),calibration).width:undefined;
+  const width=calibration?.widthOffsetMm?calibratedWidth(measurePreviewWidth(doc,wordBox),calibration).width:undefined;
   const {scratch, measure, scale, layout, contentHeight:standardHeight, effectiveCss} = createMeasurement(doc,wordBox,width);
   const contentHeight=adjusted?.height??standardHeight;
 
@@ -215,7 +210,12 @@ export function paginateBrowserPreview(html: string, doc: RichNode, calibration?
       const overflows=!fits(block.cloneNode(true) as HTMLElement);
       if(overflows&&target.children.length){
         const last=target.lastElementChild;
-        if(!canSplit||last&&keepsNext(last))moveChain(block,canSplit);
+        if(!canSplit||last&&keepsNext(last)){
+          // A long conclusion can begin here if its two-line prefix fits.
+          // Its continuation alone is not a reason to move the entire group.
+          const bodyPrefix=canSplit&&block.hasAttribute('data-conclusion-body')?firstConclusionLines(block):null;
+          if(!bodyPrefix||!fits(bodyPrefix.cloneNode(true) as HTMLElement))moveChain(block,canSplit);
+        }
       }
       if (canSplit && !fits(block.cloneNode(true) as HTMLElement)) {
         const text = block.textContent ?? '';

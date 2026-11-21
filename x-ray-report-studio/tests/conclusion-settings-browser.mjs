@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
-import {readFile} from 'node:fs/promises';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
 import {chromium} from 'playwright-core';
 import {strFromU8,unzipSync} from 'fflate';
 import {makeTemplateDocument} from '../src/catalog.ts';
@@ -16,14 +17,24 @@ const sentence='Синтетический полужирный текст за�
 const text=n=>n.text??(n.content??[]).map(text).join('');
 const normalized=s=>s.replace(/\s+/gu,'').toLowerCase();
 
+const outputDir=process.env.XRS_DOCX_VALIDATION_DIR;
+if(outputDir)await mkdir(outputDir,{recursive:true});
+const table={type:'table',content:[{type:'tableRow',content:[{type:'tableCell',content:[p('Таблица перед заключением.')]},{type:'tableCell',content:[p('Условное значение.')]}]}]};
 let browser;
 try {
  browser=await chromium.launch({headless:true,args:['--no-sandbox'],...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{})});
- for(const long of [false,true]){
+ for(const scenario of [
+  {name:'short',rows:3},
+  {name:'boundary',rows:51},
+  {name:'long',rows:51,long:true},
+  {name:'table',rows:49,table:true},
+  {name:'oversized-description',rows:4,oversized:true},
+ ]){
+  const {name,rows,long,oversized}=scenario;
   const page=await browser.newPage({viewport:{width:1400,height:900},acceptDownloads:true});
   const doc={...makeTemplateDocument('head-gm'),content:[
    section('header',[p('Синтетический протокол')]),
-   section('description',[...Array.from({length:51},(_,i)=>p('Контрольная строка описания '+(i+1))),p('Послѣдний абзац описания.')]),
+   section('description',[...Array.from({length:rows},(_,i)=>p('Контрольная строка описания '+(i+1))),p(oversized?'Послѣдний абзац описания. '+sentence.repeat(130):'Послѣдний абзац описания.'),...(scenario.table?[table]:[])]),
    section('conclusion',[{type:'horizontalRule',attrs:{manual:true}},p('ЗАКЛЮЧЕНИЕ:',[{type:'bold'}]),p(''),p(long?sentence.repeat(100):'Синтетический результат заключения.',[{type:'bold'}]),p('Рекомендации: синтетическая запись.')]),
    section('signature',[p('Врач: Синтетический. Дата: 01.01.2000')]),
   ]};
@@ -46,19 +57,25 @@ try {
     width:body.getBoundingClientRect().width};
   }));
   const headingPage=output.findIndex(x=>x.heading);
-  assert.ok(headingPage>=1,'fixture reaches a physical page boundary');
+  if(name==='short')assert.equal(output.length,1);
+  if(['boundary','long','oversized-description'].includes(name))assert.ok(headingPage>=1,'fixture reaches a physical page boundary');
   assert.equal(output.filter(x=>x.heading).length,1,'standalone heading is emitted exactly once');
   assert.ok(output[headingPage].startsBody&&output[headingPage].description&&output[headingPage].rule,'description, rule, heading and first content share a page');
   assert.ok(output.every(x=>x.safe));
   assert.equal(normalized(output.map(x=>x.text).join('')),normalized(text(doc)));
   if(long)assert.ok(output.length>headingPage+1,'long conclusion continues without a single oversized block');
   const download=page.waitForEvent('download');await page.locator('#preview-save-word').click();
-  const zip=unzipSync(await readFile(await (await download).path()));
+  const bytes=await readFile(await (await download).path());
+  if(outputDir)await writeFile(join(outputDir,`${name}.docx`),bytes);
+  const zip=unzipSync(bytes);
   const xml=strFromU8(zip['word/document.xml']);
   const paragraphs=[...xml.matchAll(/<w:p(?: [^>]*)?>.*?<\/w:p>/gs)].map(match=>match[0]);
   const find=value=>paragraphs.find(p=>p.includes(value));
   const last=find('Послѣдний абзац'),rule=find('8C9CAE'),heading=find('ЗАКЛЮЧЕНИЕ:'),body=find(long?'Синтетический полужирный':'Синтетический результат');
-  for(const item of [last,rule,heading])assert.match(item,/<w:keepNext\s*\/>/);
+  const markedDescription=scenario.table?find('Таблица перед заключением'):last;
+  for(const item of [markedDescription,rule,heading])assert.match(item,/<w:keepNext\s*\/>/);
+  if(name==='boundary')assert.match(last,/<w:pageBreakBefore\s*\/>/);
+  if(name==='short'||oversized)assert.doesNotMatch(last,/<w:pageBreakBefore/);
   assert.match(heading,/<w:keepLines\s*\/>/);
   assert.match(body,/<w:keepLines w:val="false"\s*\/>/);
   assert.match(body,/<w:keepNext w:val="false"\s*\/>/);
@@ -78,26 +95,31 @@ try {
   await page.evaluate(()=>{document.querySelector('#print-fix-copy').remove();document.querySelector('#app').style.display='';});
   await page.locator('.word-preview-dialog [data-close]').last().click();
 
-  if(!long){
+  if(name==='boundary'){
    assert.equal(await page.locator('#insert-field').count(),0);
    assert.ok(await page.locator('#insert-size').isVisible());
-   assert.ok(await page.locator('[data-command=bulletList]').isVisible());
-   assert.ok(await page.locator('[data-command=orderedList]').isVisible());
+   assert.ok(await page.locator('[data-format-toggle=list]').isVisible());
+   assert.ok(await page.locator('[data-format-toggle=align]').isVisible());
    for(const theme of ['light','dark']){
     await page.setViewportSize(theme==='light'?{width:1400,height:900}:{width:720,height:520});
     await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
     if(!await page.locator('#settings').isVisible())await page.locator('#toggle-sidebar').click();
     await page.locator('#settings').click();
     const dialog=page.locator('.doctor-settings-dialog'),sections=dialog.locator('[data-settings-section]');
-    assert.equal(await sections.count(),8);
+    assert.equal(await sections.count(),3);
+    assert.equal(await dialog.locator('#check-updates').isVisible(),true);
+    assert.equal(await dialog.locator('#update-current-version').textContent(),'0.4.79');
+    assert.equal(await dialog.locator('[data-settings-section=dictionary] summary').last().textContent(),'Лицензии словаря');
+    assert.equal(await dialog.locator('[data-settings-section=doctor] #stamp-preview').count(),1);
+    assert.equal(await dialog.locator('[data-settings-section=doctor] #settings-preview-calibration').count(),1);
     assert.equal(await dialog.locator('[data-settings-section][open]').count(),0);
     await dialog.locator('[data-settings-section=doctor] > summary').click();
     await dialog.locator('#doctor-name').fill('Синтетический врач');
     await dialog.locator('[data-settings-section=doctor] > summary').click();
-    await dialog.locator('[data-settings-section=format] > summary').click();
+    await dialog.locator('[data-settings-section=history] > summary').click();
     assert.equal(await dialog.locator('[data-settings-section][open]').count(),1);
     await dialog.getByRole('button',{name:'Развернуть все',exact:true}).click();
-    assert.equal(await dialog.locator('[data-settings-section][open]').count(),8);
+    assert.equal(await dialog.locator('[data-settings-section][open]').count(),3);
     assert.equal(await dialog.locator('#doctor-name').inputValue(),'Синтетический врач');
     const geometry=await dialog.evaluate(el=>{const body=el.querySelector('.dialog-body'),save=el.querySelector('#save-settings').getBoundingClientRect();return{scroll:body.scrollHeight>body.clientHeight,footer:save.top>=0&&save.bottom<=innerHeight};});
     assert.ok(geometry.scroll&&geometry.footer);
@@ -117,6 +139,7 @@ try {
     await dialog.locator('#save-settings').click();
    }
   }
+  console.log(`${name}: ${output.length} pages; conclusion starts on page ${headingPage+1}`);
   await page.close();
  }
  console.log('PASS: conclusion heading, first body, divider and description share the page; long body splits; OOXML, PDF, settings and ribbon.');

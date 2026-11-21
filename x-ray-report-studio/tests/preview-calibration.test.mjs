@@ -33,11 +33,15 @@ test('horizontal calibration reads old records and follows its own measured dime
  const {widthCapacity,calibratedWidth}=await import('../src/preview-calibration.ts');
  const s=storage(),c=new PreviewCalibrations(s),base={version:1,enabled:true,offset:-3,lastTarget:47};
  c.save('doctor',base);
- const width=widthCapacity(650,690,6.5);
+ const width=widthCapacity(650,690);
  assert.equal(calibratedWidth(width,c.get('doctor')).width,650);
  c.save('doctor',{...base,characterOffset:-4});
  assert.deepEqual(new PreviewCalibrations(s).get('doctor'),{...base,characterOffset:-4});
- assert.equal(calibratedWidth(width,{...base,enabled:false,characterOffset:-4}).width,624);
- assert.equal(calibratedWidth(width,{...base,characterOffset:20}).width,689);
+ assert.equal(calibratedWidth(width,{...base,enabled:false,characterOffset:-4}).width,650);
+ c.save('doctor',{...base,characterOffset:-4,widthOffsetMm:-2.5});
+ assert.equal(new PreviewCalibrations(s).get('doctor').widthOffsetMm,-2.5);
+ assert.ok(Math.abs(calibratedWidth(width,{...base,widthOffsetMm:-2.5}).width-(650-2.5*96/25.4))<.001);
+ assert.ok(calibratedWidth(widthCapacity(650,665),{...base,widthOffsetMm:10}).limited);
+ assert.throws(()=>c.save('doctor',{...base,widthOffsetMm:2.1}));
  assert.throws(()=>c.save('doctor',{...base,characterOffset:21}));
 });

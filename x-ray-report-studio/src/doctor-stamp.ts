@@ -5,6 +5,17 @@ const text = (node: RichNode): string => node.type === 'text' ? node.text ?? ''
   : node.type === 'reportField' ? String(node.attrs?.value || node.attrs?.hint || '')
     : (node.content ?? []).map(text).join('');
 
+const normalizeName = (name: string) => name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('ru');
+
+export function findDoctorStampKey(line: string, stamps: Record<string, string>): string | undefined {
+  const name = line.match(/врач(?:-рентгенолог)?\s*:\s*(.*?)(?=\s*дата\s*:|$)/iu)?.[1];
+  if (!name?.trim()) return undefined;
+  const needle = normalizeName(name);
+  const keys = Object.keys(stamps);
+  return keys.find(key => key === name.trim()) ??
+    keys.find(key => normalizeName(key) === needle || normalizeName(key) === needle.replace(/\.$/, ''));
+}
+
 export function attachDoctorStamp(
   input: RichNode,
   stamps: Record<string, string>,
@@ -31,9 +42,7 @@ export function attachDoctorStamp(
     if (!physician) node.content?.forEach(findPhysician);
   };
   findPhysician(doc);
-  const normalizedLine = physician.toLocaleLowerCase('ru');
-  const doctor = Object.keys(stamps).sort((a, b) => b.length - a.length)
-    .find(name => normalizedLine.includes(name.toLocaleLowerCase('ru')));
+  const doctor = findDoctorStampKey(physician, stamps);
   const src = doctor ? stamps[doctor] : '';
   if (!src) return doc;
   const dimensions = sizes[doctor!] ?? { width: 360, height: 130 };

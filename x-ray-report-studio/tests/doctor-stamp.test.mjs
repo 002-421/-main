@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { attachDoctorStamp, containsDoctorStamp } from '../src/doctor-stamp.ts';
+import { attachDoctorStamp, containsDoctorStamp, findDoctorStampKey } from '../src/doctor-stamp.ts';
 
 test('doctor stamp export is repeatable and preserves the date in place', () => {
   const doc = { type: 'doc', content: [{ type: 'paragraph', content: [
@@ -31,4 +31,11 @@ test('doctor stamp export is repeatable and preserves the date in place', () => 
   assert.equal(nodes[0].content.find(node => node.type === 'image').attrs.positionYEmu, -15 * 9525);
   assert.equal(nodes[0].content.find(node => node.type === 'image').attrs.positionXEmu, Math.round(((11906 - 1700) * 635 - 630 * 9525) + 25 * 9525));
   assert.equal(doc.content[0].content[0].text, 'Врач-рентгенолог: Иванов Иван Иванович');
+});
+
+test('a physician name must match the whole signature field before applying a stored stamp', () => {
+  const stamps = {'Синтетический А': 'a', 'Синтетический А Б': 'ab'};
+  assert.equal(findDoctorStampKey('Врач: Синтетический А. Дата: 01.01.2000', stamps), 'Синтетический А');
+  assert.equal(findDoctorStampKey('Врач: Синтетический  А Б Дата: 01.01.2000', stamps), 'Синтетический А Б');
+  assert.equal(findDoctorStampKey('Врач: Синтетический А В', stamps), undefined);
 });
