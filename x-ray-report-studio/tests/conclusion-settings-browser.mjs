@@ -73,9 +73,9 @@ try {
   const find=value=>paragraphs.find(p=>p.includes(value));
   const last=find('Послѣдний абзац'),rule=find('8C9CAE'),heading=find('ЗАКЛЮЧЕНИЕ:'),body=find(long?'Синтетический полужирный':'Синтетический результат');
   const markedDescription=scenario.table?find('Таблица перед заключением'):last;
-  for(const item of [markedDescription,rule,heading])assert.match(item,/<w:keepNext\s*\/>/);
-  if(name==='boundary')assert.match(last,/<w:pageBreakBefore\s*\/>/);
-  if(name==='short'||oversized)assert.doesNotMatch(last,/<w:pageBreakBefore/);
+  for(const item of [rule,heading])assert.match(item,/<w:keepNext\s*\/>/);
+  assert.match(markedDescription,oversized?/<w:keepNext w:val="false"\s*\/>/:/<w:keepNext\s*\/>/);
+  assert.doesNotMatch(last,/<w:pageBreakBefore/);
   assert.match(heading,/<w:keepLines\s*\/>/);
   assert.match(body,/<w:keepLines w:val="false"\s*\/>/);
   assert.match(body,/<w:keepNext w:val="false"\s*\/>/);

@@ -2,7 +2,7 @@ import type { RichNode } from './model';
 import type { PrintBox } from './print-document.ts';
 export type LayoutMetrics={pages:number;safe:boolean;descriptionOnConclusion:boolean};
 export type PrintVariant={document:RichNode;name:string;delta:number;spacing:number};
-type RenderedLayout={html:string;previewSourceHtml?:string;metrics:LayoutMetrics;box?:PrintBox;breakBeforeDescription?:boolean};
+type RenderedLayout={html:string;previewSourceHtml?:string;metrics:LayoutMetrics;box?:PrintBox;releaseDescriptionKeep?:boolean};
 export type PrintPlan=PrintVariant&RenderedLayout&{wordRendering:'unverified'};
 export class PrintLayoutError extends Error {constructor(message:string){super(message);this.name='PrintLayoutError';}}
 const walk=(n:RichNode,visit:(n:RichNode)=>void)=>{visit(n);n.content?.forEach(child=>walk(child,visit));};

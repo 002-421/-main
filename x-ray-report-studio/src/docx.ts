@@ -27,7 +27,7 @@ export type EmbeddedDocxFont = { name: string; data: Uint8Array; bold?: Uint8Arr
 export type DocxOptions = {
   /** Measured printable bounds from the shared browser plan, in CSS pixels. */
   printBox?: PrintBox;
-  breakBeforeDescription?: boolean;
+  releaseDescriptionKeep?: boolean;
   profile?: string;
   customModules?: Module[];
   cache?: Record<string, { body: RichNode; conclusion?: RichNode }>;
@@ -596,7 +596,7 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
     numbering: [], depth: 0, source, width: pageWidth - marginLeft - marginRight,
     ...(source ? { inherited: { font, size: fontSize, color: '000000' }, lineHeight: Number(a.lineHeight) || 1.05, spaceAfterPt: Number(a.spaceAfterPt) || 5 } : {}),
   };
-  const children = blocks((options.kind === 'template' ? doc : preparePrintDocument(doc,options.printBox,options.breakBeforeDescription)).content ?? [], context);
+  const children = blocks((options.kind === 'template' ? doc : preparePrintDocument(doc,options.printBox,options.releaseDescriptionKeep)).content ?? [], context);
   if (!children.length) children.push(new Paragraph({}));
   const file = new Document({
     creator: 'МРТ Альянс', title: cleanText(options.title ?? 'Протокол МРТ-исследования'),

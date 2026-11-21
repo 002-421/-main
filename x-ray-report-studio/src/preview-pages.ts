@@ -166,6 +166,14 @@ export function paginateBrowserPreview(html: string, doc: RichNode, calibration?
     return end<text.length&&lineCount(paragraphPart(block,end,text.length,text.length))>=2
       ? paragraphPart(block,0,end,text.length) : block;
   };
+  // Word can honor keep-with-next on ordinary flow paragraphs. A description
+  // taller than the entire available group must instead be allowed to flow.
+  const descriptionIndex=blocks.findIndex(block=>block.matches('p[data-last-description]'));
+  const bodyIndex=blocks.findIndex(block=>block.hasAttribute('data-conclusion-body'));
+  if(wordBox&&descriptionIndex>=0&&bodyIndex>descriptionIndex&&
+    !fitsOnEmptyPage([...blocks.slice(descriptionIndex,bodyIndex),firstConclusionLines(blocks[bodyIndex])])){
+    blocks[descriptionIndex].setAttribute('data-description-exceeds-keep-group','true');
+  }
   const moveChain=(follower:HTMLElement,canSplit=false)=>{
     const chain:HTMLElement[]=[];
     let previous=target.lastElementChild;
