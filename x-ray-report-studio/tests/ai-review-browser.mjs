@@ -124,8 +124,14 @@ try {
   await page.reload();
   await page.locator('#ai-review-status').waitFor({state:'attached'});
   assert.ok(!(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-report-studio.dictionary.v1')||'[]').includes('ошибкка'))),'dictionary deletion survives restart');
-  await page.locator('[data-section-id="description"]').first().evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el.firstElementChild);range.collapse(false);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
+  await page.locator('[data-section-id="description"]').first().evaluate(async el=>{
+    el.closest('[contenteditable]').focus();
+    const range=document.createRange();range.selectNodeContents(el.firstElementChild);range.collapse(false);
+    const selection=getSelection();selection.removeAllRanges();selection.addRange(range);
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  });
   await page.keyboard.type(' Ошибкка', {delay:20});
+  assert.match(await page.locator('[data-section-id="description"]').first().innerText(),/ Ошибкка/);
   assert.equal(await page.locator('.ai-review-underline').count(),0,'editing immediately invalidates all old positions');
   await page.locator('.ai-review-spelling').filter({hasText:'Ошибкка'}).first().waitFor({timeout:10000});
   assert.ok(await page.locator('.ai-review-spelling').count(),'debounced analysis runs automatically after edits');

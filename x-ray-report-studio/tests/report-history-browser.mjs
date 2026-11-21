@@ -252,9 +252,10 @@ try{
  assert.ok(firstLabel.includes('СверхдлиннаяСинтетическаяФамилия'),`tab displays the full surname instead of shortening it: ${JSON.stringify({firstTitle,firstLabel})}`);
  const tabWidths=await tabs.evaluateAll(elements=>elements.slice(0,12).map(button=>({scrollWidth:button.scrollWidth,clientWidth:button.clientWidth})));
  assert.ok(tabWidths.every(item=>item.scrollWidth<=item.clientWidth+1),`all tab names fit their naturally sized controls without clipping: ${JSON.stringify(tabWidths)}`);
- const samePatientLabels=await tabs.evaluateAll(elements=>elements.map(element=>element.innerText).filter(label=>label.includes('СверхдлиннаяСинтетическаяФамилия')));
- assert.equal(samePatientLabels.length,2,'both studies for the same synthetic patient remain identifiable');
- assert.ok(samePatientLabels.every(label=>label.split(' · ')[1]?.length===3),`same-patient tabs add the three-letter template code: ${JSON.stringify(samePatientLabels)}`);
+ const samePatientTabs=await tabs.evaluateAll(elements=>elements.filter(element=>element.innerText.includes('СверхдлиннаяСинтетическаяФамилия')).map(element=>({label:element.innerText.replace(/^● /,''),fullTitle:element.title})));
+ assert.equal(samePatientTabs.length,2,'both studies for the same synthetic patient remain identifiable');
+ assert.ok(samePatientTabs.every(tab=>tab.label===tab.fullTitle&&tab.label.split(' · ')[1]),'both tabs display the full surname and study name');
+ assert.equal(new Set(samePatientTabs.map(tab=>tab.label)).size,2,'the study names distinguish the reports');
  const tabMetrics=await page.locator('.report-tabs').evaluate(el=>({overflowX:getComputedStyle(el).overflowX,scrollWidth:el.scrollWidth,clientWidth:el.clientWidth,initialScrollLeft:el.scrollLeft}));
  assert.ok(['auto','scroll'].includes(tabMetrics.overflowX),`tab strip allows horizontal scrolling: ${JSON.stringify(tabMetrics)}`);
  assert.ok(tabMetrics.scrollWidth>tabMetrics.clientWidth,`12 naturally sized tabs exceed the available width and must scroll horizontally: ${JSON.stringify(tabMetrics)}`);
