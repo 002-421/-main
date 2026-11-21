@@ -34,7 +34,7 @@ try{
  const geometry=await page.locator('.word-reference-preview').first().evaluate(paper=>{
   const px=25.4/96,body=paper.querySelector('.report-content'),s=getComputedStyle(paper),b=body.getBoundingClientRect(),r=paper.getBoundingClientRect();
   return {width:r.width*px,left:(b.left-r.left)*px,right:(r.right-b.right)*px,body:b.width*px,
-   paragraphs:[...body.querySelectorAll('p')].map(p=>{const style=getComputedStyle(p),rect=p.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(p);const first=[...range.getClientRects()].find(r=>r.width>0);return{text:p.textContent,left:parseFloat(style.marginLeft)*px,right:parseFloat(style.marginRight)*px,first:parseFloat(style.textIndent)*px,width:rect.width*px,firstText:first?(first.left-rect.left)*px:0,font:style.fontSize,line:parseFloat(style.lineHeight)*72/96,before:parseFloat(style.marginTop)*72/96,after:parseFloat(style.marginBottom)*72/96};})};
+   paragraphs:[...body.querySelectorAll('p')].map(p=>{const style=getComputedStyle(p),rect=p.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(p);const first=[...range.getClientRects()].find(r=>r.width>0);return{text:p.textContent,left:parseFloat(style.marginLeft)*px,right:parseFloat(style.marginRight)*px,first:parseFloat(style.textIndent)*px,width:rect.width*px,firstText:first?(first.left-rect.left)*px:0,font:style.fontSize,minimum:Number(p.dataset.wordLineMinimumPt),line:parseFloat(style.lineHeight)*72/96,before:parseFloat(style.marginTop)*72/96,after:parseFloat(style.marginBottom)*72/96};})};
  });
  const download=page.waitForEvent('download');await page.locator('#preview-save-word').click();const zip=unzipSync(await readFile(await (await download).path()));const xml=strFromU8(zip['word/document.xml']);
  const section=xml.match(/<w:pgSz\b[^>]*>/)[0],margins=xml.match(/<w:pgMar\b[^>]*>/)[0];
@@ -44,7 +44,7 @@ try{
   const actual=geometry.paragraphs.find(p=>p.text.startsWith(prefix)),word=paragraphs.find(p=>p.includes('>'+prefix)),indent=word.match(/<w:ind\b[^>]*>/)?.[0]??'',spacing=word.match(/<w:spacing\b[^>]*>/)[0];
   near(actual.left,millimetres(indent,'left'),prefix+'left indent');near(actual.right,millimetres(indent,'right'),prefix+'right indent');near(actual.first,millimetres(indent,'firstLine'),prefix+'first line indent');
   near(actual.width,geometry.body-millimetres(indent,'left')-millimetres(indent,'right'),prefix+'paragraph content width');near(actual.firstText,actual.first,prefix+'actual first glyph position');
-  assert.match(spacing,/w:lineRule="atLeast"/);assert.ok(Math.abs(actual.line-millimetres(spacing,'line')*72/25.4)<.03,prefix+'line minimum follows OOXML');
+  assert.match(spacing,/w:lineRule="atLeast"/);assert.ok(Math.abs(actual.minimum-millimetres(spacing,'line')*72/25.4)<.03&&actual.line+.03>=actual.minimum,prefix+'line minimum follows OOXML');
   assert.ok(Math.abs(actual.before-millimetres(spacing,'before')*72/25.4)<.03);assert.ok(Math.abs(actual.after-millimetres(spacing,'after')*72/25.4)<.03);
  }
  await open();
@@ -96,7 +96,7 @@ try{
  // Simulate the same safe layout rejection seen with real Windows fonts. Only
  // detached Word-preview measurements change; editor/export geometry is intact.
  await page.evaluate(()=>{const original=Element.prototype.getBoundingClientRect;window.__restorePreviewMeasurement=()=>{Element.prototype.getBoundingClientRect=original;};Element.prototype.getBoundingClientRect=function(){const r=original.call(this);return this.matches('.word-reference-preview .report-content')&&this.children.length?new DOMRect(r.x,r.y,r.width,r.height+2000):r;};});
- await page.locator('#settings').click();await page.locator('#settings-preview-calibration,#settings-calibration-status').filter({hasText:'Калибровка недоступна:'}).first().waitFor();
+ await page.locator('#settings').click();await page.locator('#settings-expand-all').click();await page.locator('#settings-preview-calibration,#settings-calibration-status').filter({hasText:'Калибровка недоступна:'}).first().waitFor();
  await page.locator('#doctor-name').fill('Синтетический новый врач');await page.locator('#apply-doctor-now').check();
  assert.equal(await page.locator('#xrs-emergency').count(),0,'a rejected preview must not stop autosave or block physician settings');
  assert.match(await page.locator('#settings-preview-calibration,#settings-calibration-status').filter({hasText:'Калибровка недоступна:'}).first().innerText(),/Калибровка недоступна:.*Неделимый блок/);

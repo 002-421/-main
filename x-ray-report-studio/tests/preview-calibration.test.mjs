@@ -28,3 +28,16 @@ test('all seven physician sizes derive capacity dynamically and keep strictly po
  const values=[];for(const pt of [10,10.5,11,11.5,12,13,14]){const line=pt*96/72*1.05,base=capacity(850,860,line);values.push(base.baseLines);for(const offset of [-15,-1,0,1,15]){const x=calibratedCapacity(base,{version:1,enabled:true,offset,lastTarget:null});assert.ok(x.height>0&&x.height<=860);assert.ok(Math.abs(x.height-base.baseHeight-x.offset*line)<1e-9);}}
  assert.ok(new Set(values).size>1,'no hard-coded 50-line norm');assert.throws(()=>capacity(0,10,1));assert.throws(()=>capacity(10,9,1));
 });
+
+test('horizontal calibration reads old records and follows its own measured dimension', async()=>{
+ const {widthCapacity,calibratedWidth}=await import('../src/preview-calibration.ts');
+ const s=storage(),c=new PreviewCalibrations(s),base={version:1,enabled:true,offset:-3,lastTarget:47};
+ c.save('doctor',base);
+ const width=widthCapacity(650,690,6.5);
+ assert.equal(calibratedWidth(width,c.get('doctor')).width,650);
+ c.save('doctor',{...base,characterOffset:-4});
+ assert.deepEqual(new PreviewCalibrations(s).get('doctor'),{...base,characterOffset:-4});
+ assert.equal(calibratedWidth(width,{...base,enabled:false,characterOffset:-4}).width,624);
+ assert.equal(calibratedWidth(width,{...base,characterOffset:20}).width,689);
+ assert.throws(()=>c.save('doctor',{...base,characterOffset:21}));
+});

@@ -27,3 +27,23 @@ test('real dictionary finds supplied typos in header and conclusion, including D
  const again=await engine.review(imported.doc,new Set(['spelling']));
  assert.equal(again.suggestions.filter(s=>s.original==='исследрплаотования').length,4);
 });
+
+test('complete formatted and legacy patient names are masked while adjacent medical text is still checked',async()=>{
+ const name='Длиннофамильский-Экспериментальный Синтез Тестович';
+ const custom={type:'paragraph',content:[
+  {type:'text',text:'Ф.'},{type:'text',text:'И.О. пациента: ',marks:[{type:'bold'}]},
+  {type:'text',text:'Длиннофамильский-',marks:[{type:'templateField',attrs:{id:'custom-name',hint:'Фамилия имя отчество'}}]},
+  {type:'text',text:'Экспериментальный Синтез Тестович'},
+  {type:'text',text:'; паталогические изменения.'},
+ ]};
+ const defaultId=paragraph(name,[{type:'templateField',attrs:{id:'HEAD.BASE.1.FIELD.0001',filled:true}}]);
+ const input={type:'doc',content:[defaultId,custom,paragraph('Паталогические изменения.')]};
+ const blocks=Object.values(proofreadingBlocks(input));
+ assert.equal(blocks.length,2);
+ assert.ok(!blocks.join(' ').includes('Экспериментальный'));
+ assert.ok(!blocks.join(' ').includes('Синтез'));
+ const raw=custom.content.map(n=>n.text).join('');
+ assert.equal(blocks[0].length,raw.length);
+ assert.equal(blocks[0].indexOf('паталогические'),raw.indexOf('паталогические'));
+ assert.ok(blocks[0].endsWith('; паталогические изменения.'));
+});

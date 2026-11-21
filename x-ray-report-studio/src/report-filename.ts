@@ -1,3 +1,5 @@
+import { patientValueRange } from './patient-field.ts';
+
 export type FilenameFields = {
   number?: string;
   doctor?: string;
@@ -10,8 +12,8 @@ export function extractFilenameFields(text: string): Pick<FilenameFields, 'numbe
   const row = (pattern: RegExp) => text.match(pattern)?.[1]?.trim() ?? '';
   const number = row(/Протокол\s+МРТ[- ]исследования\s*№\s*([^\r\n]+)/i)
     .replace(/\s+(?:Ф\.\s*И\.\s*О\.|Дата\s+рождения|Вид\s+исследования)\s*:.*/i,'').trim();
-  const patient = row(/Ф\.\s*И\.\s*О\.?\s*пациент(?:а|ки)\s*:\s*([^\r\n]+)/i)
-    .replace(/\s+(?:Дата\s+рождения|Вид\s+исследования)\s*:.*/i,'').trim();
+  const range = patientValueRange(text);
+  const patient = range ? text.slice(range.from,range.to).trim() : '';
   const doctor = row(/Врач\s*:\s*([^\r\n]+)/i).replace(/\s+дата\s*:.*/i,'').trim();
   const date = row(/дата\s*:\s*(\d{1,2}\.\d{1,2}\.\d{4})/i);
   return {
@@ -41,14 +43,11 @@ export function patientSurname(value = ''): string {
   return /^(?:Ф\.?И\.?О\.?|дд\.мм\.гггг)$/i.test(surname) ? '' : surname;
 }
 
-export function buildReportTabName(patient: string, templateTitle: string, duplicatePatient: boolean, index: number, templateCodeSource = templateTitle): { label: string; fullTitle: string } {
+export function buildReportTabName(patient: string, templateTitle: string, index: number): { label: string; fullTitle: string } {
   const surname = patientSurname(patient);
-  if (!surname) return { label: `${templateTitle} ${index + 1}`, fullTitle: templateTitle };
-  const templateCode = templateCodeSource.replace(/[^a-zа-яё0-9]/giu, '').slice(0, 3).toLocaleUpperCase('ru');
-  return {
-    label: `${surname}${duplicatePatient ? ` · ${templateCode}` : ''}`,
-    fullTitle: `${surname} · ${templateTitle}`,
-  };
+  if (!surname) return {label: `${templateTitle} ${index + 1}`, fullTitle: templateTitle};
+  const title = `${surname} · ${templateTitle}`;
+  return {label: title, fullTitle: title};
 }
 
 export function buildReportFilename(fields: FilenameFields, suffix: '.docx' | '.pdf', fallbackDate: string): string {

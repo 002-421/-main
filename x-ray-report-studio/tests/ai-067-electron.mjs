@@ -51,7 +51,7 @@ try{
  await page.locator('[data-section-id="description"] p').last().click();await page.keyboard.press('End');await page.keyboard.press('Enter');await page.keyboard.press('Control+v');
  assert.ok((await page.locator('.report-content').innerText()).replace(/\s+/gu,' ').includes(copied.replace(/\s+/gu,' ')),'system plain text pastes back into XRS');
  console.log('PASS clipboard: real system plain-text write, identifier rejection, editable preview, paste back into XRS');
- await page.locator('#settings').click();await page.locator('#doctor-name').fill('Тестовый Врач');
+ await page.locator('#settings').click();await page.locator('#settings-expand-all').click();await page.locator('#doctor-name').fill('Тестовый Врач');
  await page.locator('#doctor-stamp-file').setInputFiles({name:'stamp.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW+0AAAAASUVORK5CYII=','base64')});
  await page.locator('#stamp-preview img').waitFor();
  for(const [selector,value] of [['#stamp-height','120'],['#stamp-position-x','25'],['#stamp-position-y','-15']])await page.locator(selector).evaluate((el,value)=>{el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}));},value);

@@ -15,7 +15,7 @@ try{
    installUpdate:()=>new Promise((_resolve,reject)=>{window.syntheticFailure=reject;})};
  });
  await page.goto(`http://127.0.0.1:${server.address().port}`);
- await page.locator('#settings').click();await page.locator('#check-updates').click();
+ await page.locator('#settings').click();await page.locator('#settings-expand-all').click();await page.locator('#check-updates').click();
  await page.locator('#install-update').click();await page.locator('#confirm-update-install').click();
  await page.locator('#update-progress').waitFor({state:'visible'});
  await page.waitForFunction(()=>typeof window.syntheticProgress==='function');

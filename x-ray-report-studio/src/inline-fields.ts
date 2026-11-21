@@ -287,7 +287,8 @@ export const SourceFormat = Extension.create({
     for (const [name, property, unit] of [
       ['fontFamily', 'font-family', ''], ['fontSizePt', 'font-size', 'pt'], ['spaceBeforePt', 'margin-top', 'pt'], ['spaceAfterPt', 'margin-bottom', 'pt'], ['lineHeight', 'line-height', ''], ['firstLineIndentPt', 'text-indent', 'pt'], ['leftIndentPt', 'margin-left', 'pt'], ['rightIndentPt', 'margin-right', 'pt'],
     ]) paragraphAttrs[name] = { default: null, renderHTML: (a: Record<string, any>) => a[name] != null ? { style: `${property}:${a[name]}${unit}` } : {} };
-    paragraphAttrs.keepNext = { default: null, renderHTML: (a: Record<string, any>) => a.keepNext ? { style: 'break-after:avoid', 'data-keep-next':'true' } : {} };
+    paragraphAttrs.keepNext = { default: null, renderHTML: (a: Record<string, any>) => typeof a.keepNext === 'boolean'
+      ? { ...(a.keepNext ? {style: 'break-after:avoid'} : {}), 'data-keep-next':String(a.keepNext) } : {} };
     paragraphAttrs.pageBreakBefore = { default: null, renderHTML: (a: Record<string, any>) => a.pageBreakBefore ? { style: 'break-before:page', 'data-page-break-before':'true' } : {} };
     return [
       { types: ['doc'], attributes: Object.fromEntries(['sourceFormat', 'pageWidthMm', 'pageHeightMm', 'marginTopMm', 'marginBottomMm', 'marginLeftMm', 'marginRightMm', 'fontFamily', 'fontSizePt', 'lineHeight', 'spaceAfterPt'].map(k => [k, attr()])) },

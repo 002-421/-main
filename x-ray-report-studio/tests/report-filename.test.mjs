@@ -24,7 +24,6 @@ test('report tabs use the full patient surname', () => {
   assert.equal(patientSurname('Лунева И.В.'), 'Лунева');
   assert.equal(patientSurname('Лунева Ирина Викторовна'), 'Лунева');
   assert.equal(patientSurname('дд.мм.гггг'), '');
-  assert.deepEqual(buildReportTabName('Петров Иван Алексеевич','Головной мозг',false,0),{label:'Петров',fullTitle:'Петров · Головной мозг'});
-  assert.deepEqual(buildReportTabName('Петров Иван Алексеевич','Головной мозг',true,0),{label:'Петров · ГОЛ',fullTitle:'Петров · Головной мозг'});
-  assert.deepEqual(buildReportTabName('Петров Иван Алексеевич','ГМ',true,0,'ГМ SD'),{label:'Петров · ГМS',fullTitle:'Петров · ГМ'});
+  assert.deepEqual(buildReportTabName('Петров Иван Алексеевич','Головной мозг',0),{label:'Петров · Головной мозг',fullTitle:'Петров · Головной мозг'});
+  assert.deepEqual(buildReportTabName('Абрамович-Барановский И.В.','ГМ+ВСП',0),{label:'Абрамович-Барановский · ГМ+ВСП',fullTitle:'Абрамович-Барановский · ГМ+ВСП'});
 });

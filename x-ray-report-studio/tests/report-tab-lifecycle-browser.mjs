@@ -53,22 +53,33 @@ try {
   }
 
   const firstId = await activeId();
-  await fillPatient('Петров');
-  assert.match(await page.locator('.report-tab.active .report-tab-select').getAttribute('title'), /Петров/);
+  await fillPatient('Абрамович-Барановский');
+  assert.match(await page.locator('.report-tab.active .report-tab-select').getAttribute('title'), /Абрамович-Барановский/);
   await exportDocx();
   const secondId = await addByTemplate('Иванов');
   assert.equal(await count(), 2, 'two open reports are supported');
   await exportDocx();
-  const thirdId = await addByTemplate('Смирнова');
+  const thirdId = await addByTemplate('Иванов');
   while (await count() < 5) await page.locator('#add-report-tab').click();
   assert.equal(await count(), 5, 'five open reports are supported');
-  while (await count() < 12) await page.locator('#add-report-tab').click();
-  assert.equal(await count(), 12, 'twelve open reports are supported');
+  const openingStarted=Date.now();
+  for(const capacity of [13,20,30,50]){
+    while(await count()<capacity)await page.locator('#new-report').click();
+    assert.equal(await count(),capacity);
+  }
+  console.log(`Opened from 5 to 50 tabs in ${Date.now()-openingStarted} ms including browser interactions and persistence.`);
+  const fiftieth=await activeId();
+  await fillPatient('Длиннофамильский-Экспериментальный');
+  const last=page.locator(`[data-report-select="${fiftieth}"]`);
+  assert.match(await last.innerText(), /Длиннофамильский-Экспериментальный · /);
+  assert.match(await last.getAttribute('title'), /Длиннофамильский-Экспериментальный · /);
+  assert.ok(await last.evaluate(tab=>tab.scrollWidth<=tab.clientWidth));
+  assert.ok(await page.locator('#report-tabs').evaluate(strip=>strip.scrollWidth>strip.clientWidth),'long workspaces scroll horizontally');
   const ids = await page.locator('.report-tab-select').evaluateAll(nodes => nodes.map(node => node.dataset.reportSelect));
-  assert.equal(new Set(ids).size, 12, 'all reports have unique identities');
-  assert.ok(ids.includes(firstId) && ids.includes(secondId) && ids.includes(thirdId), 'the twelve-tab workspace retains exported patient reports');
+  assert.equal(new Set(ids).size, 50, 'all reports have unique identities');
+  assert.ok(ids.includes(firstId) && ids.includes(secondId) && ids.includes(thirdId), 'the fifty-tab workspace retains exported patient reports');
 
-  for (const [id, surname] of [[firstId, 'Петров'], [secondId, 'Иванов'], [thirdId, 'Смирнова']]) {
+  for (const [id, surname] of [[firstId, 'Абрамович-Барановский'], [secondId, 'Иванов'], [thirdId, 'Иванов']]) {
     const tab = page.locator(`[data-report-select="${id}"]`);
     assert.match(await tab.getAttribute('title'), new RegExp(surname));
     await tab.click();
@@ -79,13 +90,34 @@ try {
   const beforeReload = await page.locator('.report-tab-select').evaluateAll(nodes => nodes.map(node => ({ id: node.dataset.reportSelect, title: node.title })));
   await page.reload();
   await page.locator('.report-content').waitFor();
-  assert.equal(await count(), 12, 'all twelve report tabs recover after reload');
+  assert.equal(await count(), 50, 'all fifty report tabs recover after reload');
   for (const report of beforeReload) {
     const tab = page.locator(`[data-report-select="${report.id}"]`);
     assert.equal(await tab.count(), 1, 'workspace recovery retains report identity');
     assert.equal(await tab.getAttribute('title'), report.title, 'patient title remains stable after workspace recovery');
   }
-  console.log('PASS: DOCX export before and after new patients, template selection retains prior tabs, unique identities and stable surnames across 1/2/5/12 tabs and workspace reload.');
+  await last.click();
+  await page.keyboard.press('Control+z');
+  assert.doesNotMatch(await last.innerText(),/Длиннофамильский-Экспериментальный/);
+  await page.keyboard.press('Control+y');
+  assert.match(await last.innerText(),/Длиннофамильский-Экспериментальный/);
+  assert.match(await page.locator(`[data-report-select="${secondId}"]`).getAttribute('title'),/Иванов/);
+  await page.waitForFunction(()=>document.querySelector('#save-state')?.textContent==='Сохранено на компьютере');
+  const beforeQuota=await page.evaluate(key=>{
+    const set=Storage.prototype.setItem;
+    window.xrsFixtureQuota=true;
+    Storage.prototype.setItem=function(k,v){if(k===key&&window.xrsFixtureQuota)throw new DOMException('Quota exceeded','QuotaExceededError');return set.call(this,k,v);};
+    return localStorage.getItem(key);
+  },workspaceKey);
+  await fillPatient('Несохранённый-Синтетический');
+  await page.getByRole('alert').filter({hasText:'Не удалось сохранить рабочее пространство'}).waitFor();
+  assert.match(await last.innerText(),/Несохранённый-Синтетический/,'unsaved text stays in its tab');
+  assert.equal(await count(),50,'no tabs are closed on quota failure');
+  assert.equal(await page.evaluate(key=>localStorage.getItem(key),workspaceKey),beforeQuota,'the last saved workspace survives');
+  await page.evaluate(()=>{window.xrsFixtureQuota=false;});
+  await page.keyboard.press('Control+z');
+  assert.match(await last.innerText(),/Длиннофамильский-Экспериментальный/,'history remains available after quota failure');
+  console.log('PASS: DOCX export before and after new patients, template selection retains prior tabs, unique identities and stable surnames across 1/2/5/13/20/30/50 tabs and workspace reload.');
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));

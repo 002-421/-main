@@ -111,7 +111,7 @@ try{
 
  const depthValues=[];
  for(const depth of ['100','250','500','1000']){
-  await page.locator('#settings').click();
+  await page.locator('#settings').click();await page.locator('#settings-expand-all').click();
   const selector=page.locator('#history-depth');
   await selector.waitFor();
   assert.deepEqual(await selector.locator('option').evaluateAll(options=>options.map(option=>option.value)),['100','250','500','1000']);

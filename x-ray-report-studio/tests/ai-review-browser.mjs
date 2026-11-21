@@ -114,7 +114,7 @@ try {
   assert.ok(await page.locator('.ai-review-card').innerText().then(text=>text.includes('Ошибкка')));
   await page.getByRole('button',{name:'Запомнить термин'}).click();
   assert.ok(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-report-studio.dictionary.v1')||'[]').includes('ошибкка')),'remembered term is stored in the separate personal dictionary');
-  await page.locator('#settings').click();
+  await page.locator('#settings').click();await page.locator('#settings-expand-all').click();
   await page.locator('#dictionary-settings').click();
   const words=page.locator('#personal-words');
   const withoutRemembered=(await words.inputValue()).split(/\s+/).filter(word=>word.toLocaleLowerCase('ru')!=='ошибкка').join('\n');

@@ -178,6 +178,7 @@ function paragraph(node: RichNode, context: Context, extra: IParagraphOptions = 
     widowControl: true,
     ...(heading ? { keepNext: true, keepLines: true } : {}),
     ...(typeof attrs.keepNext === 'boolean' ? { keepNext: attrs.keepNext } : {}),
+    ...(typeof attrs.keepLines === 'boolean' ? { keepLines: attrs.keepLines } : {}),
     ...(attrs.pageBreakBefore === true ? { pageBreakBefore: true } : {}),
     ...(context.indent ? { indent: { left: context.indent } } : {}),
     ...extra,

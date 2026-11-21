@@ -158,7 +158,7 @@ try{
  await page.keyboard.press('Control+z');assert.match(await page.locator('.report-content').innerText(),/справа 0,0 см, слева 0,0 см/);
  console.log('PASS: editing a yellow template measurement removes the yellow fill and Undo restores it.');
 
- await page.locator('#settings').click();
+ await page.locator('#settings').click();await page.locator('#settings-expand-all').click();
  await page.locator('#update-current-version').waitFor();
  assert.equal(await page.locator('#update-current-version').textContent(),expectedApplicationVersion);
  assert.equal(await page.locator('#check-updates').isVisible(),true,'update checks remain available manually');
@@ -224,10 +224,10 @@ try{
  assert.ok(pasteDiagnostic.pasteEvents.some(event=>event.syntheticPayloadReceived),'renderer received the actual synthetic paste event');
  console.log(`PASS: prompt text supports partial editing, full replacement, and clipboard paste (${Date.now()-pasteStarted} ms).`);
 
- await page.locator('#settings').click();assert.equal(await page.locator('#dictionary-settings').textContent(),'Личный словарь');await page.locator('#dictionary-settings').click();assert.equal(await page.locator('[role="dialog"] h2').textContent(),'Личный словарь');assert.equal(await page.locator('#personal-words').inputValue(),'','built-in medical vocabulary is separate from the new personal dictionary');await page.locator('[role="dialog"] [data-close]').first().click();
- await page.locator('#settings').click();await page.locator('#doctor-name').fill('Иванова Мария Петровна');await page.locator('#apply-doctor-now').check();await page.locator('#save-settings').click();
+ await page.locator('#settings').click();await page.locator('#settings-expand-all').click();assert.equal(await page.locator('#dictionary-settings').textContent(),'Личный словарь');await page.locator('#dictionary-settings').click();assert.equal(await page.locator('[role="dialog"] h2').textContent(),'Личный словарь');assert.equal(await page.locator('#personal-words').inputValue(),'','built-in medical vocabulary is separate from the new personal dictionary');await page.locator('[role="dialog"] [data-close]').first().click();
+ await page.locator('#settings').click();await page.locator('#settings-expand-all').click();await page.locator('#doctor-name').fill('Иванова Мария Петровна');await page.locator('#apply-doctor-now').check();await page.locator('#save-settings').click();
  assert.equal(await field(doctorId).innerText(),'Иванова Мария Петровна');
- await page.locator('#settings').click();await page.locator('#saved-doctor-choice').selectOption({label:'Иванова Мария Петровна'});assert.equal(await page.locator('#doctor-name').inputValue(),'Иванова Мария Петровна');await page.locator('.dialog-overlay footer [data-close]').click();
+ await page.locator('#settings').click();await page.locator('#settings-expand-all').click();await page.locator('#saved-doctor-choice').selectOption({label:'Иванова Мария Петровна'});assert.equal(await page.locator('#doctor-name').inputValue(),'Иванова Мария Петровна');await page.locator('.dialog-overlay footer [data-close]').click();
  await field(doctorId).evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await page.keyboard.insertText('Петров Алексей Иванович');
  assert.match(await page.locator('.report-content').innerText(),/Петров Алексей Иванович/);
  assert.doesNotMatch(await page.locator('.report-content').innerText(),/Иванова Мария Петровна/);
@@ -515,7 +515,7 @@ try{
  await browserPage.locator(`[data-field-id="${patientId}"]`).evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});await browserPage.keyboard.insertText('Проверка браузерной версии');
  await browserPage.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');await browserPage.reload();
  assert.equal(await browserPage.locator(`[data-field-id="${patientId}"]`).innerText(),'Проверка браузерной версии');
- await browserPage.locator('#settings').click();await browserPage.locator('#doctor-name').fill('Тестов Иван Петрович');
+ await browserPage.locator('#settings').click();await browserPage.locator('#settings-expand-all').click();await browserPage.locator('#doctor-name').fill('Тестов Иван Петрович');
  const jpegBytes=await browserPage.evaluate(async()=>{const canvas=document.createElement('canvas');canvas.width=1200;canvas.height=1000;const context=canvas.getContext('2d'),pixels=context.createImageData(canvas.width,canvas.height);let seed=112233;for(let i=0;i<pixels.data.length;i+=4){seed=(seed*1664525+1013904223)>>>0;pixels.data[i]=seed&255;pixels.data[i+1]=(seed>>>8)&255;pixels.data[i+2]=(seed>>>16)&255;pixels.data[i+3]=255;}context.putImageData(pixels,0,0);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.95));const transfer=new DataTransfer();transfer.items.add(new File([blob],'stamp.jpg',{type:'image/jpeg'}));const input=document.querySelector('#doctor-stamp-file');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));return blob.size;});
  assert.ok(jpegBytes>1_000_000&&jpegBytes<=5*1024*1024,'JPG above the former 1 MB limit is accepted');await browserPage.locator('#stamp-preview img').waitFor();for(const [id,value] of [['#stamp-position-y','35'],['#stamp-position-x','-45']])await browserPage.locator(id).evaluate((input,value)=>{input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));},value);await browserPage.locator('#save-settings').click();
  const storedStamp=await browserPage.evaluate(()=>{const value=JSON.parse(localStorage.getItem('mri-alliance.settings.v3'));return {image:value.doctorStamps['Тестов Иван Петрович'],size:value.doctorStampSizes['Тестов Иван Петрович'],position:value.doctorStampPositions['Тестов Иван Петрович']};});

@@ -77,7 +77,7 @@ html[data-theme="dark"] .report-tab-add{background:#202c39;border-color:#34414f;
 .export-preview-paper{position:relative;width:var(--preview-width,210mm);min-height:var(--preview-height,297mm);padding:var(--preview-top,43mm) var(--preview-right,18mm) var(--preview-bottom,16mm) var(--preview-left,18mm);border:0;box-shadow:0 0 0 1px #d8d8d8}
 .export-preview-paper .report-content,.preview-measure .report-content{width:auto!important;min-height:0!important;padding:0!important;display:flow-root;font-size:var(--preview-font-size,11pt)!important;line-height:1.239;color:#000;overflow:visible!important}
 .preview-measure{min-height:0!important;height:auto!important}
-.preview-measure .report-content{width:calc(var(--preview-width,210mm) - var(--preview-left,18mm) - var(--preview-right,18mm))!important}
+.preview-measure .report-content{width:var(--preview-wrap-width,calc(var(--preview-width,210mm) - var(--preview-left,18mm) - var(--preview-right,18mm)))!important}
 .export-preview-paper .preview-paragraph-fragment{margin-bottom:0!important}
 .export-preview-paper .preview-paragraph-continuation{margin-top:0!important;text-indent:0!important}
 .preview-word-footer{position:absolute;left:var(--preview-left,18mm);right:var(--preview-right,18mm);bottom:6.5mm;text-align:center;color:#64748b;font:8pt/1.05 Arial,sans-serif}
@@ -168,3 +168,25 @@ html[data-theme=dark] .word-preview-dialog #preview-calibration-warning,html[dat
 }
 #editor .report-content :is(p,h1,h2,h3):has(+ hr[data-manual-rule]) { margin-bottom: 0 !important; }
 #editor .report-content hr[data-manual-rule] + :is(p,h1,h2,h3):not([data-page-break-before=true]) { margin-top: 0 !important; }
+
+.doctor-settings-dialog {
+  display:flex;
+  flex-direction:column;
+  max-height:calc(100dvh - 32px);
+  overflow:hidden;
+}
+.doctor-settings-dialog > header,
+.doctor-settings-dialog > footer { flex:0 0 auto; }
+.doctor-settings-dialog > .dialog-body { min-height:0; overflow:auto; }
+.doctor-settings-dialog .settings-section {
+  border:1px solid var(--border);
+  border-radius:6px;
+  margin:8px 0;
+  color:inherit;
+}
+.settings-section > summary { padding:11px 12px; cursor:pointer; font-weight:600; }
+.settings-section[open] > summary { border-bottom:1px solid var(--border); }
+.settings-section-body { padding:12px; }
+
+.export-preview-paper[style*="--preview-wrap-width"] .report-content { width:var(--preview-wrap-width)!important; }
+.preview-calibration-controls h4 {margin:12px 0 6px;font-size:13px;}

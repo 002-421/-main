@@ -47,7 +47,7 @@ try{
  assert.ok(JSON.parse(await readFile(path.join(shared,'dictionary.json'),'utf8')).includes('ошибкка'));
  await app.close();app=undefined;await launch();
  assert.ok((await page.evaluate(()=>window.desktop.dictionaryLoad())).words.includes('ошибкка'));
- await page.locator('#settings').click();await page.locator('#dictionary-settings').click();
+ await page.locator('#settings').click();await page.locator('#settings-expand-all').click();await page.locator('#dictionary-settings').click();
  const input=page.locator('#personal-words');await input.fill((await input.inputValue()).split(/\s+/).filter(w=>w!=='ошибкка').join('\n'));await page.locator('#save-dictionary').click();
  await page.waitForFunction(()=>!JSON.parse(localStorage.getItem('mri-report-studio.dictionary.v1')||'[]').includes('ошибкка'));
  await app.close();app=undefined;await launch();

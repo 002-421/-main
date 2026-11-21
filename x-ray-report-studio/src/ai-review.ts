@@ -1,4 +1,5 @@
 import type { RichNode } from './model';
+import { isPatientField, maskPatientValue, patientMask } from './patient-field.ts';
 import { MedicalTerminologyEngine, ClinicalConsistencyEngine, ClinicalLogicEngine } from './clinical-review.ts';
 
 export type ReviewBlockId = string;
@@ -63,13 +64,17 @@ export function proofreadingBlocks(doc: RichNode): ReviewBlocks {
     if (['paragraph','heading'].includes(n.type) && /^\s*(?:Данное заключение не является диагнозом|Исследование выполнено на .*томографе)/iu.test((n.content??[]).map(child=>child.text??'').join(''))) return;
     if (['paragraph','heading'].includes(n.type)) {
       let text = '';
+      const identifiers:{from:number;to:number}[]=[];
       for (const child of n.content ?? []) {
         const value = child.type === 'text' ? child.text ?? '' : child.type === 'hardBreak' ? '\n' : ' ';
         const field = child.marks?.find(m => m.type === 'templateField');
-        const identifier = field && /patient|doctor|physician|birthdate|reportdate|number|FIELD\.0043/i.test(String(field.attrs?.id)) || !!field && /Ф\.?\s*И\.?\s*О|дата рождения|номер исследования|Фамилия/iu.test(String(field.attrs?.hint));
-        text += identifier ? ' '.repeat(value.length) : value;
+        const identifier = isPatientField(field?.attrs) || field && /patient|doctor|physician|birthdate|reportdate|number|FIELD\.0043/i.test(String(field.attrs?.id)) || !!field && /Ф\.?\s*И\.?\s*О|дата рождения|номер исследования|Фамилия/iu.test(String(field.attrs?.hint));
+        if(identifier)identifiers.push({from:text.length,to:text.length+value.length});
+        text += value;
       }
-      if (text.trim()) blocks[`paragraph@${pos}`] = text;
+      text = text.split('\n').map(maskPatientValue).join('\n');
+      for(const {from,to} of identifiers)text=text.slice(0,from)+patientMask.repeat(to-from)+text.slice(to);
+      if (text.replaceAll(patientMask,'').trim()) blocks[`paragraph@${pos}`] = text;
       return;
     }
     let offset = n.type === 'doc' ? 0 : pos + 1;

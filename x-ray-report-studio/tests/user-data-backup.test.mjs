@@ -137,9 +137,9 @@ test('backup destination cannot be inside the profile or installation directory'
  await assert.rejects(createUserDataBackup({userDataDir:data,backupRoot:path.join(data,'backups')}),/отдельным от профиля/);
 });
 
-test('backup preserves 1, 5 and 12 open synthetic reports and template state',async t=>{
+test('backup preserves 1, 5, 12 and 50 open synthetic reports and template state',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'xrs-report-counts-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
- for(const count of [1,5,12]){
+ for(const count of [1,5,12,50]){
   const profile=path.join(root,`profile-${count}`),backups=path.join(root,`backups-${count}`),store=path.join(profile,'Local Storage','leveldb');
   await fs.mkdir(store,{recursive:true});
   const workspace={activeId:`synthetic-${count}-1`,reports:Array.from({length:count},(_,i)=>({id:`synthetic-${count}-${i+1}`,templateId:`template-${i+1}`,dirty:i%2===0,doc:{type:'doc',content:[{type:'text',text:`SYNTHETIC REPORT ${count}-${i+1}`} ]}}))};

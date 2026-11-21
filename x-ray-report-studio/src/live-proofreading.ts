@@ -3,6 +3,7 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { ProofIssue } from './proofreading-core';
+import { isPatientField, maskPatientValue, patientMask } from './patient-field.ts';
 
 export type LiveProofIssue = { issue: ProofIssue; from: number; to: number };
 export type ProofStatus = { enabled: boolean; checking: boolean; count: number; error?: string };
@@ -17,6 +18,7 @@ const proofKey = new PluginKey<ProofState>('mriLiveProofreading');
 /** Only actual report prose is checked. Empty prompts and atoms break context. */
 export function createProofreadingSnapshot(doc: ProseMirrorNode): LiveProofSnapshot {
   const segments: Segment[] = [];
+  const patientRuns: {from:number;to:number}[]=[];
   let text = '';
   const separator = () => { if (text && !text.endsWith('\n')) text += '\n'; };
   doc.descendants((node, pos) => {
@@ -26,16 +28,20 @@ export function createProofreadingSnapshot(doc: ProseMirrorNode): LiveProofSnaps
       const field = node.marks.find(mark => mark.type.name === 'templateField');
       if (field && field.attrs.filled === false) { separator(); return; }
       const value = node.text ?? '';
-      segments.push({ start: text.length, end: text.length + value.length, pos });
+      if(isPatientField(field?.attrs))patientRuns.push({from:text.length,to:text.length+value.length});
+      else segments.push({ start: text.length, end: text.length + value.length, pos });
       text += value;
     } else if (node.isLeaf && !node.isText) separator();
   });
+  text = text.split('\n').map(maskPatientValue).join('\n');
+  for(const {from,to} of patientRuns)text=text.slice(0,from)+patientMask.repeat(to-from)+text.slice(to);
   return { doc, text, segments };
 }
 
 /** Refuse edits across paragraphs, missing prompts, hard breaks or atoms. */
 export function locateProofreadingIssue(snapshot: LiveProofSnapshot, issue: ProofIssue): LiveProofIssue | null {
-  if (issue.start < 0 || issue.end <= issue.start || issue.end > snapshot.text.length) return null;
+  if (issue.start < 0 || issue.end <= issue.start || issue.end > snapshot.text.length ||
+    snapshot.text.slice(issue.start,issue.end).includes(patientMask)) return null;
   const first = snapshot.segments.findIndex(s => issue.start >= s.start && issue.start < s.end);
   const last = snapshot.segments.findIndex(s => issue.end > s.start && issue.end <= s.end);
   if (first < 0 || last < first) return null;
