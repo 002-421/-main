@@ -43,7 +43,7 @@ try{
   assert.ok(geometry.every(g=>g.bottom<g.footer),'content does not overlap footer');assert.deepEqual(await currentDoc(),source,'editor source remains unchanged');return geometry;
  }
  stage='defaults and one-line steps';await load(fixture(35));const source=await currentDoc();await open();await page.screenshot({path:'test-output/calibration-default.png',fullPage:true});const originalHTML=await page.locator('.paginated-browser-preview').innerHTML(),baseGeometry=await validate(source),basePages=await pages().count();let data=await controlData();
- assert.equal(await controls().locator('[data-calibration-enabled]').isChecked(),false);assert.equal(Number(data.offset),0);assert.equal(data.baseHeight,data.effectiveHeight);assert.ok(Number(data.baseLines)>0);assert.equal(await controls().locator('[data-calibration-plus]').isDisabled(),true,'physical upper bound protects footer');
+ assert.equal(await controls().locator('[data-calibration-enabled]').isChecked(),false);assert.equal(Number(data.offset),0);assert.equal(data.baseHeight,data.effectiveHeight);assert.ok(Number(data.baseLines)>0);assert.equal(await controls().locator('[data-calibration-plus]').isDisabled(),Number(data.baseLines)===Number(await controls().locator('[data-calibration-target]').getAttribute('max')));
  await controls().locator('[data-calibration-enabled]').check();await controls().locator('[data-calibration-minus]').click();let lower=await controlData();assert.ok(Math.abs(Number(data.baseHeight)-Number(lower.effectiveHeight)-Number(data.standardLine))<.03,'minus one subtracts one measured standard line');await validate(source);
  await controls().locator('[data-calibration-plus]').click();assert.ok(Math.abs(Number((await controlData()).effectiveHeight)-Number(data.baseHeight))<.03);assert.equal(await page.locator('.paginated-browser-preview').innerHTML(),originalHTML,'zero offset restores exact baseline');
  const target=controls().locator('[data-calibration-target]'),minimum=Number(await target.getAttribute('min'));await target.fill(String(minimum));await target.press('Tab');assert.equal(await controls().locator('[data-calibration-minus]').isDisabled(),true);await validate(source);
@@ -105,6 +105,44 @@ try{
  console.log('PASS: all seven font sizes and deleted/recreated physician isolation.');
  const matrix=[['one page',8,'',false],['two pages',30,'',false],['three pages',50,'',false],['four pages',70,'',false],['five pages',95,'',false],['long conclusion',20,'conclusion',true],['split paragraph',2,'paragraph',false],['table',20,'table',true],['large indivisible image',0,'image',false]];
  for(const [name,n,special,optimize] of matrix){stage=name;await load(fixture(n,11,special),optimize);const source=await currentDoc();await open();const original=await pages().count();if(!special)assert.equal(original,{'one page':1,'two pages':2,'three pages':3,'four pages':4,'five pages':5}[name]);const originalGeometry=await validate(source);await controls().locator('[data-calibration-enabled]').check();await controls().locator('[data-calibration-target]').fill(String(Number((await controlData()).baseLines)-15));await controls().locator('[data-calibration-target]').press('Tab');const after=await validate(source);assert.ok((await pages().count())>=original);for(const g of after)assert.equal(g.css,originalGeometry[0].css);if(special==='image')assert.match(await page.locator('#preview-calibration-warning').innerText(),/Поправка не применена/);console.log(`${name}: ${original} → ${await pages().count()} preview pages; optimizer ${optimize}; all text retained`);await close();}
+ stage='positive calibration within the unchanged physical area';
+ const synthetic=fixture(33,10);
+ // The same Arial 10 pt input must be testable on systems with different fonts.
+ await load(synthetic);
+ await page.addStyleTag({content:'div[style*="line-height: normal"][style*="font-size: 10pt"][style*="left: -10000px"] { line-height:11.9pt!important; }'});
+ const beforeWord=await word(),beforePdf=await pdfInput(),beforeSource=await currentDoc();
+ await open();
+ const before=await controlData(),originalPreview=await validate(beforeSource);
+ const initialLines=Number(before.baseLines);
+ assert.ok(initialLines>0);
+ const plus=controls().locator('[data-calibration-plus]');
+ const targetOffset=controls().locator('[data-calibration-target]');
+ assert.equal(await plus.isEnabled(),true,'+1 is available at the baseline with a safe line correction');
+ await controls().locator('[data-calibration-enabled]').check();
+ await plus.click();
+ assert.equal(Number(await targetOffset.inputValue()),initialLines+1);
+ const after=await controlData();
+ assert.equal(after.baseHeight,after.effectiveHeight);
+ assert.ok(Number(after.lineScale)<1);
+ const compactPreview=await validate(beforeSource);
+ assert.ok(compactPreview.every(p=>p.css===originalPreview[0].css&&Math.abs(p.paper-originalPreview[0].paper)<.1&&Math.abs(p.footer-originalPreview[0].footer)<.1));
+ await page.locator('.paginated-browser-preview').evaluate(el=>{
+  for(const p of el.querySelectorAll('p[data-word-line-minimum-pt]')){
+   if(parseFloat(getComputedStyle(p).lineHeight)*.75+.01<Number(p.dataset.wordLineMinimumPt))throw new Error('Line is below the declared Word minimum');
+  }
+ });
+ const maximum=Number(await targetOffset.getAttribute('max'));
+ await targetOffset.fill(String(maximum));await targetOffset.press('Tab');
+ assert.equal(await plus.isDisabled(),true,'the typographic limit disables further increases');
+ await validate(beforeSource);
+ await close();await page.reload();
+ await page.addStyleTag({content:'div[style*="line-height: normal"][style*="font-size: 10pt"][style*="left: -10000px"] { line-height:11.9pt!important; }'});
+ await open();
+ assert.equal(Number((await controlData()).offset),maximum-initialLines,'positive calibration persists after a restart');
+ await close();
+ assert.equal(await word(),beforeWord,'positive calibration leaves Word XML unchanged');
+ assert.equal(await pdfInput(),beforePdf,'positive calibration leaves PDF input unchanged');
+ console.log(`PASS: ${initialLines} → ${initialLines+1}, physical height/footer, width, Word/PDF and restart.`);
  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);console.log('PASS: 1–5 pages, long conclusion/paragraph/table/stamp/footer, safe failure, optimization on/off and local-only calibration.');
 }catch(error){await writeFile('test-output/calibration-failure.json',JSON.stringify({stage,error:error.stack},null,2));await page?.screenshot({path:'test-output/calibration-failure.png',fullPage:true}).catch(()=>{});console.error('Calibration stage:',stage);throw error;}
 finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}

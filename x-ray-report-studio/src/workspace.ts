@@ -899,10 +899,10 @@ function doctorCalibration(format:DoctorFormat):PreviewCalibration {
 }
 function calibratedPreview(plan:PrintPlan,value:PreviewCalibration){
  if(!plan.previewSourceHtml)throw new Error('Исходная печатная раскладка недоступна.');
- const baseline=()=>paginateBrowserPreview(plan.previewSourceHtml!,plan.document,undefined,plan.box);
+ const baseline=()=>paginateBrowserPreview(plan.previewSourceHtml!,plan.document,undefined,plan.box,true);
  if((!value.enabled||value.offset===0)&&!value.widthOffsetMm)return{html:baseline(),warning:''};
  try {
-  return{html:paginateBrowserPreview(plan.previewSourceHtml,plan.document,value,plan.box),warning:''};
+  return{html:paginateBrowserPreview(plan.previewSourceHtml,plan.document,value,plan.box,true),warning:''};
  }catch(error){return{html:baseline(),warning:`Поправка не применена к этому документу: ${(error as Error).message} Показан базовый предпросмотр; Word и PDF не изменены.`};}
 }
 function mountDoctorCalibration(root:HTMLElement,plan:PrintPlan,format:DoctorFormat|undefined,change:()=>void,openPreview?:()=>void){

@@ -5,7 +5,7 @@ import { DISCLAIMER_TEXT, EQUIPMENT_TEXT } from './report-footer.ts';
 
 export { previewPageLayout } from './page-geometry.ts';
 import { previewPageLayout } from './page-geometry.ts';
-import {wordPreviewGeometry,normalizeWordPreview} from './word-preview.ts';
+import {wordPreviewGeometry,normalizeWordPreview,previewLineFloor} from './word-preview.ts';
 
 /** The same footer measurement supplies preview and print-only object bounds. */
 function createMeasurement(doc: RichNode, wordBox?:PrintBox, wrapWidth?:number) {
@@ -61,7 +61,8 @@ export function measurePreviewCapacity(doc:RichNode,wordBox?:PrintBox) {
     if(wordBox)normalizeWordPreview(box.measure,doc);
     const lineHeight=probe.getBoundingClientRect().height/box.scale;
     const maximum=Math.max(box.contentHeight,Math.min((box.layout.heightMm-box.layout.topMm-box.layout.bottomMm)*96/25.4,(box.layout.heightMm-box.layout.topMm-6.5)*96/25.4-box.footerHeight-1));
-    return capacity(box.contentHeight,maximum,lineHeight);
+    const minimumLineHeight=wordBox?Math.min(lineHeight,previewLineFloor(probe,box.layout.fontSizePt,lineHeight*.75,Number(probe.dataset.wordLineMinimumPt))*4/3):lineHeight;
+    return capacity(box.contentHeight,wordBox?box.contentHeight:maximum,lineHeight,minimumLineHeight);
   } finally {box.scratch.remove();}
 }
 
@@ -74,10 +75,11 @@ export function measurePreviewWidth(doc:RichNode,wordBox?:PrintBox) {
  } finally {box.scratch.remove();}
 }
 
-export function paginateBrowserPreview(html: string, doc: RichNode, calibration?:PreviewCalibration, wordBox?:PrintBox): string {
+export function paginateBrowserPreview(html: string, doc: RichNode, calibration?:PreviewCalibration, wordBox?:PrintBox, interactivePreview=false): string {
   const source = document.createElement('div');
   source.innerHTML = html;
-  if(wordBox)normalizeWordPreview(source,doc);
+  const adjusted=calibration?.enabled?calibratedCapacity(measurePreviewCapacity(doc,wordBox),calibration):undefined;
+  if(wordBox)normalizeWordPreview(source,doc,adjusted?.lineScale);
   const blocks: HTMLElement[] = [];
   const collect = (node: Element) => {
     if (node.matches('section[data-report-section]')) { [...node.children].forEach(collect); return; }
@@ -92,13 +94,14 @@ export function paginateBrowserPreview(html: string, doc: RichNode, calibration?
     blocks.push(node.cloneNode(true) as HTMLElement);
   };
   [...source.children].forEach(collect);
-  const adjusted=calibration?.enabled?calibratedCapacity(measurePreviewCapacity(doc,wordBox),calibration):undefined;
   const width=calibration?.widthOffsetMm?calibratedWidth(measurePreviewWidth(doc,wordBox),calibration).width:undefined;
   const {scratch, measure, scale, layout, contentHeight:standardHeight, effectiveCss} = createMeasurement(doc,wordBox,width);
   const contentHeight=adjusted?.height??standardHeight;
+  const interactiveWord=Boolean(interactivePreview&&wordBox);
+  if(interactiveWord)scratch.classList.add('interactive-word-preview');
 
   const pages: HTMLElement[] = [];
-  const makePage = () => { const paper = document.createElement('article'); paper.className = 'export-preview-paper'+(wordBox?' word-reference-preview':''); paper.style.cssText = effectiveCss; const content = document.createElement('div'); content.className = 'report-content'; content.style.fontFamily = layout.fontFamily; if(wordBox)content.style.lineHeight=String(Number(doc.attrs?.lineHeight)||1.05); paper.append(content); pages.push(paper); return content; };
+  const makePage = () => { const paper = document.createElement('article'); paper.className = 'export-preview-paper'+(wordBox?' word-reference-preview':'')+(interactiveWord?' interactive-word-preview':''); paper.style.cssText = effectiveCss; const content = document.createElement('div'); content.className = 'report-content'; content.style.fontFamily = layout.fontFamily; if(wordBox)content.style.lineHeight=String(Number(doc.attrs?.lineHeight)||1.05); paper.append(content); pages.push(paper); return content; };
   let target = makePage();
   const measuredHeight = () => {
     const top = measure.getBoundingClientRect().top;

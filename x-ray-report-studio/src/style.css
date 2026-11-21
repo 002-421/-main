@@ -216,3 +216,6 @@ html[data-theme=dark] .word-preview-dialog #preview-calibration-warning,html[dat
 .settings-update-row { justify-content:space-between; padding-bottom:8px; margin-bottom:8px; border-bottom:1px solid var(--border); }
 .settings-update-row small { flex-basis:100%; }
 [data-theme=dark] .format-options { background:#202b38; color:#e3edf6; }
+
+/* Spacing after the last paragraph only belongs between paragraphs on the page. */
+.interactive-word-preview .report-content > :is(p,h1,h2,h3):last-child { margin-bottom:0!important; }

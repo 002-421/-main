@@ -31,8 +31,29 @@ function naturalLineHeight(family:string,size:number) {
   return height;
 }
 
+let inkContext:CanvasRenderingContext2D|null|undefined;
+/** Word's declared minimum and the actual ink height constrain preview-only compaction. */
+export function previewLineFloor(p:HTMLElement, fontSize:number, natural:number, minimum:number) {
+  if(p.querySelector('img,sub,sup,svg,math'))return natural;
+  inkContext??=document.createElement('canvas').getContext('2d');
+  if(!inkContext)return natural;
+  const family=p.style.fontFamily;
+  const sample=p.textContent+' АяЁЙЦgqp()';
+  const styles=['normal'];
+  if(p.querySelector('strong,b')||p.matches('h1,h2,h3'))styles.push('bold');
+  if(p.querySelector('em,i'))styles.push('italic', 'italic bold');
+  let ink=0;
+  for(const style of styles){
+    inkContext.font=`${style} ${fontSize}pt ${family}`;
+    const bounds=inkContext.measureText(sample);
+    ink=Math.max(ink,(bounds.actualBoundingBoxAscent+bounds.actualBoundingBoxDescent)*.75);
+  }
+  // Limit any one line to a small correction, even if the reference glyphs are short.
+  return Math.min(natural,Math.max(minimum,ink+.25,natural*.95));
+}
+
 /** Normalize only detached preview DOM. Never writes to the document or export plan. */
-export function normalizeWordPreview(root:HTMLElement, doc:RichNode) {
+export function normalizeWordPreview(root:HTMLElement, doc:RichNode, lineScale=1) {
   const attrs=doc.attrs??{}, rootSize=Number(attrs.fontSizePt)||12;
   for(const p of root.querySelectorAll<HTMLElement>('p,h1,h2,h3')) {
     const heading=/^H[1-3]$/.test(p.tagName), level=Number(p.tagName.slice(1));
@@ -51,14 +72,21 @@ export function normalizeWordPreview(root:HTMLElement, doc:RichNode) {
     // Preserve the OOXML minimum and let the available font's natural line
     // box raise the browser floor so ordinary glyphs are not compressed.
     const minimum=Math.round(fontSize*20*Math.round(ratio*240)/240)/20;
-    let natural=naturalLineHeight(p.style.fontFamily,fontSize);
+    let natural=naturalLineHeight(p.style.fontFamily,fontSize),uniform=true;
     p.querySelectorAll<HTMLElement>('[style]').forEach(run=>{
       const size=run.style.fontSize;
       if(!size&&!run.style.fontFamily)return;
       const points=size.endsWith('px')?parseFloat(size)*.75:size.endsWith('pt')?parseFloat(size):fontSize;
-      if(points>0&&points<=200)natural=Math.max(natural,naturalLineHeight(run.style.fontFamily||p.style.fontFamily,points));
+      const family=run.style.fontFamily||p.style.fontFamily;
+      if(points>0&&points<=200){
+        natural=Math.max(natural,naturalLineHeight(family,points));
+        if(Math.abs(points-fontSize)>.02||family!==p.style.fontFamily)uniform=false;
+      }
     });
-    p.style.lineHeight=`${Math.max(minimum,natural)}pt`;
+    const baseline=Math.max(minimum,natural);
+    const height=lineScale<1&&uniform&&!themed?
+      Math.max(baseline*lineScale,previewLineFloor(p,fontSize,baseline,minimum)):baseline;
+    p.style.lineHeight=`${height}pt`;
     p.dataset.wordLineRule='atLeast';
     p.dataset.wordLineMinimumPt=String(minimum);
     p.querySelectorAll<HTMLElement>('[style]').forEach(n=>{if(n.style.lineHeight)n.style.lineHeight='inherit';});

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import packageInfo from '../package.json' with {type:'json'};
 import {chromium} from 'playwright-core';
 import {strFromU8,unzipSync} from 'fflate';
 import {makeTemplateDocument} from '../src/catalog.ts';
@@ -108,7 +109,7 @@ try {
     const dialog=page.locator('.doctor-settings-dialog'),sections=dialog.locator('[data-settings-section]');
     assert.equal(await sections.count(),3);
     assert.equal(await dialog.locator('#check-updates').isVisible(),true);
-    assert.equal(await dialog.locator('#update-current-version').textContent(),'0.4.79');
+    assert.equal(await dialog.locator('#update-current-version').textContent(),packageInfo.version);
     assert.equal(await dialog.locator('[data-settings-section=dictionary] summary').last().textContent(),'Лицензии словаря');
     assert.equal(await dialog.locator('[data-settings-section=doctor] #stamp-preview').count(),1);
     assert.equal(await dialog.locator('[data-settings-section=doctor] #settings-preview-calibration').count(),1);

@@ -5,8 +5,8 @@ export const MAX_WIDTH_OFFSET_MM=10;
 export const WIDTH_STEP_MM=0.5;
 const PX_PER_MM=96/25.4;
 export type PreviewCalibration={version:1;enabled:boolean;offset:number;lastTarget:number|null;characterOffset?:number;widthOffsetMm?:number};
-export type Capacity={baseHeight:number;maximumHeight:number;lineHeight:number;baseLines:number;minimumOffset:number;maximumOffset:number};
-export type CalibrationResult=Capacity&{offset:number;height:number;target:number;limited:boolean};
+export type Capacity={baseHeight:number;maximumHeight:number;lineHeight:number;minimumLineHeight:number;baseLines:number;minimumOffset:number;maximumOffset:number};
+export type CalibrationResult=Capacity&{offset:number;height:number;lineScale:number;target:number;limited:boolean};
 const defaults=():PreviewCalibration=>({version:1,enabled:false,offset:0,lastTarget:null});
 export type WidthCapacity = {baseWidth:number;minimumOffset:number;maximumOffset:number};
 const validCharacterOffset = (value:unknown) => value===undefined || Number.isInteger(value) && Math.abs(Number(value))<=MAX_LEGACY_CHARACTER_OFFSET;
@@ -42,13 +42,16 @@ export class PreviewCalibrations {
 }
 
 /** A line-equivalent height adjustment, never a count of rendered DOM lines. */
-export function capacity(baseHeight:number,maximumHeight:number,lineHeight:number):Capacity {
- if(![baseHeight,maximumHeight,lineHeight].every(v=>Number.isFinite(v)&&v>0)||maximumHeight<baseHeight||baseHeight<lineHeight)throw new Error('Недопустимая геометрия предпросмотра.');
- return{baseHeight,maximumHeight,lineHeight,baseLines:Math.floor(baseHeight/lineHeight),minimumOffset:Math.max(-MAX_LINE_OFFSET,Math.ceil((lineHeight-baseHeight)/lineHeight)),maximumOffset:Math.min(MAX_LINE_OFFSET,Math.floor((maximumHeight-baseHeight)/lineHeight))};
+export function capacity(baseHeight:number,maximumHeight:number,lineHeight:number,minimumLineHeight=lineHeight):Capacity {
+ if(![baseHeight,maximumHeight,lineHeight,minimumLineHeight].every(v=>Number.isFinite(v)&&v>0)||maximumHeight<baseHeight||baseHeight<lineHeight||minimumLineHeight>lineHeight)throw new Error('Недопустимая геометрия предпросмотра.');
+ const densestHeight=maximumHeight*lineHeight/minimumLineHeight;
+ return{baseHeight,maximumHeight,lineHeight,minimumLineHeight,baseLines:Math.floor(baseHeight/lineHeight),minimumOffset:Math.max(-MAX_LINE_OFFSET,Math.ceil((lineHeight-baseHeight)/lineHeight)),maximumOffset:Math.min(MAX_LINE_OFFSET,Math.floor((densestHeight-baseHeight)/lineHeight))};
 }
 export function calibratedCapacity(base:Capacity,value:PreviewCalibration):CalibrationResult {
  const requested=value.enabled?value.offset:0,offset=Math.max(base.minimumOffset,Math.min(base.maximumOffset,requested));
- return{...base,offset,height:base.baseHeight+offset*base.lineHeight,target:base.baseLines+offset,limited:offset!==requested};
+ const requestedHeight=base.baseHeight+offset*base.lineHeight;
+ const height=Math.min(requestedHeight,base.maximumHeight);
+ return{...base,offset,height,lineScale:height/requestedHeight,target:base.baseLines+offset,limited:offset!==requested};
 }
 
 export function widthCapacity(baseWidth:number,maximumWidth:number):WidthCapacity {

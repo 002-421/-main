@@ -24,6 +24,19 @@ test('line-equivalent adjustment changes height by one standard line, never by D
  assert.equal(calibratedCapacity(base,{...on,enabled:false}).height,1000);assert.equal(on.offset,-1);assert.equal(calibratedCapacity(base,{...on,offset:15}).height,1040);assert.equal(base.maximumOffset,2);assert.equal(base.minimumOffset,-15);
  const full=capacity(1000,1005,20);assert.equal(full.maximumOffset,0);assert.equal(calibratedCapacity(full,{...on,offset:1}).limited,true);
 });
+test('positive calibration can fit another line within the same printable height',()=>{
+ const base=capacity(1000,1000,20,19);
+ const settings={version:1,enabled:true,offset:1,lastTarget:51};
+ const compact=calibratedCapacity(base,settings);
+ assert.equal(base.maximumOffset,2);
+ assert.equal(compact.height,1000);
+ assert.equal(compact.target,51);
+ assert.ok(compact.lineScale*base.lineHeight>=base.minimumLineHeight);
+ assert.equal(calibratedCapacity(base,{...settings,enabled:false}).lineScale,1);
+ assert.equal(calibratedCapacity(base,{...settings,offset:-1}).lineScale,1);
+ assert.equal(calibratedCapacity(capacity(1000,1000,20),settings).limited,true);
+});
+
 test('all seven physician sizes derive capacity dynamically and keep strictly positive safe heights',()=>{
  const values=[];for(const pt of [10,10.5,11,11.5,12,13,14]){const line=pt*96/72*1.05,base=capacity(850,860,line);values.push(base.baseLines);for(const offset of [-15,-1,0,1,15]){const x=calibratedCapacity(base,{version:1,enabled:true,offset,lastTarget:null});assert.ok(x.height>0&&x.height<=860);assert.ok(Math.abs(x.height-base.baseHeight-x.offset*line)<1e-9);}}
  assert.ok(new Set(values).size>1,'no hard-coded 50-line norm');assert.throws(()=>capacity(0,10,1));assert.throws(()=>capacity(10,9,1));
