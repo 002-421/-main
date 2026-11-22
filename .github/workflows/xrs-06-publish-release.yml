@@ -273,6 +273,7 @@ jobs:
       - name: Activate Stable manifest and canonical ZIP last
         env:
           RUNNER_TEMP: ${{ runner.temp }}
+          CANDIDATE_DIR: ${{ runner.temp }}/xrs-candidate
           RELEASE_VERSION: ${{ steps.baseline.outputs.new_version }}
           OLD_VERSION: ${{ steps.baseline.outputs.old_version }}
         run: |
