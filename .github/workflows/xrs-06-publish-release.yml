@@ -85,7 +85,9 @@ jobs:
         run: |
           python scripts/package_web.py --version $env:RELEASE_VERSION --output-dir test-output/stable-release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Get-Content 'test-output/stable-release/XRS-'$env:RELEASE_VERSION'-Web.sha256' | Add-Content $env:GITHUB_STEP_SUMMARY
+          $checksumPath = "test-output/stable-release/XRS-$($env:RELEASE_VERSION)-Web.sha256"
+          if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) { throw "Browser ZIP checksum file is missing: $checksumPath" }
+          Get-Content -LiteralPath $checksumPath | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
       - name: Upload verified release candidate
         uses: actions/upload-artifact@v4
         with:
