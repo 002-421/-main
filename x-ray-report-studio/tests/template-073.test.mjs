@@ -29,31 +29,35 @@ test('all 113 built-in MRI/CT templates use 11 pt without changing template coun
   }
 });
 
-test('all built-in spinal legacy headings are replaced only as highlighted editable 11 pt variants', () => {
-  let replaced = 0;
-  const pairs = [
-    ['Дорзальные грыжи дисков:', 'Дорзальные -ая экструзии -я дисков -а:'],
-    ['Дорзальные протрузии дисков:', 'Дорзальные -ая протрузии -я дисков -а:'],
-  ];
-  for (const template of reportTemplates) {
-    const sourceText = plain(template.doc);
-    const doc = makeTemplateDocument(template.id);
-    const text = plain(doc);
-    assert.doesNotMatch(text, /Дорзальные (?:грыжи дисков|протрузии дисков):/u, template.id);
-    for (const [legacy, label] of pairs) {
-      const expected = [...sourceText.matchAll(new RegExp(legacy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gu'))].length;
-      const matches = [];
-      walk(doc, node => { if (node.type === 'text' && node.text === label) matches.push(node); });
-      assert.equal(matches.length, expected, `${template.id}: ${legacy} occurrences are replaced one-for-one`);
-      replaced += matches.length;
-      for (const node of matches) {
-        assert.ok(node.marks.some(mark => mark.type === 'bold'));
-        assert.ok(node.marks.some(mark => mark.type === 'highlight' && mark.attrs.color === '#ffff00'));
-        assert.equal(node.marks.find(mark => mark.type === 'textStyle').attrs.fontSize, '14.66667px');
+test('the eight Review v8 spine templates retain approved labels, five field IDs and yellow measurements', () => {
+  const alternatives = new Map([
+    ['spine-shop', 31], ['spine-shop-m', 31], ['spine-shop-art', 33],
+    ['spine-gop', 33], ['spine-gop-m', 33], ['spine-pop', 42], ['spine-pop-m', 42],
+    ['spine-kkop', 2],
+  ]);
+  const headings = ['Дорзальные/-ая экструзии/-я дисков/-а:', 'Дорзальные/-ая протрузии/-я дисков/-а:'];
+  assert.deepEqual(reportTemplates.filter(template => template.areaId === 'spine').map(template => template.id).sort(), [...alternatives.keys()].sort());
+  for (const [id, expectedMeasurements] of alternatives) {
+    const doc = makeTemplateDocument(id), fieldIds = [], found = [];
+    let measurements = 0;
+    walk(doc, node => {
+      if (node.type !== 'text') return;
+      for (const mark of node.marks ?? []) if (mark.type === 'templateField') fieldIds.push(mark.attrs.id);
+      if (headings.includes(node.text)) {
+        found.push(node.text);
+        assert.ok(node.marks?.some(mark => mark.type === 'bold'), id);
+        assert.ok(!node.marks?.some(mark => mark.type === 'highlight' && mark.attrs.color === '#ffff00'), id);
       }
-    }
+      const prompts = [...node.text.matchAll(/(?<![\d,])0,0(?![\d,])/g)].length;
+      if (prompts) assert.ok(node.marks?.some(mark => mark.type === 'highlight' && mark.attrs.color === '#ffff00'), id);
+      measurements += prompts;
+    });
+    assert.deepEqual(fieldIds, [
+      `${id}.number`, `${id}.patient`, `${id}.birthdate`, 'HEAD.BASE.2.FIELD.0043', `${id}.reportdate`,
+    ], `${id}: original editable field IDs and order`);
+    assert.deepEqual(found, id === 'spine-kkop' ? [] : headings, `${id}: approved alternative labels`);
+    assert.equal(measurements, expectedMeasurements, `${id}: editable yellow measurements`);
   }
-  assert.equal(replaced, 14, 'the 7 legacy herniation and 7 protrusion headings are replaced one-for-one');
 });
 
 test('recommendation paragraphs receive 12 pt external spacing without inserted blank paragraphs', () => {

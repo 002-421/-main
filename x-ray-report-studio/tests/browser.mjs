@@ -154,7 +154,7 @@ try{
  await page.keyboard.type('0,25');
  await page.waitForFunction(()=>[...document.querySelectorAll('.report-content p')].some(el=>el.textContent?.includes('максимальная размерами 0,25 см')));
  assert.match(await editedMeasurement.innerText(),/максимальная размерами 0,25 см/);
- assert.equal(await editedMeasurement.locator('mark[data-color="#ffff00"]').count(),0,'the edited value is no longer yellow-highlighted');
+ assert.equal(await editedMeasurement.locator('mark[data-color="#ffff00"]').filter({hasText:'0,25'}).count(),0,'the edited value is no longer yellow-highlighted while untouched highlighted text remains intact');
  await page.keyboard.press('Control+z');assert.match(await page.locator('.report-content').innerText(),/справа 0,0 см, слева 0,0 см/);
  console.log('PASS: editing a yellow template measurement removes the yellow fill and Undo restores it.');
 

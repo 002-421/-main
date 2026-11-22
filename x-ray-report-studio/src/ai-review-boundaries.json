@@ -252,60 +252,60 @@
     "doctorIndex": 22
   },
   "spine-gop-m": {
-    "count": 46,
+    "count": 56,
     "headerEnd": 4,
-    "conclusionStart": 41,
-    "signatureStart": 43,
-    "doctorIndex": 44
+    "conclusionStart": 48,
+    "signatureStart": 53,
+    "doctorIndex": 54
   },
   "spine-gop": {
-    "count": 44,
-    "headerEnd": 4,
-    "conclusionStart": 39,
-    "signatureStart": 41,
-    "doctorIndex": 42
-  },
-  "spine-kkop": {
-    "count": 25,
-    "headerEnd": 4,
-    "conclusionStart": 20,
-    "signatureStart": 22,
-    "doctorIndex": 23
-  },
-  "spine-pop-m": {
-    "count": 61,
-    "headerEnd": 4,
-    "conclusionStart": 56,
-    "signatureStart": 58,
-    "doctorIndex": 59
-  },
-  "spine-pop": {
-    "count": 59,
-    "headerEnd": 4,
-    "conclusionStart": 54,
-    "signatureStart": 56,
-    "doctorIndex": 57
-  },
-  "spine-shop-art": {
     "count": 54,
     "headerEnd": 4,
-    "conclusionStart": 47,
+    "conclusionStart": 46,
     "signatureStart": 51,
     "doctorIndex": 52
   },
-  "spine-shop-m": {
-    "count": 50,
+  "spine-kkop": {
+    "count": 32,
     "headerEnd": 4,
-    "conclusionStart": 45,
-    "signatureStart": 47,
-    "doctorIndex": 48
+    "conclusionStart": 23,
+    "signatureStart": 29,
+    "doctorIndex": 30
+  },
+  "spine-pop-m": {
+    "count": 72,
+    "headerEnd": 4,
+    "conclusionStart": 60,
+    "signatureStart": 69,
+    "doctorIndex": 70
+  },
+  "spine-pop": {
+    "count": 70,
+    "headerEnd": 4,
+    "conclusionStart": 58,
+    "signatureStart": 67,
+    "doctorIndex": 68
+  },
+  "spine-shop-art": {
+    "count": 63,
+    "headerEnd": 4,
+    "conclusionStart": 52,
+    "signatureStart": 60,
+    "doctorIndex": 61
+  },
+  "spine-shop-m": {
+    "count": 59,
+    "headerEnd": 4,
+    "conclusionStart": 50,
+    "signatureStart": 56,
+    "doctorIndex": 57
   },
   "spine-shop": {
-    "count": 48,
+    "count": 57,
     "headerEnd": 4,
-    "conclusionStart": 43,
-    "signatureStart": 45,
-    "doctorIndex": 46
+    "conclusionStart": 48,
+    "signatureStart": 54,
+    "doctorIndex": 55
   },
   "joints-vnchs": {
     "count": 32,

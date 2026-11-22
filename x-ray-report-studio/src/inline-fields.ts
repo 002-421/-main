@@ -253,11 +253,22 @@ export const InlineFieldEditing = Extension.create({
         let tr: Transaction | undefined;
         for (const range of yellowRanges) {
           const from = mapping.map(range.from, -1), to = mapping.map(range.to, 1);
-          if (to <= from || state.doc.textBetween(from, to) === range.text) continue;
+          if (to <= from) continue;
+          const updatedText = state.doc.textBetween(from, to);
+          if (updatedText === range.text) continue;
+          let unchangedPrefix = 0;
+          while (unchangedPrefix < range.text.length && unchangedPrefix < updatedText.length &&
+              range.text[unchangedPrefix] === updatedText[unchangedPrefix]) unchangedPrefix++;
+          let unchangedSuffix = 0;
+          while (unchangedSuffix < range.text.length - unchangedPrefix &&
+              unchangedSuffix < updatedText.length - unchangedPrefix &&
+              range.text[range.text.length - unchangedSuffix - 1] === updatedText[updatedText.length - unchangedSuffix - 1]) unchangedSuffix++;
+          const changedFrom = from + unchangedPrefix, changedTo = to - unchangedSuffix;
+          if (changedTo <= changedFrom) continue;
           const mark = state.schema.marks.highlight?.create(range.mark.attrs);
           if (!mark) continue;
           tr ??= state.tr;
-          tr.removeMark(from, to, mark);
+          tr.removeMark(changedFrom, changedTo, mark);
         }
         const groups = new Map<string, { text: string; nodes: { pos: number; size: number; mark: PMMark }[] }>();
         state.doc.descendants((node, pos) => {
