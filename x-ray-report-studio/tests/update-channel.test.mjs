@@ -69,4 +69,7 @@ test('release workflow publishes, restores, and verifies only the canonical Stab
   assert.match(releaseWorkflow, /Verified previous-version ZIP is unavailable; refusing to write a rollback manifest/);
   assert.match(releaseWorkflow, /tests\/user-data-backup\.test\.mjs/);
   assert.match(releaseWorkflow, /tests\/windows-integration\.test\.mjs/);
+  assert.ok(releaseWorkflow.includes('scripts/package_web.py'), 'browser ZIP is built from the verified single-file app');
+  assert.ok(releaseWorkflow.includes('XRS-${{ steps.baseline.outputs.new_version }}-Web.zip'), 'versioned browser archive is published separately');
+  assert.ok(releaseWorkflow.includes('Verify public standalone browser ZIP'), 'public browser archive and checksum are independently verified');
 });
