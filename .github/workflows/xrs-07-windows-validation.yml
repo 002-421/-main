@@ -281,19 +281,19 @@ jobs:
             x-ray-report-studio/test-output/report-history-failure.json
             x-ray-report-studio/test-output/report-history-failure.png
           if-no-files-found: warn
-      - name: Word-oriented preview pagination with synthetic reports
+      - name: Print pagination with synthetic reports
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: node tests/preview-pagination-browser.mjs
       - name: Word atomic blocks, empty paragraphs and oversized keep chains
         if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081')
         run: node tests/preview-keep-chain-browser.mjs
-      - name: Editor line and paragraph spacing through preview, DOCX and PDF
+      - name: Editor formatting through direct DOCX and PDF export
         if: (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081')
         run: node tests/editor-format-browser.mjs
       - name: Conclusion continuity, Word and PDF output, and compact settings
         if: github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081'
         run: node tests/conclusion-settings-browser.mjs
-      - name: Actual DOCX and preview geometry, widows and calibration UI
+      - name: Direct DOCX/PDF geometry and physician settings
         id: word-preview-geometry
         if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081')
         run: node tests/word-preview-geometry-browser.mjs

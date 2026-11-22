@@ -55,8 +55,8 @@ try{
  await page.locator('#settings').click();await page.locator('#settings-expand-all').click();await page.locator('#doctor-name').fill('Тестовый Врач');
  await page.locator('#doctor-stamp-file').setInputFiles({name:'stamp.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW+0AAAAASUVORK5CYII=','base64')});
  await page.locator('#stamp-preview img').waitFor();
- for(const [selector,value] of [['#stamp-height','120'],['#stamp-position-x','25'],['#stamp-position-y','-15']])await page.locator(selector).evaluate((el,value)=>{el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}));},value);
- assert.equal(await page.locator('#stamp-preview img').evaluate(el=>el.style.transform),'translate(25px, -15px)');
+ for(const [selector,value] of [['#stamp-height','120'],['#stamp-position-x','-25'],['#stamp-position-y','-15']])await page.locator(selector).evaluate((el,value)=>{el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}));},value);
+ assert.deepEqual(await Promise.all(['#stamp-height','#stamp-position-x','#stamp-position-y'].map(selector=>page.locator(selector).inputValue())),['120','-25','-15']);
  await page.locator('#save-settings').click();
  await app.evaluate(({dialog})=>{dialog.showSaveDialog=async()=>({canceled:true});});
  await page.evaluate(()=>{
@@ -71,7 +71,7 @@ try{
  });
  await chooseExport(page,'#export-pdf');
  await page.waitForFunction(()=>window.__stampPrint&&!document.querySelector('#editor > .export-only-editor'));
- assert.deepEqual(await page.evaluate(()=>window.__stampPrint),['25px','-15px','120px','contain']);
+ assert.deepEqual(await page.evaluate(()=>window.__stampPrint),['-25px','-15px','120px','contain']);
  await assertNoPrintPreview(page);
  await page.addInitScript(()=>{const get=Storage.prototype.getItem;let once=false;Storage.prototype.getItem=function(key){const raw=get.call(this,key);if(once||key!=='mri-report-studio.workspace.v1'||!raw)return raw;once=true;const w=JSON.parse(raw),r=w.reports.find(x=>x.id===w.activeId);for(const [id,text] of [['description','Грыж межпозвонковых дисков не выявлено.'],['conclusion','Экструзия L5/S1.']])r.doc.content.find(n=>n.attrs?.id===id).content=[{type:'paragraph',content:[{type:'text',text}]}];return JSON.stringify(w);};});
  await page.reload();const contradiction=page.locator('.ai-review-clinical').first();await contradiction.waitFor({timeout:30000});await contradiction.click({button:'right'});assert.match(await page.locator('.ai-review-card').innerText(),/противореч|наличи/iu);assert.equal(await page.locator('.ai-review-card').getByRole('button',{name:'Заменить',exact:true}).count(),0);

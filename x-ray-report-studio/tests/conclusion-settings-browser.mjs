@@ -40,13 +40,20 @@ try {
    section('conclusion',[{type:'horizontalRule',attrs:{manual:true}},p('ЗАКЛЮЧЕНИЕ:',[{type:'bold'}]),p(''),p(long?sentence.repeat(100):'Синтетический результат заключения.',[{type:'bold'}]),p('Рекомендации: синтетическая запись.')]),
    section('signature',[p('Врач: Синтетический. Дата: 01.01.2000')]),
   ]};
-  await page.addInitScript(({doc,key})=>{
+  await page.addInitScript(({doc,key,stamp})=>{
    sessionStorage.getItem('seeded')||(
     sessionStorage.setItem('seeded','1'),
     localStorage.setItem(key,JSON.stringify({activeId:'pagination-test',reports:[{id:'pagination-test',templateId:'head-gm',doc,dirty:false}]})),
     localStorage.setItem('xrs.doctor-format.v1',JSON.stringify({version:1,activeId:'physician',profiles:{physician:{id:'physician',name:'',fontSize:11,optimize:false}}}))
    );
-  },{doc,key});
+   if(stamp){
+    const name='Синтетический';
+    const image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW+0AAAAASUVORK5CYII=';
+    localStorage.setItem('mri-alliance.settings.v3',JSON.stringify({doctor:name,doctors:[name],
+     doctorStamps:{[name]:image},doctorStampSizes:{[name]:{width:80,height:40}},
+     doctorStampHeights:{[name]:40},doctorStampPositions:{[name]:{x:-15,y:0}}}));
+   }
+  },{doc,key,stamp:name==='short'});
   await page.goto(url);
   await capturePrintLayout(page);
   const output=await page.locator('#test-print-layout .preview-page').evaluateAll(pages=>pages.map(p=>{
@@ -58,7 +65,13 @@ try {
     width:body.getBoundingClientRect().width};
   }));
   const headingPage=output.findIndex(x=>x.heading);
-  if(name==='short')assert.equal(output.length,1);
+  if(name==='short'){
+   assert.equal(output.length,1);
+   const stamp=page.locator('#test-print-layout .doctor-stamp-image');
+   assert.equal(await stamp.count(),1);
+   assert.equal(await stamp.evaluate(el=>el.style.getPropertyValue('--stamp-x')),'-15px');
+   assert.equal(await stamp.evaluate(el=>el.style.getPropertyValue('--stamp-height')),'40px');
+  }
   if(['boundary','long','oversized-description'].includes(name))assert.ok(headingPage>=1,'fixture reaches a physical page boundary');
   assert.equal(output.filter(x=>x.heading).length,1,'standalone heading is emitted exactly once');
   assert.ok(output[headingPage].startsBody&&output[headingPage].description&&output[headingPage].rule,'description, rule, heading and first content share a page');
@@ -84,6 +97,10 @@ try {
   assert.match(body,/<w:sz w:val="22"\s*\/>/);
   assert.match(body,/<w:b\s*\/>/);
   assert.match(xml,/<w:sectPr>/);
+  if(name==='short'){
+   assert.match(xml,/<w:drawing>/);
+   assert.ok(Object.keys(zip).some(name=>name.startsWith('word/media/')));
+  }
 
   const pdf=await renderCapturedPdf(page);
   assert.equal((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g)||[]).length,output.length);
