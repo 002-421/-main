@@ -21,7 +21,7 @@ function fixture(count,size=11,special=''){
 let browser,page,stage='start';const errors=[],external=[];await mkdir('test-output',{recursive:true});
 try{
  browser=await chromium.launch({headless:true,args:['--no-sandbox'],...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{})});
- async function load(doc,optimize=false,size=11){
+ async function load(doc,optimize=false,size=11,referenceStyle){
   await page?.close();page=await browser.newPage({viewport:{width:1500,height:1000},acceptDownloads:true});page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(!r.url().startsWith(url)&&!r.url().startsWith('data:'))external.push(r.url());});page.on('dialog',d=>d.accept());
   await page.addInitScript(({doc,optimize,size,key,formatKey,a,b})=>{
    if(localStorage.getItem('calibration-fixture-seeded'))return;localStorage.setItem('calibration-fixture-seeded','1');
@@ -29,7 +29,9 @@ try{
    localStorage.setItem('mri-alliance.settings.v3',JSON.stringify({doctor:'Синтетический А',doctors:['Синтетический А','Синтетический Б'],doctorStamps:{'Синтетический А':'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW+0AAAAASUVORK5CYII='},doctorStampSizes:{'Синтетический А':{width:100,height:40}},doctorStampHeights:{'Синтетический А':40}}));
    localStorage.setItem(formatKey,JSON.stringify({version:1,activeId:a,profiles:{[a]:{id:a,name:'Синтетический А',fontSize:size,optimize},[b]:{id:b,name:'Синтетический Б',fontSize:size,optimize}}}));
   },{doc,optimize,size,key,formatKey,a,b});
-  await page.goto(url);await page.locator('#editor .report-content').waitFor();await page.locator('#settings').click();await page.locator('#settings-expand-all').click();await page.locator('#save-settings').click();await page.locator('#doctor-name').waitFor({state:'detached'});
+  await page.goto(url);await page.locator('#editor .report-content').waitFor();
+  if(referenceStyle)await page.addStyleTag(referenceStyle);
+  await page.locator('#settings').click();await page.locator('#settings-expand-all').click();await page.locator('#save-settings').click();await page.locator('#doctor-name').waitFor({state:'detached'});
  }
  const currentDoc=()=>page.evaluate(key=>{const w=JSON.parse(localStorage.getItem(key));return w.reports.find(r=>r.id===w.activeId).doc;},key);
  const controls=()=>page.locator('#preview-calibration-controls');
@@ -108,13 +110,13 @@ try{
  stage='positive calibration within the unchanged physical area';
  const synthetic=fixture(33,10);
  // The same Arial 10 pt input must be testable on systems with different fonts.
- await load(synthetic);
- await page.addStyleTag({content:'div[style*="line-height: normal"][style*="font-size: 10pt"][style*="left: -10000px"] { line-height:11.9pt!important; }'});
+ const referenceStyle={content:'div[style*="line-height: normal"][style*="font-size: 10pt"][style*="left: -10000px"] { line-height:11.9pt!important; }'};
+ await load(synthetic,false,11,referenceStyle);
  const beforeWord=await word(),beforePdf=await pdfInput(),beforeSource=await currentDoc();
  await open();
  const before=await controlData(),originalPreview=await validate(beforeSource);
  const initialLines=Number(before.baseLines);
- assert.ok(initialLines>0);
+ assert.ok(Math.abs(Number(before.standardLine)*.75-11.9)<.03,'the test sets the reference before it is measured');
  const plus=controls().locator('[data-calibration-plus]');
  const targetOffset=controls().locator('[data-calibration-target]');
  assert.equal(await plus.isEnabled(),true,'+1 is available at the baseline with a safe line correction');
@@ -136,7 +138,7 @@ try{
  assert.equal(await plus.isDisabled(),true,'the typographic limit disables further increases');
  await validate(beforeSource);
  await close();await page.reload();
- await page.addStyleTag({content:'div[style*="line-height: normal"][style*="font-size: 10pt"][style*="left: -10000px"] { line-height:11.9pt!important; }'});
+ await page.addStyleTag(referenceStyle);
  await open();
  assert.equal(Number((await controlData()).offset),maximum-initialLines,'positive calibration persists after a restart');
  await close();
