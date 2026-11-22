@@ -5,7 +5,7 @@ import { DISCLAIMER_TEXT, EQUIPMENT_TEXT } from './report-footer.ts';
 
 export { previewPageLayout } from './page-geometry.ts';
 import { previewPageLayout } from './page-geometry.ts';
-import {wordPreviewGeometry,normalizeWordPreview,previewLineFloor} from './word-preview.ts';
+import {wordPreviewGeometry,normalizeWordPreview,previewLineFloor,hasStandardParagraphGap,MAX_PREVIEW_GAP_CORRECTION_PT} from './word-preview.ts';
 
 /** The same footer measurement supplies preview and print-only object bounds. */
 function createMeasurement(doc: RichNode, wordBox?:PrintBox, wrapWidth?:number) {
@@ -61,8 +61,12 @@ export function measurePreviewCapacity(doc:RichNode,wordBox?:PrintBox) {
     if(wordBox)normalizeWordPreview(box.measure,doc);
     const lineHeight=probe.getBoundingClientRect().height/box.scale;
     const maximum=Math.max(box.contentHeight,Math.min((box.layout.heightMm-box.layout.topMm-box.layout.bottomMm)*96/25.4,(box.layout.heightMm-box.layout.topMm-6.5)*96/25.4-box.footerHeight-1));
-    const minimumLineHeight=wordBox?Math.min(lineHeight,previewLineFloor(probe,box.layout.fontSizePt,lineHeight*.75,Number(probe.dataset.wordLineMinimumPt))*4/3):lineHeight;
-    return capacity(box.contentHeight,wordBox?box.contentHeight:maximum,lineHeight,minimumLineHeight);
+    if(!wordBox)return capacity(box.contentHeight,maximum,lineHeight);
+    const lineMinimumPt=Number(probe.dataset.wordLineMinimumPt);
+    const inkFloor=previewLineFloor(probe,box.layout.fontSizePt,lineHeight*.75,lineMinimumPt);
+    const gapFloor=hasStandardParagraphGap(doc)?
+      Math.max(lineMinimumPt,lineHeight*.75-MAX_PREVIEW_GAP_CORRECTION_PT):inkFloor;
+    return capacity(box.contentHeight,box.contentHeight,lineHeight,Math.min(lineHeight,Math.min(inkFloor,gapFloor)*4/3));
   } finally {box.scratch.remove();}
 }
 

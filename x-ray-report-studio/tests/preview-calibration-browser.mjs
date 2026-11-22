@@ -120,12 +120,19 @@ try{
  const plus=controls().locator('[data-calibration-plus]');
  const targetOffset=controls().locator('[data-calibration-target]');
  assert.equal(await plus.isEnabled(),true,'+1 is available at the baseline with a safe line correction');
+ const intervals=()=>page.locator('.paginated-browser-preview p[data-word-line-minimum-pt]').evaluateAll(paragraphs=>
+  paragraphs.map(p=>[Number.parseFloat(p.style.lineHeight),Number.parseFloat(p.style.marginBottom)]));
+ const originalIntervals=await intervals();
  await controls().locator('[data-calibration-enabled]').check();
  await plus.click();
  assert.equal(Number(await targetOffset.inputValue()),initialLines+1);
  const after=await controlData();
  assert.equal(after.baseHeight,after.effectiveHeight);
  assert.ok(Number(after.lineScale)<1);
+ const correctedIntervals=await intervals();
+ assert.ok(correctedIntervals.some(([line,after],i)=>
+  originalIntervals[i]&&(line<originalIntervals[i][0]-.001||after<originalIntervals[i][1]-.001)),
+ '+1 changes at least one measured line or standard paragraph interval');
  const compactPreview=await validate(beforeSource);
  assert.ok(compactPreview.every(p=>p.css===originalPreview[0].css&&Math.abs(p.paper-originalPreview[0].paper)<.1&&Math.abs(p.footer-originalPreview[0].footer)<.1));
  await page.locator('.paginated-browser-preview').evaluate(el=>{

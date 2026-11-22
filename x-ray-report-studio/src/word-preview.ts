@@ -31,6 +31,19 @@ function naturalLineHeight(family:string,size:number) {
   return height;
 }
 
+export const MAX_PREVIEW_GAP_CORRECTION_PT = .5;
+
+export function hasStandardParagraphGap(doc:RichNode):boolean {
+  const gap=Number(doc.attrs?.spaceAfterPt)||5;
+  const visit=(node:RichNode):boolean=>{
+    if(node.type==='table')return false;
+    if(node.type==='paragraph'&&(!node.attrs?.sourceStyle||node.attrs.sourceStyle==='Normal')&&
+      (node.attrs?.spaceAfterPt??gap)===gap)return true;
+    return node.content?.some(visit)??false;
+  };
+  return visit(doc);
+}
+
 let inkContext:CanvasRenderingContext2D|null|undefined;
 /** Word's declared minimum and the actual ink height constrain preview-only compaction. */
 export function previewLineFloor(p:HTMLElement, fontSize:number, natural:number, minimum:number) {
@@ -84,15 +97,22 @@ export function normalizeWordPreview(root:HTMLElement, doc:RichNode, lineScale=1
       }
     });
     const baseline=Math.max(minimum,natural);
-    const height=lineScale<1&&uniform&&!themed?
-      Math.max(baseline*lineScale,previewLineFloor(p,fontSize,baseline,minimum)):baseline;
+    const canCalibrate=lineScale<1&&uniform&&!themed&&!heading&&!p.closest('table');
+    const desired=baseline*lineScale;
+    const height=canCalibrate?Math.max(desired,previewLineFloor(p,fontSize,baseline,minimum)):baseline;
     p.style.lineHeight=`${height}pt`;
     p.dataset.wordLineRule='atLeast';
     p.dataset.wordLineMinimumPt=String(minimum);
     p.querySelectorAll<HTMLElement>('[style]').forEach(n=>{if(n.style.lineHeight)n.style.lineHeight='inherit';});
     const pt=(value:string,fallback:number)=>`${value?Math.max(0,Math.round(parseFloat(value)*20)/20):fallback}pt`;
     p.style.marginTop=pt(p.style.marginTop,themed?9:0);
-    p.style.marginBottom=pt(p.style.marginBottom,heading?5:Number(attrs.spaceAfterPt)||5);
+    const standardGap=Number(attrs.spaceAfterPt)||5;
+    const after=Number.parseFloat(pt(p.style.marginBottom,heading?5:standardGap));
+    // When ink prevents further line compression, use a fraction of the
+    // standard paragraph gap. Explicit nonstandard gaps keep their value.
+    const gapCorrection=canCalibrate&&after===standardGap?
+      Math.min(after,MAX_PREVIEW_GAP_CORRECTION_PT,Math.max(0,height-desired)):0;
+    p.style.marginBottom=`${after-gapCorrection}pt`;
     p.style.marginLeft=pt(p.style.marginLeft,0);p.style.marginRight=pt(p.style.marginRight,0);
     p.style.textIndent=pt(p.style.textIndent,0);
   }
