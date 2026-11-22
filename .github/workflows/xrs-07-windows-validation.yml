@@ -89,6 +89,29 @@ jobs:
         if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080')
         run: node tests/windows-backup-lock-checks.mjs ${{ (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080') && '--native-lock' || '--module-readiness' }}
       - run: npm run build
+      - name: Individual Word preview calibration and unchanged exports
+        id: preview-calibration-tests
+        if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080') || github.ref_name == 'codex/xrs-preview-calibration-075'
+        shell: pwsh
+        run: |
+          node tests/preview-calibration-browser.mjs
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0 -and (Test-Path 'test-output/calibration-failure.json')) {
+            $failure = Get-Content 'test-output/calibration-failure.json' -Raw | ConvertFrom-Json
+            $diagnostic = "$($failure.stage): $($failure.error)"
+            $escaped = $diagnostic.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Synthetic preview calibration::$escaped"
+            "### Synthetic preview calibration failure" >> $env:GITHUB_STEP_SUMMARY
+            ('    ' + ($diagnostic -replace "`r?`n", "`n    ")) >> $env:GITHUB_STEP_SUMMARY
+          }
+          exit $testExit
+      - name: Preserve calibration failure diagnostics
+        if: failure() && steps.preview-calibration-tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrs-preview-calibration-diagnostics-${{ github.run_id }}
+          path: x-ray-report-studio/test-output/calibration-failure.*
+          if-no-files-found: warn
       - name: Verify Electron runtime for Windows shortcut test
         if: steps.release-channel.outputs.updateHotfix == 'true'
         shell: pwsh
@@ -314,17 +337,6 @@ jobs:
         with:
           name: xrs-doctor-print-diagnostics-${{ github.run_id }}
           path: x-ray-report-studio/test-output/doctor-print-failure.*
-          if-no-files-found: warn
-      - name: Individual Word preview calibration and unchanged exports
-        id: preview-calibration-tests
-        if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080') || github.ref_name == 'codex/xrs-preview-calibration-075'
-        run: node tests/preview-calibration-browser.mjs
-      - name: Preserve calibration failure diagnostics
-        if: failure() && steps.preview-calibration-tests.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: xrs-preview-calibration-diagnostics-${{ github.run_id }}
-          path: x-ray-report-studio/test-output/calibration-failure.*
           if-no-files-found: warn
       - name: Export and preserve patient tab lifecycle (up to 50 tabs)
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
