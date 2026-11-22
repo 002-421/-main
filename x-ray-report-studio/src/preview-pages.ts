@@ -1,6 +1,6 @@
 import type { PrintBox } from './print-document.ts';
 import type { RichNode } from './model';
-import { DISCLAIMER_TEXT, EQUIPMENT_TEXT } from './report-footer.ts';
+import { DISCLAIMER_TEXT, EQUIPMENT_TEXT, PAGE_NUMBER_FONT_SIZE_PT } from './report-footer.ts';
 
 export { previewPageLayout } from './page-geometry.ts';
 import { previewPageLayout } from './page-geometry.ts';
@@ -27,7 +27,7 @@ function createMeasurement(doc: RichNode, wordBox?:PrintBox) {
   disclaimer.textContent=DISCLAIMER_TEXT;
   emphasis.textContent=EQUIPMENT_TEXT;equipment.append(emphasis);
   pageNumber.className='preview-word-page-number';pageNumber.textContent='1';
-  if(wordBox)pageNumber.style.fontSize=`${layout.fontSizePt}pt`;
+  pageNumber.style.fontSize=`${PAGE_NUMBER_FONT_SIZE_PT}pt`;
   footerProbe.append(disclaimer,equipment,pageNumber);
   scratch.append(footerProbe);
   const scale = scratch.getBoundingClientRect().width / scratch.offsetWidth || 1;
@@ -241,7 +241,7 @@ export function paginateBrowserPreview(html: string, doc: RichNode, wordBox?:Pri
     const footer = document.createElement('div'); footer.className = 'preview-word-footer';
     if(wordBox)footer.style.fontFamily=layout.fontFamily;
     footer.innerHTML = `<div>${escape(DISCLAIMER_TEXT)}</div><div><em>${escape(EQUIPMENT_TEXT)}</em></div><div class="preview-word-page-number">${index + 1}</div>`;
-    if(wordBox)(footer.lastElementChild as HTMLElement).style.fontSize=`${layout.fontSizePt}pt`;
+    (footer.lastElementChild as HTMLElement).style.fontSize=`${PAGE_NUMBER_FONT_SIZE_PT}pt`;
     paper.append(footer);
     return `<div class="preview-page" style="width:${layout.widthMm}mm"><span class="preview-page-number">Страница ${index + 1}</span>${paper.outerHTML}</div>`;
   }).join('');

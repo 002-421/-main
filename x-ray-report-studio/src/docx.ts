@@ -11,7 +11,7 @@ import {
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { draftVersion, validateDraft, type Module, type RichNode } from './model.ts';
 import { compactWordSpaces } from './word-spacing.ts';
-import { DISCLAIMER_TEXT, EQUIPMENT_TEXT } from './report-footer.ts';
+import { DISCLAIMER_TEXT, EQUIPMENT_TEXT, PAGE_NUMBER_FONT_SIZE_PT } from './report-footer.ts';
 
 export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const STATE_PART = 'customXml/mri-report-studio.xml';
@@ -627,7 +627,7 @@ export async function exportDocx(doc: RichNode, options: DocxOptions = {}): Prom
       ...(source ? { footers: { default: new Footer({ children: [
         new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0, line: 200, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: 16, color: '64748B', text: DISCLAIMER_TEXT })] }),
         new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0, line: 200, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: 16, color: '64748B', italics: true, text: EQUIPMENT_TEXT })] }),
-        new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 0, after: 0, line: 200, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: fontSize, color: '000000', children: [PageNumber.CURRENT] })] }),
+        new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 0, after: 0, line: 200, lineRule: LineRuleType.AUTO }, children: [new TextRun({ font, size: PAGE_NUMBER_FONT_SIZE_PT * 2, color: '000000', children: [PageNumber.CURRENT] })] }),
       ] }) } } : {}),
       children,
     }],

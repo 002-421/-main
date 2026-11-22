@@ -98,13 +98,14 @@ try {
       const paper = page.querySelector('.export-preview-paper');
       const content = paper.querySelector('.report-content');
       const style = getComputedStyle(content);
-      return { fontSize: style.fontSize, paperHeight: paper.getBoundingClientRect().height, contentHeight: content.getBoundingClientRect().height, allowedHeight: (297 - 43 - 16) * 96 / 25.4, footerTop: paper.querySelector('.preview-word-footer').getBoundingClientRect().top, textBottom: Math.max(...[...content.querySelectorAll('*')].map(n=>n.getBoundingClientRect().bottom)), overflow: paper.hasAttribute('data-preview-overflow') };
+      return { fontSize: style.fontSize, pageNumberFontSize: getComputedStyle(paper.querySelector('.preview-word-page-number')).fontSize, paperHeight: paper.getBoundingClientRect().height, contentHeight: content.getBoundingClientRect().height, allowedHeight: (297 - 43 - 16) * 96 / 25.4, footerTop: paper.querySelector('.preview-word-footer').getBoundingClientRect().top, textBottom: Math.max(...[...content.querySelectorAll('*')].map(n=>n.getBoundingClientRect().bottom)), overflow: paper.hasAttribute('data-preview-overflow') };
     }));
     const previewSizes = await paragraphSizes(page.locator('.preview-page .report-content p'));
     diagnostic = { scenario: scenario.name, geometry, editorSizes, previewSizes };
     console.log(`${scenario.name}: ${actual} preview page(s), blocks ${await page.locator('.preview-page .report-content').evaluateAll(nodes => nodes.map(node => node.children.length).join('/'))}`);
     assert.ok(actual >= scenario.minPages && actual <= scenario.maxPages, `${scenario.name}: got ${actual} pages`);
     for (const item of geometry) assertSize(item.fontSize, doc.attrs.fontSizePt, `${scenario.name}: preview container follows document base size`);
+    for (const item of geometry) assertSize(item.pageNumberFontSize, 10.5, `${scenario.name}: page number remains on its independent 10.5 pt print setting`);
     assert.deepEqual([...new Set(previewSizes.map(item => Number.parseFloat(item.inlineSize)))].sort((a,b) => a-b), [...expectedSizes].sort((a,b) => a-b), `${scenario.name}: preview preserves explicit 12 pt or mixed 10/14 pt`);
     for (const item of previewSizes) assertSize(item.computedSize, Number.parseFloat(item.inlineSize), `${scenario.name}: preview paragraph overrides container base`);
     assert.deepEqual(await paragraphSizes(page.locator('#editor .report-content p')), editorSizes, `${scenario.name}: preview does not change the editor document`);

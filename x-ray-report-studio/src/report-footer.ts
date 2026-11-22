@@ -3,6 +3,8 @@ import type { RichNode } from './model';
 const textOf = (node: RichNode): string => node.type === 'text' ? node.text ?? '' : node.content?.map(textOf).join('') ?? '';
 export const DISCLAIMER_TEXT = 'Данное заключение не является диагнозом и должно быть интерпретировано лечащим врачом на основании клинико-лабораторных данных и других диагностических исследований';
 export const EQUIPMENT_TEXT = 'Исследование выполнено на магнитно-резонансном томографе Philips Achieva с высокой напряженностью магнитного поля 1,5 Тесла';
+/** Stable print styling for the page number, independent of body font optimization. */
+export const PAGE_NUMBER_FONT_SIZE_PT = 10.5;
 
 /** Add visual spacing to the closing block and initialize report dates, including CT templates. */
 export function initializeReportFooter(doc: RichNode, date = new Date().toLocaleDateString('ru-RU')): RichNode {

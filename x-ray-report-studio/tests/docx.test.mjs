@@ -354,6 +354,18 @@ test('0.4.73 built-in template DOCX keeps 11 pt, 12 pt recommendation margins an
   assert.match(strFromU8(footer[1]), /Исследование выполнено на магнитно-резонансном томографе/);
 });
 
+test('all eight approved Spine Review v8 DOCX footers keep their independent 10.5 pt page number', async () => {
+  const ids = ['spine-shop', 'spine-shop-m', 'spine-shop-art', 'spine-gop', 'spine-gop-m', 'spine-pop', 'spine-pop-m', 'spine-kkop'];
+  for (const id of ids) {
+    const doc = makeTemplateDocument(id);
+    const { zip } = await exported(doc, { templateId: id });
+    const footer = strFromU8(zip['word/footer1.xml']);
+    const pageNumber = footer.match(/<w:p><w:pPr>[\s\S]*?<w:jc w:val="right"\/>[\s\S]*?<\/w:p>/)?.[0];
+    assert.ok(pageNumber, `${id}: right-aligned page-number paragraph exists`);
+    assert.match(pageNumber, /<w:sz w:val="21"\/><w:szCs w:val="21"\/>/, `${id}: footer page number remains 10.5 pt`);
+  }
+});
+
 test('source font faces are embedded with Word font relationships and cannot be modified behind embedded draft metadata', async () => {
   const dir = new URL('../src/assets/fonts/', import.meta.url);
   const font = {

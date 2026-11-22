@@ -23,13 +23,18 @@ test('the last description and conclusion share a real page before page count br
  const baseline=choosePrintLayout(doc,false,()=>({html:'synthetic',metrics:{safe:true,pages:2,descriptionOnConclusion:false}}));
  assert.equal(baseline.name,'original','disabled optimization never changes user formatting');
 });
-test('an optimized 11 to 10 pt report keeps the same size in every Word run',async()=>{
+test('an optimized 11 to 10 pt report changes body size but preserves the 10.5 pt page number and measured margin',async()=>{
  const plan=choosePrintLayout(doc,true,d=>({html:'synthetic',metrics:{safe:true,pages:d.attrs.fontSizePt===10?1:2,descriptionOnConclusion:true}}));
  assert.equal(plan.delta,-1);assert.equal(plan.document.content[0].attrs.fontSizePt,10);
  assert.ok(Math.abs(parseFloat(plan.document.content[0].content[0].marks[0].attrs.fontSize)*.75-10)<.01);
- const blob=await exportDocx(plan.document,{templateId:'head-gm'});
- const xml=strFromU8(unzipSync(new Uint8Array(await blob.arrayBuffer()))['word/document.xml']);
+ const blob=await exportDocx(plan.document,{templateId:'head-gm',printBox:{width:850,height:899}});
+ const parts=unzipSync(new Uint8Array(await blob.arrayBuffer()));
+ const xml=strFromU8(parts['word/document.xml']);
+ const footer=strFromU8(parts['word/footer1.xml']);
  assert.match(xml,/<w:sz w:val="20"\s*\/>/,'actual DOCX uses 10 pt for the optimized text run');
+ assert.match(footer,/<w:sz w:val="21"\/><w:szCs w:val="21"\/><\/w:rPr><w:fldChar/,'page number remains 10.5 pt in the DOCX footer');
+ const bottom=Number(xml.match(/<w:pgMar\b[^>]*w:bottom="(\d+)"/)?.[1]);
+ assert.equal(bottom,915,'the bottom margin remains the existing printBox-derived value');
 });
 test('oversized graphic objects fit the printable area proportionally without scaling medical text',()=>{
  const input=structuredClone(doc);input.content.push({type:'image',attrs:{src:'synthetic',width:1700,height:2000}});const before=structuredClone(input),printed=preparePrintDocument(input),image=printed.content.at(-1);assert.ok(image.attrs.width<1700);assert.ok(Math.abs(image.attrs.width/image.attrs.height-1700/2000)<1e-12);assert.deepEqual(input,before);assert.equal(printed.content[0].content[0].marks[0].attrs.fontSize,'14.66667px');
