@@ -1,3 +1,4 @@
+import { assertNoPrintPreview } from './print-export-helpers.mjs';
 import assert from 'node:assert/strict';
 import { _electron, chromium } from 'playwright-core';
 import { appendFile, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -82,8 +83,7 @@ async function saveWord(name){
  const filePath=path.join(output,name);await rm(filePath,{force:true});
  await application.evaluate(({session},dest)=>session.defaultSession.once('will-download',(_event,item)=>item.setSavePath(dest)),filePath);
  await page.locator('#save-menu-toggle').click();assert.equal(await page.locator('#save-menu-toggle').getAttribute('aria-expanded'),'true');assert.equal(await page.locator('#export-pdf').isVisible(),true);await page.locator('#save-docx').click();assert.equal(await page.locator('#save-menu-items').isVisible(),false);
- assert.ok(await page.locator('.paged-preview-frame iframe, .preview-page').count(),'paginated preview opens before Word export');assert.equal(await page.locator('#preview-save-pdf').count(),0,'Word menu selection stays on the Word export path');
- await page.locator('#preview-save-word').click();
+ await assertNoPrintPreview(page);
  if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
  for(let i=0;i<200;i++){
   try{if((await stat(filePath)).size>0){const bytes=await readFile(filePath);const imported=await importOwnDocx(bytes);if(imported)return {filePath,bytes,imported};}}catch{}
@@ -251,15 +251,10 @@ try{
  assert.match(clip.text,/Тестовый Пациент/);assert.match(clip.html,/Arial/);
  const pdfPath=path.join(output,'v3-native.pdf');
  await application.evaluate(({dialog},filePath)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath});},pdfPath);
- await page.locator('#save-menu-toggle').click();await page.locator('#export-pdf').click();assert.equal(await page.locator('#preview-save-word').count(),0,'PDF menu selection stays on the PDF export path');await page.locator('#preview-save-pdf').waitFor();const wordPreviewPages=await page.locator('.preview-page').count();assert.ok(wordPreviewPages>0);assert.equal(await page.locator('.word-reference-preview').count(),wordPreviewPages,'Word preview renders successfully before PDF export');
- const declaredPlan=Number((await page.locator('.preview-note').first().innerText()).match(/печатной раскладки Word\/PDF: (\d+)/)?.[1]);assert.ok(Number.isInteger(declaredPlan)&&declaredPlan>0);
- // Word-reference geometry/calibration is intentionally separate from PDF.
- // Capture the actual export-only DOM before the native PDF IPC, rather than
- // comparing the unchanged PDF to the independently paginated Word preview.
  await page.evaluate(()=>{window.__nativePdfPages=null;const observer=new MutationObserver(()=>{const host=document.querySelector('.export-only-editor');if(host){window.__nativePdfPages=host.querySelectorAll('.preview-page').length;observer.disconnect();}});observer.observe(document.querySelector('#editor'),{childList:true,subtree:true});});
- await page.locator('#preview-save-pdf').click();if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
+ await page.locator('#save-menu-toggle').click();await page.locator('#export-pdf').click();await assertNoPrintPreview(page);if(await page.locator('#continue-yellow-export').count())await page.locator('#continue-yellow-export').click();
  await page.getByRole('status').filter({hasText:'PDF сохранён'}).waitFor({timeout:30000});
- const expectedPdfPages=await page.evaluate(()=>window.__nativePdfPages);assert.ok(Number.isInteger(expectedPdfPages)&&expectedPdfPages>0,'actual PDF input layout was captured');assert.equal(expectedPdfPages,declaredPlan,'PDF input uses the declared unchanged print plan');
+ const expectedPdfPages=await page.evaluate(()=>window.__nativePdfPages);assert.ok(Number.isInteger(expectedPdfPages)&&expectedPdfPages>0,'actual PDF input layout was captured');
  const pdfBytes=await readFile(pdfPath);assert.equal(pdfBytes.subarray(0,5).toString(),'%PDF-');assert.equal((pdfBytes.toString('latin1').match(/\/Type\s*\/Page\b/g)||[]).length,expectedPdfPages,'actual Electron PDF page count matches its export input');
  console.log('PASS: formatted clipboard and actual desktop PDF export.');
 
@@ -372,6 +367,7 @@ try{
  const editableReportBefore=await page.locator('.report-content').innerText();
  await insertedField.click();await page.keyboard.press('End');await page.keyboard.insertText('!');
  assert.notEqual(await page.locator('.report-content').innerText(),editableReportBefore,'editing remains available after closing boundary help');await page.keyboard.press('Backspace');
+ const systemYellowBefore=await page.locator('#editor mark[data-color="#ffff00"]').allTextContents();
  await selectField(await insertedField.getAttribute('data-field-id'));await page.locator('#fill-text').click();
  assert.equal(await page.locator('#fill-text').getAttribute('aria-pressed'),'true');
  assert.ok((await page.locator('.report-content [data-manual-fill="#ffff00"]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')));
@@ -379,6 +375,7 @@ try{
  await page.locator('[data-format-toggle=fill]').click();
  await page.locator('[data-format=fill][data-value=off]').click();
  assert.ok(!(await page.locator('.report-content [data-manual-fill]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')),'manual fill can be removed');
+ assert.deepEqual(await page.locator('#editor mark[data-color="#ffff00"]').allTextContents(),systemYellowBefore,'manual removal preserves the system yellow prompts');
  assert.match(await page.locator('.report-content strong').allTextContents().then(t=>t.join(' ')),/ЗАКЛЮЧЕНИЕ/);
  console.log('PASS: searchable previews and insertion, live spelling/grammar corrections and existing report formatting.');
  await insertedField.click();await page.keyboard.press('Control+End');

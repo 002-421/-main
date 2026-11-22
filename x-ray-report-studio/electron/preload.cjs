@@ -9,7 +9,6 @@ contextBridge.exposeInMainWorld('desktop', {
   getApplicationVersion: () => ipcRenderer.invoke('app:version'),
   onWordSaved: callback => ipcRenderer.on('report:word-saved', (_event, url) => callback(url)),
   exportPDF: filename => ipcRenderer.invoke('report:export-pdf', filename),
-  previewPDF: () => ipcRenderer.invoke('report:preview-pdf'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   installUpdate: () => ipcRenderer.invoke('updates:install'),
   onUpdateProgress: callback => {

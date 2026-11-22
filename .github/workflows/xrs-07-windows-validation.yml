@@ -2,7 +2,7 @@ name: XRS-07/XRS-08 Windows validation
 
 on:
   push:
-    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062, codex/xrs-updater-rollback-053, codex/xrs-updater-068, codex/xrs-ai-069, codex/xrs-functional-071, codex/xrs-ai-072, codex/xrs-ai-065, codex/xrs-ai-066, codex/xrs-ai-067, codex/xrs-template-073, codex/xrs-print-ai-074, codex/xrs-preview-calibration-075, codex/xrs-preview-geometry-076, codex/xrs-print-preview-ui-077, codex/xrs-word-pagination-078, codex/xrs-ui-print-079, codex/xrs-preview-lines-080]
+    branches: [codex/xrs-07-editor-template-stability, codex/xrs-08-stable-beta, codex/xrs-056-stable-clean, codex/xrs-first-start-confirmation, codex/xrs-updater-recovery, codex/xrs-updater-062, codex/xrs-updater-rollback-053, codex/xrs-updater-068, codex/xrs-ai-069, codex/xrs-functional-071, codex/xrs-ai-072, codex/xrs-ai-065, codex/xrs-ai-066, codex/xrs-ai-067, codex/xrs-template-073, codex/xrs-print-ai-074, codex/xrs-preview-calibration-075, codex/xrs-preview-geometry-076, codex/xrs-print-preview-ui-077, codex/xrs-word-pagination-078, codex/xrs-ui-print-079, codex/xrs-preview-lines-080, codex/xrs-direct-export-081]
   pull_request:
     paths:
       - 'x-ray-report-studio/**'
@@ -64,7 +64,7 @@ jobs:
           $isUpdaterRecovery = $sourceRef -in @('codex/xrs-updater-recovery', 'codex/xrs-updater-062', 'codex/xrs-updater-068')
           $isUpdaterRollback053 = $sourceRef -in @('codex/xrs-updater-rollback-053', 'codex/xrs-updater-068', 'codex/xrs-ai-065', 'codex/xrs-ai-066', 'codex/xrs-ai-067', 'codex/xrs-ai-069', 'codex/xrs-functional-071', 'codex/xrs-ai-072')
           $isUpdaterCandidate060 = $version -eq '0.4.60' -and $isUpdaterRecovery
-          $isTemplateCandidate073 = (($version -eq '0.4.73' -and $sourceRef -eq 'codex/xrs-template-073') -or ($version -eq '0.4.74' -and $sourceRef -eq 'codex/xrs-print-ai-074') -or ($version -eq '0.4.75' -and $sourceRef -eq 'codex/xrs-preview-calibration-075') -or ($version -eq '0.4.76' -and $sourceRef -eq 'codex/xrs-preview-geometry-076') -or ($version -eq '0.4.77' -and $sourceRef -eq 'codex/xrs-print-preview-ui-077') -or ($version -eq '0.4.78' -and $sourceRef -eq 'codex/xrs-word-pagination-078') -or ($version -eq '0.4.79' -and $sourceRef -eq 'codex/xrs-ui-print-079') -or ($version -eq '0.4.80' -and $sourceRef -eq 'codex/xrs-preview-lines-080'))
+          $isTemplateCandidate073 = (($version -eq '0.4.73' -and $sourceRef -eq 'codex/xrs-template-073') -or ($version -eq '0.4.74' -and $sourceRef -eq 'codex/xrs-print-ai-074') -or ($version -eq '0.4.75' -and $sourceRef -eq 'codex/xrs-preview-calibration-075') -or ($version -eq '0.4.76' -and $sourceRef -eq 'codex/xrs-preview-geometry-076') -or ($version -eq '0.4.77' -and $sourceRef -eq 'codex/xrs-print-preview-ui-077') -or ($version -eq '0.4.78' -and $sourceRef -eq 'codex/xrs-word-pagination-078') -or ($version -eq '0.4.79' -and $sourceRef -eq 'codex/xrs-ui-print-079') -or ($version -eq '0.4.80' -and $sourceRef -eq 'codex/xrs-preview-lines-080') -or ($version -eq '0.4.81' -and $sourceRef -eq 'codex/xrs-direct-export-081'))
           Add-Content -Path $env:GITHUB_OUTPUT -Value "beta=$($isBeta.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "stable056=$($isStable056.ToString().ToLowerInvariant())" -Encoding utf8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "updateHotfix=$($isUpdateHotfix.ToString().ToLowerInvariant())" -Encoding utf8
@@ -81,37 +81,14 @@ jobs:
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: npx playwright-core install chromium
       - uses: actions/setup-python@v5
-        if: (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080')
+        if: (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081')
         with:
           python-version: '3.12'
       - name: Windows lock readiness diagnosis, repetitions and normal parallel full suite
         id: backup-lock-076
-        if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080')
-        run: node tests/windows-backup-lock-checks.mjs ${{ (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080') && '--native-lock' || '--module-readiness' }}
+        if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081')
+        run: node tests/windows-backup-lock-checks.mjs ${{ (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081') && '--native-lock' || '--module-readiness' }}
       - run: npm run build
-      - name: Individual Word preview calibration and unchanged exports
-        id: preview-calibration-tests
-        if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080') || github.ref_name == 'codex/xrs-preview-calibration-075'
-        shell: pwsh
-        run: |
-          node tests/preview-calibration-browser.mjs
-          $testExit = $LASTEXITCODE
-          if ($testExit -ne 0 -and (Test-Path 'test-output/calibration-failure.json')) {
-            $failure = Get-Content 'test-output/calibration-failure.json' -Raw | ConvertFrom-Json
-            $diagnostic = "$($failure.stage): $($failure.error)"
-            $escaped = $diagnostic.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-            Write-Output "::error title=Synthetic preview calibration::$escaped"
-            "### Synthetic preview calibration failure" >> $env:GITHUB_STEP_SUMMARY
-            ('    ' + ($diagnostic -replace "`r?`n", "`n    ")) >> $env:GITHUB_STEP_SUMMARY
-          }
-          exit $testExit
-      - name: Preserve calibration failure diagnostics
-        if: failure() && steps.preview-calibration-tests.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: xrs-preview-calibration-diagnostics-${{ github.run_id }}
-          path: x-ray-report-studio/test-output/calibration-failure.*
-          if-no-files-found: warn
       - name: Verify Electron runtime for Windows shortcut test
         if: steps.release-channel.outputs.updateHotfix == 'true'
         shell: pwsh
@@ -262,7 +239,7 @@ jobs:
             x-ray-report-studio/test-output/v3-failed.png
           if-no-files-found: error
       - name: Offline AI contextual review acceptance
-        if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080') || github.ref_name == 'codex/xrs-preview-calibration-075' || github.ref_name == 'codex/xrs-print-ai-074' || github.ref_name == 'codex/xrs-ai-072' || github.ref_name == 'codex/xrs-ai-065' || github.ref_name == 'codex/xrs-ai-066' || github.ref_name == 'codex/xrs-ai-067' || github.ref_name == 'codex/xrs-ai-069' || github.ref_name == 'codex/xrs-template-073'
+        if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081') || github.ref_name == 'codex/xrs-preview-calibration-075' || github.ref_name == 'codex/xrs-print-ai-074' || github.ref_name == 'codex/xrs-ai-072' || github.ref_name == 'codex/xrs-ai-065' || github.ref_name == 'codex/xrs-ai-066' || github.ref_name == 'codex/xrs-ai-067' || github.ref_name == 'codex/xrs-ai-069' || github.ref_name == 'codex/xrs-template-073'
         shell: pwsh
         run: |
           $scenarios = @('ai-review-browser', 'morphology-browser', 'dictionary-electron', 'final-medical-browser', 'final-renderer-electron', 'update-progress-browser')
@@ -308,20 +285,20 @@ jobs:
         if: steps.release-channel.outputs.stable056 != 'true' && steps.release-channel.outputs.updateHotfix != 'true' && steps.release-channel.outputs.updaterRecovery != 'true'
         run: node tests/preview-pagination-browser.mjs
       - name: Word atomic blocks, empty paragraphs and oversized keep chains
-        if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080')
+        if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081')
         run: node tests/preview-keep-chain-browser.mjs
       - name: Editor line and paragraph spacing through preview, DOCX and PDF
-        if: (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080')
+        if: (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081')
         run: node tests/editor-format-browser.mjs
       - name: Conclusion continuity, Word and PDF output, and compact settings
-        if: github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080'
+        if: github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081'
         run: node tests/conclusion-settings-browser.mjs
       - name: Actual DOCX and preview geometry, widows and calibration UI
         id: word-preview-geometry
-        if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080')
+        if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081')
         run: node tests/word-preview-geometry-browser.mjs
       - name: Preserve Word preview geometry diagnostics
-        if: always() && (github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080'))
+        if: always() && (github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081'))
         uses: actions/upload-artifact@v4
         with:
           name: xrs-word-preview-geometry-${{ github.run_id }}
@@ -329,7 +306,7 @@ jobs:
           if-no-files-found: warn
       - name: Doctor formatting and adaptive print acceptance
         id: doctor-print-tests
-        if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080') || github.ref_name == 'codex/xrs-print-ai-074' || github.ref_name == 'codex/xrs-preview-calibration-075'
+        if: github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081') || github.ref_name == 'codex/xrs-print-ai-074' || github.ref_name == 'codex/xrs-preview-calibration-075'
         run: node tests/doctor-print-browser.mjs
       - name: Preserve adaptive print failure diagnostics
         if: failure() && steps.doctor-print-tests.outcome == 'failure'
@@ -462,7 +439,7 @@ jobs:
             x-ray-report-studio/test-output/X-ray_Report_Studio_Windows_Beta_Setup.zip
             x-ray-report-studio/test-output/XRS-08-beta-candidate.json
       - name: Preserve Windows lock diagnostics for print preview candidates
-        if: always() && (github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080'))
+        if: always() && (github.ref_name == 'codex/xrs-preview-geometry-076' || (github.ref_name == 'codex/xrs-print-preview-ui-077' || github.ref_name == 'codex/xrs-word-pagination-078' || github.ref_name == 'codex/xrs-ui-print-079' || github.ref_name == 'codex/xrs-preview-lines-080' || github.ref_name == 'codex/xrs-direct-export-081'))
         uses: actions/upload-artifact@v4
         with:
           name: xrs-${{ steps.release-channel.outputs.version }}-backup-lock-diagnostics-${{ github.run_id }}

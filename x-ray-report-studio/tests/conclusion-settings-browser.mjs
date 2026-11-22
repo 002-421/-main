@@ -1,3 +1,4 @@
+import { chooseExport, capturePrintLayout, renderCapturedPdf, removePrintCapture, assertNoPrintPreview } from './print-export-helpers.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
@@ -47,9 +48,8 @@ try {
    );
   },{doc,key});
   await page.goto(url);
-  const preview=async()=>{await page.locator('#preview-report').click();await page.locator('.paginated-browser-preview .preview-page').first().waitFor();};
-  await preview();
-  const output=await page.locator('.paginated-browser-preview .preview-page').evaluateAll(pages=>pages.map(p=>{
+  await capturePrintLayout(page);
+  const output=await page.locator('#test-print-layout .preview-page').evaluateAll(pages=>pages.map(p=>{
    const body=p.querySelector('.report-content'),footer=p.querySelector('.preview-word-footer');
    const bottom=Math.max(...[...body.querySelectorAll('*')].map(e=>e.getBoundingClientRect().bottom));
    return {text:body.textContent,heading:!!body.querySelector('[data-conclusion-start]'),
@@ -65,7 +65,7 @@ try {
   assert.ok(output.every(x=>x.safe));
   assert.equal(normalized(output.map(x=>x.text).join('')),normalized(text(doc)));
   if(long)assert.ok(output.length>headingPage+1,'long conclusion continues without a single oversized block');
-  const download=page.waitForEvent('download');await page.locator('#preview-save-word').click();
+  const download=page.waitForEvent('download');await chooseExport(page,'#save-docx');await assertNoPrintPreview(page);
   const bytes=await readFile(await (await download).path());
   if(outputDir)await writeFile(join(outputDir,`${name}.docx`),bytes);
   const zip=unzipSync(bytes);
@@ -85,16 +85,9 @@ try {
   assert.match(body,/<w:b\s*\/>/);
   assert.match(xml,/<w:sectPr>/);
 
-  await preview();
-  await page.evaluate(()=>{
-   document.querySelector('#app').style.display='none';
-   const copy=document.createElement('div');copy.id='print-fix-copy';copy.className='export-only-editor';
-   copy.innerHTML=document.querySelector('.paginated-browser-preview').innerHTML;document.body.append(copy);
-  });
-  const pdf=await page.pdf({preferCSSPageSize:true,printBackground:true});
+  const pdf=await renderCapturedPdf(page);
   assert.equal((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g)||[]).length,output.length);
-  await page.evaluate(()=>{document.querySelector('#print-fix-copy').remove();document.querySelector('#app').style.display='';});
-  await page.locator('.word-preview-dialog [data-close]').last().click();
+  await removePrintCapture(page);
 
   if(name==='boundary'){
    assert.equal(await page.locator('#insert-field').count(),0);
@@ -112,7 +105,7 @@ try {
     assert.equal(await dialog.locator('#update-current-version').textContent(),packageInfo.version);
     assert.equal(await dialog.locator('[data-settings-section=dictionary] summary').last().textContent(),'Лицензии словаря');
     assert.equal(await dialog.locator('[data-settings-section=doctor] #stamp-preview').count(),1);
-    assert.equal(await dialog.locator('[data-settings-section=doctor] #settings-preview-calibration').count(),1);
+    await assertNoPrintPreview(page);
     assert.equal(await dialog.locator('[data-settings-section][open]').count(),0);
     await dialog.locator('[data-settings-section=doctor] > summary').click();
     await dialog.locator('#doctor-name').fill('Синтетический врач');

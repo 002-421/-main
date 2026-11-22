@@ -1,3 +1,4 @@
+import { chooseExport, assertNoPrintPreview } from './print-export-helpers.mjs';
 import assert from 'node:assert/strict';
 import {_electron} from 'playwright-core';
 import {cp,mkdir,mkdtemp,rename,rm,readFile} from 'node:fs/promises';
@@ -56,9 +57,22 @@ try{
  await page.locator('#stamp-preview img').waitFor();
  for(const [selector,value] of [['#stamp-height','120'],['#stamp-position-x','25'],['#stamp-position-y','-15']])await page.locator(selector).evaluate((el,value)=>{el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}));},value);
  assert.equal(await page.locator('#stamp-preview img').evaluate(el=>el.style.transform),'translate(25px, -15px)');
- await page.locator('#save-settings').click();await page.locator('#preview-report').click();
- const stamp=page.locator('.doctor-stamp-image').first();await stamp.waitFor();assert.equal(await stamp.evaluate(el=>el.style.getPropertyValue('--stamp-x')),'25px');assert.equal(await stamp.evaluate(el=>el.style.getPropertyValue('--stamp-y')),'-15px');assert.equal(await stamp.evaluate(el=>el.style.getPropertyValue('--stamp-height')),'120px');
- assert.equal(await stamp.evaluate(el=>getComputedStyle(el).objectFit),'contain');await page.locator('[data-close]').first().click();
+ await page.locator('#save-settings').click();
+ await app.evaluate(({dialog})=>{dialog.showSaveDialog=async()=>({canceled:true});});
+ await page.evaluate(()=>{
+  const watcher=new MutationObserver(()=>{
+   const stamp=document.querySelector('#editor > .export-only-editor .doctor-stamp-image');
+   if(!stamp)return;
+   window.__stampPrint=['--stamp-x','--stamp-y','--stamp-height'].map(key=>stamp.style.getPropertyValue(key));
+   window.__stampPrint.push(getComputedStyle(stamp).objectFit);
+   watcher.disconnect();
+  });
+  watcher.observe(document.querySelector('#editor'),{childList:true});
+ });
+ await chooseExport(page,'#export-pdf');
+ await page.waitForFunction(()=>window.__stampPrint&&!document.querySelector('#editor > .export-only-editor'));
+ assert.deepEqual(await page.evaluate(()=>window.__stampPrint),['25px','-15px','120px','contain']);
+ await assertNoPrintPreview(page);
  await page.addInitScript(()=>{const get=Storage.prototype.getItem;let once=false;Storage.prototype.getItem=function(key){const raw=get.call(this,key);if(once||key!=='mri-report-studio.workspace.v1'||!raw)return raw;once=true;const w=JSON.parse(raw),r=w.reports.find(x=>x.id===w.activeId);for(const [id,text] of [['description','Грыж межпозвонковых дисков не выявлено.'],['conclusion','Экструзия L5/S1.']])r.doc.content.find(n=>n.attrs?.id===id).content=[{type:'paragraph',content:[{type:'text',text}]}];return JSON.stringify(w);};});
  await page.reload();const contradiction=page.locator('.ai-review-clinical').first();await contradiction.waitFor({timeout:30000});await contradiction.click({button:'right'});assert.match(await page.locator('.ai-review-card').innerText(),/противореч|наличи/iu);assert.equal(await page.locator('.ai-review-card').getByRole('button',{name:'Заменить',exact:true}).count(),0);
  assert.deepEqual(requests,[],'local review does not request any HTTP endpoint');

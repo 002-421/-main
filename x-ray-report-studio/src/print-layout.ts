@@ -2,8 +2,8 @@ import type { RichNode } from './model';
 import type { PrintBox } from './print-document.ts';
 export type LayoutMetrics={pages:number;safe:boolean;descriptionOnConclusion:boolean};
 export type PrintVariant={document:RichNode;name:string;delta:number;spacing:number};
-type RenderedLayout={html:string;previewSourceHtml?:string;metrics:LayoutMetrics;box?:PrintBox;releaseDescriptionKeep?:boolean};
-export type PrintPlan=PrintVariant&RenderedLayout&{wordRendering:'unverified'};
+type RenderedLayout={html:string;metrics:LayoutMetrics;box?:PrintBox;releaseDescriptionKeep?:boolean};
+export type PrintPlan=PrintVariant&RenderedLayout;
 export class PrintLayoutError extends Error {constructor(message:string){super(message);this.name='PrintLayoutError';}}
 const walk=(n:RichNode,visit:(n:RichNode)=>void)=>{visit(n);n.content?.forEach(child=>walk(child,visit));};
 const content=(n:RichNode):string=>n.text??(n.content??[]).map(content).join('');
@@ -29,10 +29,10 @@ export function printVariants(input:RichNode,optimize:boolean):PrintVariant[]{
  if(uniformArial(input,base))for(const delta of [-.5,-1,.5,1])if(base+delta>=9&&base+delta<=15)variants.push({document:resized(lined,base,delta),name:`font-${delta}`,delta,spacing:2});
  return variants;
 }
-/** One deterministic decision, shared by preview and both exports. */
+/** One deterministic decision, shared by both exports. */
 export function choosePrintLayout(input:RichNode,optimize:boolean,render:(doc:RichNode)=>RenderedLayout):PrintPlan{
  const plans:PrintPlan[]=[];const failures:string[]=[];
- for(const v of printVariants(input,optimize)){try{const result=render(v.document);if(result.metrics.safe&&content(v.document).replace(/\s/gu,'')===content(input).replace(/\s/gu,''))plans.push({...v,...result,wordRendering:'unverified'});}catch(error){failures.push((error as Error).message);}}
+ for(const v of printVariants(input,optimize)){try{const result=render(v.document);if(result.metrics.safe&&content(v.document).replace(/\s/gu,'')===content(input).replace(/\s/gu,''))plans.push({...v,...result});}catch(error){failures.push((error as Error).message);}}
  // A shorter plan is not useful when it separates the conclusion from the
  // last part of the description. The renderer measures this on actual pages,
  // after long paragraphs and tables have been split.

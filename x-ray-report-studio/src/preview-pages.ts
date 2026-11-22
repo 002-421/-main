@@ -1,17 +1,16 @@
-import {capacity, calibratedCapacity, calibratedWidth, widthCapacity, type PreviewCalibration} from './preview-calibration.ts';
 import type { PrintBox } from './print-document.ts';
 import type { RichNode } from './model';
 import { DISCLAIMER_TEXT, EQUIPMENT_TEXT } from './report-footer.ts';
 
 export { previewPageLayout } from './page-geometry.ts';
 import { previewPageLayout } from './page-geometry.ts';
-import {wordPreviewGeometry,normalizeWordPreview,previewLineFloor,hasStandardParagraphGap,MAX_PREVIEW_GAP_CORRECTION_PT} from './word-preview.ts';
+import {wordPreviewGeometry,normalizeWordPreview} from './word-preview.ts';
 
 /** The same footer measurement supplies preview and print-only object bounds. */
-function createMeasurement(doc: RichNode, wordBox?:PrintBox, wrapWidth?:number) {
+function createMeasurement(doc: RichNode, wordBox?:PrintBox) {
   const layout = wordBox?wordPreviewGeometry(doc,wordBox):previewPageLayout(doc);
   const css = [layout.widthMm, layout.heightMm, layout.topMm, layout.bottomMm, layout.leftMm, layout.rightMm]
-    .map((value, index) => `--preview-${['width', 'height', 'top', 'bottom', 'left', 'right'][index]}:${value}mm`).join(';') + `;--preview-font-size:${layout.fontSizePt}pt` + (wrapWidth===undefined?'':`;--preview-wrap-width:${wrapWidth}px`);
+    .map((value, index) => `--preview-${['width', 'height', 'top', 'bottom', 'left', 'right'][index]}:${value}mm`).join(';') + `;--preview-font-size:${layout.fontSizePt}pt`;
   const scratch = document.createElement('article');
   scratch.className = 'export-preview-paper preview-measure'+(wordBox?' word-reference-preview':'');
   scratch.style.cssText = css;
@@ -37,7 +36,7 @@ function createMeasurement(doc: RichNode, wordBox?:PrintBox, wrapWidth?:number) 
   const contentHeight = (layout.heightMm - layout.topMm) * 96 / 25.4 - bottom;
   const effectiveCss = css + `;--preview-bottom:${bottom}px`;
 
-  return {scratch, measure, scale, layout, contentHeight, effectiveCss, footerHeight:footerProbe.getBoundingClientRect().height/scale};
+  return {scratch, measure, scale, layout, contentHeight, effectiveCss};
 }
 export function measurePrintBox(doc: RichNode): PrintBox {
   const box = createMeasurement(doc);
@@ -49,41 +48,10 @@ export function measurePrintBox(doc: RichNode): PrintBox {
   finally { box.scratch.remove(); }
 }
 
-/** Calibrate only the break calculation, without moving paper margins or footer. */
-export function measurePreviewCapacity(doc:RichNode,wordBox?:PrintBox) {
-  const box=createMeasurement(doc,wordBox);
-  try {
-    const probe=document.createElement('p');probe.textContent='Аа';
-    const line=typeof doc.attrs?.lineHeight==='number'&&doc.attrs.lineHeight>0?doc.attrs.lineHeight:1.05;
-    probe.style.cssText='margin:0;padding:0';
-    probe.style.fontFamily=box.layout.fontFamily;probe.style.fontSize=`${box.layout.fontSizePt}pt`;probe.style.lineHeight=String(line);
-    box.measure.append(probe);
-    if(wordBox)normalizeWordPreview(box.measure,doc);
-    const lineHeight=probe.getBoundingClientRect().height/box.scale;
-    const maximum=Math.max(box.contentHeight,Math.min((box.layout.heightMm-box.layout.topMm-box.layout.bottomMm)*96/25.4,(box.layout.heightMm-box.layout.topMm-6.5)*96/25.4-box.footerHeight-1));
-    if(!wordBox)return capacity(box.contentHeight,maximum,lineHeight);
-    const lineMinimumPt=Number(probe.dataset.wordLineMinimumPt);
-    const inkFloor=previewLineFloor(probe,box.layout.fontSizePt,lineHeight*.75,lineMinimumPt);
-    const gapFloor=hasStandardParagraphGap(doc)?
-      Math.max(lineMinimumPt,lineHeight*.75-MAX_PREVIEW_GAP_CORRECTION_PT):inkFloor;
-    return capacity(box.contentHeight,box.contentHeight,lineHeight,Math.min(lineHeight,Math.min(inkFloor,gapFloor)*4/3));
-  } finally {box.scratch.remove();}
-}
-
-export function measurePreviewWidth(doc:RichNode,wordBox?:PrintBox) {
- const box=createMeasurement(doc,wordBox);
- try {
-  const standard=box.measure.getBoundingClientRect().width/box.scale;
-  const maximum=Math.max(standard,(box.layout.widthMm-box.layout.leftMm-5)*96/25.4);
-  return widthCapacity(standard,maximum);
- } finally {box.scratch.remove();}
-}
-
-export function paginateBrowserPreview(html: string, doc: RichNode, calibration?:PreviewCalibration, wordBox?:PrintBox, interactivePreview=false): string {
+export function paginateBrowserPreview(html: string, doc: RichNode, wordBox?:PrintBox): string {
   const source = document.createElement('div');
   source.innerHTML = html;
-  const adjusted=calibration?.enabled?calibratedCapacity(measurePreviewCapacity(doc,wordBox),calibration):undefined;
-  if(wordBox)normalizeWordPreview(source,doc,adjusted?.lineScale);
+  if(wordBox)normalizeWordPreview(source,doc);
   const blocks: HTMLElement[] = [];
   const collect = (node: Element) => {
     if (node.matches('section[data-report-section]')) { [...node.children].forEach(collect); return; }
@@ -98,14 +66,10 @@ export function paginateBrowserPreview(html: string, doc: RichNode, calibration?
     blocks.push(node.cloneNode(true) as HTMLElement);
   };
   [...source.children].forEach(collect);
-  const width=calibration?.widthOffsetMm?calibratedWidth(measurePreviewWidth(doc,wordBox),calibration).width:undefined;
-  const {scratch, measure, scale, layout, contentHeight:standardHeight, effectiveCss} = createMeasurement(doc,wordBox,width);
-  const contentHeight=adjusted?.height??standardHeight;
-  const interactiveWord=Boolean(interactivePreview&&wordBox);
-  if(interactiveWord)scratch.classList.add('interactive-word-preview');
+  const {scratch, measure, scale, layout, contentHeight, effectiveCss} = createMeasurement(doc,wordBox);
 
   const pages: HTMLElement[] = [];
-  const makePage = () => { const paper = document.createElement('article'); paper.className = 'export-preview-paper'+(wordBox?' word-reference-preview':'')+(interactiveWord?' interactive-word-preview':''); paper.style.cssText = effectiveCss; const content = document.createElement('div'); content.className = 'report-content'; content.style.fontFamily = layout.fontFamily; if(wordBox)content.style.lineHeight=String(Number(doc.attrs?.lineHeight)||1.05); paper.append(content); pages.push(paper); return content; };
+  const makePage = () => { const paper = document.createElement('article'); paper.className = 'export-preview-paper'+(wordBox?' word-reference-preview':''); paper.style.cssText = effectiveCss; const content = document.createElement('div'); content.className = 'report-content'; content.style.fontFamily = layout.fontFamily; if(wordBox)content.style.lineHeight=String(Number(doc.attrs?.lineHeight)||1.05); paper.append(content); pages.push(paper); return content; };
   let target = makePage();
   const measuredHeight = () => {
     const top = measure.getBoundingClientRect().top;

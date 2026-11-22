@@ -46,6 +46,21 @@ export function bindFormatToolbar(editor: Editor, toolbar: HTMLElement) {
     if (value) chain.setBackgroundColor(value).run();
     else chain.unsetBackgroundColor().run();
   }
+  function selectionFill() {
+    const {selection, storedMarks, doc} = editor.state;
+    const background = (marks: typeof selection.$from.parent.marks) =>
+      String(marks.find(mark => mark.type.name === 'textStyle')?.attrs.backgroundColor ?? '').toLowerCase();
+    const colors = new Set<string>();
+    if (selection.empty) colors.add(background(storedMarks ?? selection.$from.marks()));
+    else for (const range of selection.ranges) {
+      doc.nodesBetween(range.$from.pos, range.$to.pos, node => {
+        if (node.isText) colors.add(background(node.marks));
+      });
+    }
+    if (colors.size > 1) return {state:'mixed'};
+    const color = colors.values().next().value;
+    return {state:!color ? 'none' : color === fill ? 'current' : 'other', color};
+  }
   function activeAlignment() {
     const {from, to, $from} = editor.state.selection;
     const selected = new Set<string>();
@@ -74,8 +89,12 @@ export function bindFormatToolbar(editor: Editor, toolbar: HTMLElement) {
     alignToggle.title = align === 'mixed' ? 'Смешанное выравнивание' : alignment ?? 'Выравнивание';
     alignToggle.textContent = align === 'mixed' ? 'Смешанное ▾' : `${alignment ?? 'Выравнивание'} ▾`;
     fillButton.querySelector<HTMLElement>('.format-swatch')!.style.setProperty('--swatch', fill);
-    fillButton.title = `Заливка: ${MANUAL_FILL_COLORS.find(([color]) => color === fill)![1]}`;
-    fillButton.setAttribute('aria-pressed', String(editor.isActive('textStyle', {backgroundColor:fill})));
+    const {state,color} = selectionFill();
+    const description = {none:'нет ручной заливки',current:'текущий цвет',other:'другой цвет',mixed:'смешанная заливка'}[state];
+    fillButton.dataset.fillState = state;
+    fillButton.style.setProperty('--fill-selection-color', color || 'var(--mint)');
+    fillButton.title = `Заливка: ${MANUAL_FILL_COLORS.find(([choice]) => choice === fill)![1]}. Выделение: ${description}.`;
+    fillButton.setAttribute('aria-pressed', state === 'mixed' ? 'mixed' : String(state !== 'none'));
   }
   for (const toggle of toggles) {
     toggle.onmousedown = event => event.preventDefault();
@@ -98,7 +117,7 @@ export function bindFormatToolbar(editor: Editor, toolbar: HTMLElement) {
     if (!(event.target instanceof Element) || !event.target.closest('.format-menu')) close();
   });
   fillButton.onmousedown = event => event.preventDefault();
-  fillButton.onclick = () => { applyFill(fill); close(); update(); };
+  fillButton.onclick = () => { applyFill(selectionFill().state === 'current' ? null : fill); close(); update(); };
   for (const choice of choices) {
     choice.onmousedown = event => event.preventDefault();
     choice.onclick = () => {
@@ -131,7 +150,7 @@ export function bindFormatToolbar(editor: Editor, toolbar: HTMLElement) {
     };
   }
   editor.on('transaction', ({transaction}) => {
-    if (transaction.docChanged || transaction.selectionSet) update();
+    if (transaction.docChanged || transaction.selectionSet || transaction.storedMarksSet) update();
   });
   update();
 }

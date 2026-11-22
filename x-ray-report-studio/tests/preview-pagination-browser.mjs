@@ -1,3 +1,4 @@
+import { capturePrintLayout, renderCapturedPdf, removePrintCapture } from './print-export-helpers.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -34,8 +35,7 @@ try {
   assert.ok(builtinSizes.every(item=>item.fontFamily.split(',')[0].trim()==='Arial'),'new builtin computed family is Arial');
   if(process.platform==='win32'){const cdp=await page.context().newCDPSession(page);await cdp.send('DOM.enable');await cdp.send('CSS.enable');const tree=await cdp.send('DOM.getDocument');const node=await cdp.send('DOM.querySelector',{nodeId:tree.root.nodeId,selector:'#editor .report-content p :not(:has(*))'});const rendered=await cdp.send('CSS.getPlatformFontsForNode',{nodeId:node.nodeId});assert.ok(rendered.fonts.some(font=>font.familyName==='Arial'&&font.glyphCount>0&&!font.isCustomFont),'Windows renders actual system Arial glyphs: '+JSON.stringify(rendered.fonts));await cdp.detach();}
   for (const item of builtinSizes) assertSize(item.computedSize, 11, 'new builtin editor paragraph');
-  await page.locator('#preview-report').click();
-  await page.locator('.preview-page').first().waitFor();
+  await capturePrintLayout(page);
   const builtinContainer = await page.locator('.preview-page .report-content').first().evaluate(node => getComputedStyle(node).fontSize);
   assertSize(builtinContainer, 11, 'new builtin preview container');
   for (const item of await paragraphSizes(page.locator('.preview-page .report-content p'))) assertSize(item.computedSize, 11, 'new builtin preview paragraph');
@@ -81,7 +81,7 @@ try {
       localStorage.removeItem('mri-report-studio.draft.v1');
     }, doc);
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await page.locator('#preview-report').waitFor();
+    await page.locator('#save-menu-toggle').waitFor();
     const restored = await page.locator('#editor .report-content').innerText();
     assert.match(restored, /Синтетическое описание/, `${scenario.name}: synthetic workspace restored`);
     const editorSizes = await paragraphSizes(page.locator('#editor .report-content p'));
@@ -91,9 +91,8 @@ try {
     await page.emulateMedia({ media: 'print' });
     for (const item of await paragraphSizes(page.locator('#editor .report-content p'))) assertSize(item.computedSize, Number.parseFloat(item.inlineSize), `${scenario.name}: PDF print paragraph`);
     await page.emulateMedia({ media: null });
-    await page.locator('#preview-report').click();
-    await page.locator('.preview-page').first().waitFor();
-    if(scenario.custom)await page.locator('.export-preview-scroll').evaluate(el=>{el.style.zoom='0.8';});
+    await capturePrintLayout(page);
+    if(scenario.custom)await page.locator('#test-print-layout').evaluate(el=>{el.style.zoom='0.8';});
     const actual = await page.locator('.preview-page').count();
     const geometry = await page.locator('.preview-page').evaluateAll(nodes => nodes.map(page => {
       const paper = page.querySelector('.export-preview-paper');
@@ -122,11 +121,9 @@ try {
     const xml=strFromU8(unzipSync(new Uint8Array(await word.arrayBuffer()))['word/document.xml']);
     const wordText=[...xml.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map(m=>m[1].replaceAll('&amp;','&').replaceAll('&lt;','<').replaceAll('&gt;','>')).join('');
     assert.equal(wordText.replace(/\s/gu,''),plain(doc).replace(/\s/gu,''),`${scenario.name}: DOCX retains all medical text`);
-    await page.evaluate(()=>{const app=document.querySelector('#app');app.style.display='none';const copy=document.createElement('div');copy.id='synthetic-pdf-copy';copy.className='export-only-editor';copy.innerHTML=document.querySelector('.paginated-browser-preview').innerHTML;document.body.append(copy);});
-    const pdf=await page.pdf({path:`${output}/pagination-${scenario.name.replace(/[^a-z0-9]/gi,'-')}.pdf`,preferCSSPageSize:true,printBackground:true,margin:{top:0,bottom:0,left:0,right:0}});
-    assert.equal((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g)||[]).length,actual,`${scenario.name}: real Chromium PDF page count matches preview`);
-    await page.evaluate(()=>{document.querySelector('#synthetic-pdf-copy').remove();document.querySelector('#app').style.display='';});
-    await page.locator('.dialog [data-close]').last().click();
+    const pdf = await renderCapturedPdf(page,{path:`${output}/pagination-${scenario.name.replace(/[^a-z0-9]/gi,'-')}.pdf`,margin:{top:0,bottom:0,left:0,right:0}});
+    assert.equal((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g)||[]).length,actual,`${scenario.name}: real Chromium PDF matches the print layout`);
+    await removePrintCapture(page);
     await page.close();
   }
   console.log('PASS: synthetic page geometry, long paragraph, table, mixed font sizes, explicit break and conclusion position.');

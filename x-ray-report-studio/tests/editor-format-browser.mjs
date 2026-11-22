@@ -1,3 +1,4 @@
+import { chooseExport, capturePrintLayout, renderCapturedPdf, removePrintCapture } from './print-export-helpers.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
@@ -50,8 +51,15 @@ try {
   const storage = () => page.evaluate(key => JSON.parse(localStorage.getItem(key)).reports.find(r => r.id === 'format-test').doc, key);
   const select = (first, last = first, a = 4, b = a) => paragraphs.evaluateAll(async (ps, {first, last, a, b}) => {
     ps[0].closest('[contenteditable]').focus();
-    const text = el => document.createTreeWalker(el, NodeFilter.SHOW_TEXT).nextNode();
-    getSelection().setBaseAndExtent(text(ps[first]), a, text(ps[last]), b);
+    const point = (el, offset) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let node; (node = walker.nextNode());) {
+        if (offset <= node.length) return [node, offset];
+        offset -= node.length;
+      }
+      throw new Error('Selection extends beyond the paragraph');
+    };
+    getSelection().setBaseAndExtent(...point(ps[first],a), ...point(ps[last],b));
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   }, {first, last, a, b});
   await select(2);
@@ -136,7 +144,7 @@ try {
   await select(2);
   await interval.selectOption('1.05');
   await page.waitForFunction(key => JSON.parse(localStorage.getItem(key)).reports[0].doc.content[3].attrs.lineHeight === 1.05, key);
-  await page.locator('#preview-report').click();
+  await capturePrintLayout(page);
   const printed = page.locator('.preview-page .report-content');
   const previewLine = printed.locator('hr[data-manual-rule]');
   await previewLine.waitFor();
@@ -150,7 +158,7 @@ try {
   assert.equal(await remaining.evaluate(el => el.style.marginBottom), '4.9pt');
 
   const downloading = page.waitForEvent('download');
-  await page.locator('#preview-save-word').click();
+  await chooseExport(page,'#save-docx');
   const download = await downloading;
   const xml = strFromU8(unzipSync(await readFile(await download.path()))['word/document.xml']);
   const wordParagraphs = [...xml.matchAll(/<w:p(?: [^>]*)?>.*?<\/w:p>/gs)].map(match => match[0]);
@@ -164,29 +172,16 @@ try {
   assert.match(wordParagraphs.find(p => p.includes('строка В.')), /w:line="231"/);
   assert.match(wordParagraphs.find(p => p.includes('строка А.')), /w:after="0"/);
 
-  await page.locator('#preview-report').click();
-  await page.locator('.paginated-browser-preview').waitFor();
-  await page.evaluate(() => {
-    document.querySelector('#app').style.display = 'none';
-    const copy = document.createElement('div');
-    copy.className = 'export-only-editor';
-    copy.innerHTML = document.querySelector('.paginated-browser-preview').innerHTML;
-    document.body.append(copy);
-  });
   await page.emulateMedia({media: 'print'});
   const printStyle = await page.locator('.export-only-editor hr[data-manual-rule]').evaluate(el => ({
     visible: el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0,
     color: getComputedStyle(el).backgroundColor, colorAdjust: getComputedStyle(el).printColorAdjust,
   }));
   assert.deepEqual(printStyle, {visible: true, color: 'rgb(140, 156, 174)', colorAdjust: 'exact'});
-  const pdf = await page.pdf({preferCSSPageSize: true, printBackground: true});
+  const pdf = await renderCapturedPdf(page);
   assert.match(pdf.toString('latin1'), /\/Type\s*\/Page\b/);
   await page.emulateMedia({media: 'screen'});
-  await page.evaluate(() => {
-    document.querySelector('.export-only-editor').remove();
-    document.querySelector('#app').style.display = '';
-  });
-  await page.locator('.word-preview-dialog [data-close]').last().click();
+  await removePrintCapture(page);
 
   const choose = async (menu, value) => {
     await page.locator(`[data-format-toggle=${menu}]`).click();
@@ -228,6 +223,45 @@ try {
   await select(1,2,3,5);
   await choose('list','asterisk');
 
+  const fillButton=page.locator('#fill-text');
+  const fillState=()=>fillButton.getAttribute('data-fill-state');
+  const yellow=body.locator('[data-manual-fill="#ffff00"]');
+  const blue=body.locator('[data-manual-fill="#bcebff"]');
+  await select(1,1,1,6);
+  assert.equal(await fillState(),'none');
+  await fillButton.click();
+  assert.equal(await yellow.count(),1);
+  assert.equal(await fillState(),'current');
+  await fillButton.click();
+  assert.equal(await yellow.count(),0,'second click removes yellow without undo');
+  await choose('fill','#bcebff');
+  assert.equal(await blue.count(),1);
+  await fillButton.click();
+  assert.equal(await blue.count(),0,'second click removes blue without undo');
+  await fillButton.click();
+  await select(1,1,3,3);
+  assert.equal(await fillState(),'current');
+  assert.equal(await fillButton.getAttribute('aria-pressed'),'true');
+  await select(1,1,10,10);
+  assert.equal(await fillState(),'none');
+  await choose('fill','#ffbdd7');
+  await select(1,1,1,6);
+  assert.equal(await fillState(),'other');
+  await fillButton.click();
+  assert.equal(await blue.count(),0);
+  assert.equal(await fillState(),'current');
+  await select(1,2,1,6);
+  assert.equal(await fillState(),'mixed');
+  assert.equal(await fillButton.getAttribute('aria-pressed'),'mixed');
+  await fillButton.click();
+  assert.equal(await fillState(),'current');
+  assert.equal(await body.locator('[data-manual-fill="#ffbdd7"]').count(),2);
+  await fillButton.click();
+  assert.equal(await body.locator('[data-manual-fill="#ffbdd7"]').count(),0);
+  await undo.click();
+  assert.equal(await body.locator('[data-manual-fill="#ffbdd7"]').count(),2);
+  await redo.click();
+  assert.equal(await body.locator('[data-manual-fill="#ffbdd7"]').count(),0);
   await select(1,1,1,6);
   await choose('fill','#b7f7b7');
   const green = body.locator('[data-manual-fill="#b7f7b7"]');
@@ -247,30 +281,20 @@ try {
   await page.waitForFunction(()=>document.querySelector('#fill-text')?.title.includes('Светло-зелёный'));
   assert.equal(await green.count(),2);
 
-  await page.locator('#preview-report').click();
-  await page.locator('.paginated-browser-preview').waitFor();
   const downloadWithFormatting = page.waitForEvent('download');
-  await page.locator('#preview-save-word').click();
+  await chooseExport(page,'#save-docx');
   const formatted = unzipSync(await readFile(await (await downloadWithFormatting).path()));
   assert.match(strFromU8(formatted['word/document.xml']), /w:fill="B7F7B7"/);
   assert.match(strFromU8(formatted['word/numbering.xml']), /<w:lvlText w:val="\*"/);
   assert.match(strFromU8(formatted['word/numbering.xml']), /w:hanging="240"/);
 
-  await page.locator('#preview-report').click();
-  await page.locator('.paginated-browser-preview li').first().waitFor();
-  await page.evaluate(() => {
-    document.querySelector('#app').style.display = 'none';
-    const copy = document.createElement('div');
-    copy.className = 'export-only-editor';
-    copy.innerHTML = document.querySelector('.paginated-browser-preview').innerHTML;
-    document.body.append(copy);
-  });
+  await capturePrintLayout(page);
   await page.emulateMedia({media:'print'});
   const marker = page.locator('.export-only-editor ul[data-bullet-style=asterisk]');
   assert.equal(await marker.evaluate(el=>getComputedStyle(el).listStyleType), '"*  "');
   const pdfFill = page.locator('.export-only-editor [data-manual-fill="#b7f7b7"]').first();
   assert.equal(await pdfFill.evaluate(el=>getComputedStyle(el).backgroundColor), 'rgb(183, 247, 183)');
-  const formattedPdf = await page.pdf({preferCSSPageSize:true,printBackground:true});
+  const formattedPdf = await renderCapturedPdf(page);
   assert.match(formattedPdf.toString('latin1'), /\/Type\s*\/Page\b/);
 
   console.log('PASS: four list markers and removal, four alignments, all line thicknesses, fill across themes, Undo/Redo, reload, real DOCX and Chromium PDF.');

@@ -14,7 +14,7 @@ try{
   const paragraph=label=>`<p data-keep-next="true" style="font-family:Arial;font-size:11pt;line-height:1.05;margin:0">${label} 1<br>${label} 2<br>${label} 3</p>`;
   const html=paragraph('Синтетический А')+paragraph('Синтетический Б')+'<div class="doctor-signature-row"><p style="font-size:11pt;line-height:1.05;margin:0">Врач: Синтетический</p><p style="font-size:11pt;line-height:1.05;margin:0">Дата: 01.01.2000</p></div>';
   const doc={type:'doc',attrs:{fontFamily:'Arial',fontSizePt:11,lineHeight:1.05},content:[]};
-  const output=window.PreviewGeometryTest.paginateBrowserPreview(html,doc,undefined,{width:650,height:100,imageHeight:100});
+  const output=window.PreviewGeometryTest.paginateBrowserPreview(html,doc,{width:650,height:100,imageHeight:100});
   const box=document.createElement('div');box.innerHTML=output;document.body.append(box);
   const input=document.createElement('div');input.innerHTML=html;
   return {input:input.textContent,output:box.textContent.replace(/Страница \d+/gu,'').replace(/\d+$/u,''),content:[...box.querySelectorAll('.report-content')].map(node=>({text:node.textContent,height:node.getBoundingClientRect().height,children:node.children.length})),authored:[...box.querySelectorAll('.report-content')].map(n=>n.textContent).join('')};
@@ -24,7 +24,7 @@ try{
   const p=label=>`<p style="font-family:Arial;font-size:11pt;line-height:1.05;margin:0">${label} 1<br>${label} 2<br>${label} 3</p>`;
   const html=p('А')+p('Б')+'<p style="font-size:11pt;line-height:1.05;margin:0"><br class="ProseMirror-trailingBreak"></p>';
   const doc={type:'doc',attrs:{fontFamily:'Arial',fontSizePt:11,lineHeight:1.05},content:[]};
-  const output=window.PreviewGeometryTest.paginateBrowserPreview(html,doc,undefined,{width:650,height:100,imageHeight:100});
+  const output=window.PreviewGeometryTest.paginateBrowserPreview(html,doc,{width:650,height:100,imageHeight:100});
   const box=document.createElement('div');box.innerHTML=output;document.body.append(box);
   return[...box.querySelectorAll('.report-content')].map(n=>({height:n.getBoundingClientRect().height,count:n.children.length,empty:n.querySelector('p:has(br.ProseMirror-trailingBreak)')!==null}));
  });

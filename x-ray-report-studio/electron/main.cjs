@@ -545,11 +545,6 @@ app.whenReady().then(async () => {
     await fs.writeFile(result.filePath, pdf);
     return { canceled: false, path: result.filePath };
   });
-  ipcMain.handle('report:preview-pdf', async event => {
-    requireMain(event);
-    const pdf = await renderPdf();
-    return pdf.toString('base64');
-  });
   ipcMain.handle('updates:check', async event => {
     requireMain(event);
     return getUpdateManifest();

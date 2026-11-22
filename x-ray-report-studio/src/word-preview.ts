@@ -31,42 +31,8 @@ function naturalLineHeight(family:string,size:number) {
   return height;
 }
 
-export const MAX_PREVIEW_GAP_CORRECTION_PT = .5;
-
-export function hasStandardParagraphGap(doc:RichNode):boolean {
-  const gap=Number(doc.attrs?.spaceAfterPt)||5;
-  const visit=(node:RichNode):boolean=>{
-    if(node.type==='table')return false;
-    if(node.type==='paragraph'&&(!node.attrs?.sourceStyle||node.attrs.sourceStyle==='Normal')&&
-      (node.attrs?.spaceAfterPt??gap)===gap)return true;
-    return node.content?.some(visit)??false;
-  };
-  return visit(doc);
-}
-
-let inkContext:CanvasRenderingContext2D|null|undefined;
-/** Word's declared minimum and the actual ink height constrain preview-only compaction. */
-export function previewLineFloor(p:HTMLElement, fontSize:number, natural:number, minimum:number) {
-  if(p.querySelector('img,sub,sup,svg,math'))return natural;
-  inkContext??=document.createElement('canvas').getContext('2d');
-  if(!inkContext)return natural;
-  const family=p.style.fontFamily;
-  const sample=p.textContent+' АяЁЙЦgqp()';
-  const styles=['normal'];
-  if(p.querySelector('strong,b')||p.matches('h1,h2,h3'))styles.push('bold');
-  if(p.querySelector('em,i'))styles.push('italic', 'italic bold');
-  let ink=0;
-  for(const style of styles){
-    inkContext.font=`${style} ${fontSize}pt ${family}`;
-    const bounds=inkContext.measureText(sample);
-    ink=Math.max(ink,(bounds.actualBoundingBoxAscent+bounds.actualBoundingBoxDescent)*.75);
-  }
-  // Limit any one line to a small correction, even if the reference glyphs are short.
-  return Math.min(natural,Math.max(minimum,ink+.25,natural*.95));
-}
-
 /** Normalize only detached preview DOM. Never writes to the document or export plan. */
-export function normalizeWordPreview(root:HTMLElement, doc:RichNode, lineScale=1) {
+export function normalizeWordPreview(root:HTMLElement, doc:RichNode) {
   const attrs=doc.attrs??{}, rootSize=Number(attrs.fontSizePt)||12;
   for(const p of root.querySelectorAll<HTMLElement>('p,h1,h2,h3')) {
     const heading=/^H[1-3]$/.test(p.tagName), level=Number(p.tagName.slice(1));
@@ -85,7 +51,7 @@ export function normalizeWordPreview(root:HTMLElement, doc:RichNode, lineScale=1
     // Preserve the OOXML minimum and let the available font's natural line
     // box raise the browser floor so ordinary glyphs are not compressed.
     const minimum=Math.round(fontSize*20*Math.round(ratio*240)/240)/20;
-    let natural=naturalLineHeight(p.style.fontFamily,fontSize),uniform=true;
+    let natural=naturalLineHeight(p.style.fontFamily,fontSize);
     p.querySelectorAll<HTMLElement>('[style]').forEach(run=>{
       const size=run.style.fontSize;
       if(!size&&!run.style.fontFamily)return;
@@ -93,26 +59,15 @@ export function normalizeWordPreview(root:HTMLElement, doc:RichNode, lineScale=1
       const family=run.style.fontFamily||p.style.fontFamily;
       if(points>0&&points<=200){
         natural=Math.max(natural,naturalLineHeight(family,points));
-        if(Math.abs(points-fontSize)>.02||family!==p.style.fontFamily)uniform=false;
       }
     });
-    const baseline=Math.max(minimum,natural);
-    const canCalibrate=lineScale<1&&uniform&&!themed&&!heading&&!p.closest('table');
-    const desired=baseline*lineScale;
-    const height=canCalibrate?Math.max(desired,previewLineFloor(p,fontSize,baseline,minimum)):baseline;
-    p.style.lineHeight=`${height}pt`;
+    p.style.lineHeight=`${Math.max(minimum,natural)}pt`;
     p.dataset.wordLineRule='atLeast';
     p.dataset.wordLineMinimumPt=String(minimum);
     p.querySelectorAll<HTMLElement>('[style]').forEach(n=>{if(n.style.lineHeight)n.style.lineHeight='inherit';});
     const pt=(value:string,fallback:number)=>`${value?Math.max(0,Math.round(parseFloat(value)*20)/20):fallback}pt`;
     p.style.marginTop=pt(p.style.marginTop,themed?9:0);
-    const standardGap=Number(attrs.spaceAfterPt)||5;
-    const after=Number.parseFloat(pt(p.style.marginBottom,heading?5:standardGap));
-    // When ink prevents further line compression, use a fraction of the
-    // standard paragraph gap. Explicit nonstandard gaps keep their value.
-    const gapCorrection=canCalibrate&&after===standardGap?
-      Math.min(after,MAX_PREVIEW_GAP_CORRECTION_PT,Math.max(0,height-desired)):0;
-    p.style.marginBottom=`${after-gapCorrection}pt`;
+    p.style.marginBottom=pt(p.style.marginBottom,heading?5:Number(attrs.spaceAfterPt)||5);
     p.style.marginLeft=pt(p.style.marginLeft,0);p.style.marginRight=pt(p.style.marginRight,0);
     p.style.textIndent=pt(p.style.textIndent,0);
   }
