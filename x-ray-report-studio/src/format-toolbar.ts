@@ -49,7 +49,7 @@ export function bindFormatToolbar(editor: Editor, toolbar: HTMLElement) {
   function selectionFill() {
     const {selection, storedMarks, doc} = editor.state;
     const background = (marks: typeof selection.$from.parent.marks) =>
-      String(marks.find(mark => mark.type.name === 'textStyle')?.attrs.backgroundColor ?? '').toLowerCase();
+      manualFillColor(marks.find(mark => mark.type.name === 'textStyle')?.attrs.backgroundColor) ?? String(marks.find(mark => mark.type.name === 'textStyle')?.attrs.backgroundColor ?? '').toLowerCase();
     const colors = new Set<string>();
     if (selection.empty) colors.add(background(storedMarks ?? selection.$from.marks()));
     else for (const range of selection.ranges) {
@@ -77,7 +77,8 @@ export function bindFormatToolbar(editor: Editor, toolbar: HTMLElement) {
     const selection = editor.state.selection;
     const rule = selection instanceof NodeSelection && selection.node.type.name === 'horizontalRule' ?
       selection.node.attrs.thicknessPt ?? LEGACY_RULE_THICKNESS : thickness;
-    const active: Record<string, unknown> = {list, align, rule: String(rule), fill};
+    const {state,color} = selectionFill();
+    const active: Record<string, unknown> = {list, align, rule: String(rule), fill:state==='none'?'off':state==='mixed'?null:color};
     for (const choice of choices) {
       const pressed = active[choice.dataset.format!] === choice.dataset.value;
       choice.setAttribute('aria-pressed', String(pressed));
@@ -89,7 +90,6 @@ export function bindFormatToolbar(editor: Editor, toolbar: HTMLElement) {
     alignToggle.title = align === 'mixed' ? 'Смешанное выравнивание' : alignment ?? 'Выравнивание';
     alignToggle.textContent = align === 'mixed' ? 'Смешанное ▾' : `${alignment ?? 'Выравнивание'} ▾`;
     fillButton.querySelector<HTMLElement>('.format-swatch')!.style.setProperty('--swatch', fill);
-    const {state,color} = selectionFill();
     const description = {none:'нет ручной заливки',current:'текущий цвет',other:'другой цвет',mixed:'смешанная заливка'}[state];
     fillButton.dataset.fillState = state;
     fillButton.style.setProperty('--fill-selection-color', color || 'var(--mint)');

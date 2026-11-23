@@ -34,11 +34,11 @@ export type DocxOptions = {
   title?: string;
   kind?: 'report' | 'template';
   templateId?: string;
-  templateReview?: { format: number; templateId: string; areaId: string; baseSha256: string; appVersion: string; templateVersion?: string };
+  templateReview?: { format: number; templateId: string; areaId: string; baseSha256: string; appVersion: string; templateVersion?: string; structureVersion?:number; structure?: ReturnType<typeof import('./template-highlights.ts').editableHighlightStructure> };
   /** Full source font faces keep Word layout stable on machines without that font installed. */
   fonts?: EmbeddedDocxFont[];
 };
-export type ImportedDocx = ReturnType<typeof validateDraft> & { kind: 'report' | 'template'; templateId?: string; importWarnings?: string[]; editedInWord?: boolean; templateReview?: { format: number; templateId: string; areaId: string; baseSha256: string; appVersion: string; templateVersion?: string } };
+export type ImportedDocx = ReturnType<typeof validateDraft> & { kind: 'report' | 'template'; templateId?: string; importWarnings?: string[]; editedInWord?: boolean; templateReview?: { format: number; templateId: string; areaId: string; baseSha256: string; appVersion: string; templateVersion?: string; structureVersion?:number; structure?: ReturnType<typeof import('./template-highlights.ts').editableHighlightStructure> } };
 
 function color(value: unknown): string | undefined {
   if (typeof value !== 'string') return;
@@ -83,7 +83,7 @@ function runOptions(node: RichNode, inherited: IRunOptions = {}, omitHighlight =
       const background = color(attrs.backgroundColor);
       if (background && !omitHighlight) options.shading = { type: ShadingType.CLEAR, fill: background, color: 'auto' };
     }
-    if (mark.type === 'highlight' && !omitHighlight) {
+    if ((mark.type === 'highlight' || mark.type === 'templateHighlight' || mark.type === 'templateSize' && !mark.attrs?.filled) && !omitHighlight) {
       options.shading = { type: ShadingType.CLEAR, fill: color(mark.attrs?.color) ?? 'FFFF00', color: 'auto' };
     }
   }
@@ -97,7 +97,7 @@ function runOptions(node: RichNode, inherited: IRunOptions = {}, omitHighlight =
   }
   if (omitHighlight) { delete options.highlight; delete options.shading; }
   const manual = manualFillColor(node.marks?.find(mark => mark.type === 'textStyle')?.attrs?.backgroundColor);
-  if (manual && !options.highlight && (field?.attrs?.filled === true || !node.marks?.some(mark => mark.type === 'highlight'))) {
+  if (manual && !options.highlight && (field?.attrs?.filled === true || !node.marks?.some(mark => mark.type === 'highlight' || mark.type === 'templateHighlight' || mark.type === 'templateSize' && !mark.attrs?.filled))) {
     options.shading = { type: ShadingType.CLEAR, fill: manual.slice(1).toUpperCase(), color: 'auto' };
   }
   return options;
@@ -695,7 +695,9 @@ export async function importOwnDocx(input: ArrayBuffer | Uint8Array | Blob): Pro
     const parsed = parseEditedWordDocument(strFromU8(zip['word/document.xml']), importedDoc);
     importedDoc = parsed.doc; importWarnings = parsed.warnings;
   }
-  if (contentChanged && !documentChanged) importWarnings.push('В документе изменены стили или другие элементы Word. Они не входят в поддерживаемое редактируемое содержимое шаблона.');
+  const changedParts=[...new Set([...Object.keys(actualHashes),...Object.keys(metadata.contentHashes??{})])].filter(name=>metadata.contentHashes?.[name]!==actualHashes[name]);
+  const onlyCommentsChanged=changedParts.length>0 && changedParts.every(name=>/^word\/comments(?:Extended|Ids)?\.xml$/.test(name));
+  if (contentChanged && !documentChanged && !onlyCommentsChanged) importWarnings.push('В документе изменены стили или другие элементы Word. Они не входят в поддерживаемое редактируемое содержимое шаблона.');
   const result = validateDraft({ ...metadata.draft, doc: importedDoc });
   return { ...result, cache: validatedCache(metadata.draft.cache), kind, templateId, editedInWord: documentChanged || contentChanged, importWarnings, ...(metadata.templateReview?{templateReview:metadata.templateReview}:{}) };
 }

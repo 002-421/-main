@@ -1,3 +1,5 @@
+import {assertTemplateFieldContinuity} from './template-integration.ts';
+import {initializeEditableHighlights,editableHighlightStructure} from './template-highlights.ts';
 import { exportDocx, importOwnDocx, type EmbeddedDocxFont } from './docx.ts';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { validateTemplate, type RichNode } from './model.ts';
@@ -27,7 +29,7 @@ export async function exportTemplateDocx(item: TemplateDocxItem, appVersion: str
   return exportDocx(doc, {
     kind: 'template', templateId: item.id, title: item.title,
     profile: item.areaId === 'head' ? 'brain' : 'custom', fonts,
-    templateReview: { format: 2, templateId: item.id, areaId: item.areaId, baseSha256: hash, appVersion, templateVersion },
+    templateReview: { format: 2, templateId: item.id, areaId: item.areaId, baseSha256: hash, appVersion, templateVersion, structure:editableHighlightStructure(initializeEditableHighlights(doc)), structureVersion:1 },
   });
 }
 
@@ -39,9 +41,10 @@ export async function exportTemplateDocxGroup(items: TemplateDocxItem[], appVers
     const blob = await exportTemplateDocx(item, appVersion, fonts), name = `${escaped(item.title)}-${item.id}.docx`;
     const sanitized = validateTemplate(sanitizeTemplateForExport(item.doc));
     files[name] = new Uint8Array(await blob.arrayBuffer());
+    const docxSha256=[...new Uint8Array(await crypto.subtle.digest('SHA-256',files[name] as Uint8Array<ArrayBuffer>))].map(v=>v.toString(16).padStart(2,'0')).join('');
     manifest.push({ id: item.id, title: item.title, areaId: item.areaId,
       templateVersion: VERSION.test(item.templateVersion ?? '') ? item.templateVersion : INITIAL_TEMPLATE_VERSION,
-      sha256: await sha256Doc(sanitized), file: name });
+      sha256: await sha256Doc(sanitized), docxSha256, structure:editableHighlightStructure(initializeEditableHighlights(sanitized)), file: name });
   }
   files['manifest.json'] = strToU8(JSON.stringify({ format: 'xrs-template-docx-group', schemaVersion: 2, appVersion, templates: manifest }, null, 2));
   return new Blob([zipSync(files, { level: 6 })], { type: 'application/zip' });
@@ -60,7 +63,7 @@ export async function inspectTemplateDocx(input: Uint8Array | ArrayBuffer | Blob
   } });
   if (oversized) throw Error('Содержимое DOCX превышает безопасный размер.');
   for (const [name, data] of Object.entries(files)) {
-    if (/^word\/.*\.xml$/.test(name) && /<w:(?:ins|del)(?:\s|>)/.test(strFromU8(data)))
+    if (/^word\/.*\.xml$/.test(name) && /<w:(?:ins|del|moveFrom|moveTo|rPrChange|pPrChange|tblPrChange|trPrChange|tcPrChange|sectPrChange)(?:\s|>)/.test(strFromU8(data)))
       throw Error('В DOCX остались неразрешённые исправления Word. Примите или отклоните их в Word, сохраните файл и загрузите снова.');
   }
   const imported = await importOwnDocx(bytes);
@@ -74,6 +77,11 @@ export async function inspectTemplateDocx(input: Uint8Array | ArrayBuffer | Blob
   if (current.areaId !== meta.areaId) throw Error('Шаблон перемещён в другую зону после экспорта. Экспортируйте его заново.');
   const currentVersion = VERSION.test(current.templateVersion ?? '') ? current.templateVersion! : INITIAL_TEMPLATE_VERSION;
   const baseHash = await sha256Doc(sanitizeTemplateForExport(current.doc)), after = validateTemplate(imported.doc);
+  if (imported.editedInWord) {
+    assertTemplateFieldContinuity(sanitizeTemplateForExport(current.doc),after);
+    if (imported.importWarnings?.length) throw Error('DOCX содержит неподдерживаемые изменения структуры или стилей. Импорт отменён; требуется проверка пакета интеграции.');
+  }
+  const sourceSha256=[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes as Uint8Array<ArrayBuffer>))].map(value=>value.toString(16).padStart(2,'0')).join('');
   const comments = wordComments(strFromU8(files['word/comments.xml'] ?? new Uint8Array()));
   const warnings = [...(imported.importWarnings ?? [])];
   if (comments.length) warnings.push(`Комментарии Word не сохраняются в шаблоне; учтите их перед подтверждением импорта: ${comments.map(value => `«${value}»`).join('; ')}`);
@@ -81,7 +89,7 @@ export async function inspectTemplateDocx(input: Uint8Array | ArrayBuffer | Blob
   return {
     id: meta.templateId, title: current.title, areaId: current.areaId, appVersion: meta.appVersion,
     templateVersion: currentVersion, exportedTemplateVersion: meta.templateVersion,
-    baseSha256: meta.baseSha256, currentSha256: baseHash, before: current.doc, after,
+    sourceSha256, baseSha256: meta.baseSha256, currentSha256: baseHash, before: current.doc, after:imported.editedInWord?initializeEditableHighlights(after):after,
     status: baseHash !== meta.baseSha256 || versionConflict ? 'conflict' as const : !imported.editedInWord ? 'unchanged' as const : 'changed' as const,
     warnings,
   };
@@ -113,7 +121,7 @@ export async function applyTemplateDocx(storage: Store, row: Awaited<ReturnType<
     all[row.id] = row.after;
     put(storage, key, JSON.stringify(all));
     put(storage, TEMPLATE_VERSION_STORAGE_KEY, JSON.stringify({ ...versions, [row.id]: nextVersion }));
-    put(storage, templateDocxKeys.report, JSON.stringify({ templateId: row.id, templateVersion: nextVersion, createdAt }));
+    put(storage, templateDocxKeys.report, JSON.stringify({ templateId: row.id, templateVersion: nextVersion, sourceSha256:row.sourceSha256, baseSha256:row.baseSha256, createdAt }));
     storage.removeItem(templateDocxKeys.journal);
   } catch (error) {
     recover(storage);

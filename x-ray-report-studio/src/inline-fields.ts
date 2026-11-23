@@ -1,3 +1,4 @@
+import { initializeEditableHighlights } from './template-highlights.ts';
 import { normalizeDateInput } from './date-input.ts';
 import { reportHistoryKey } from './report-history.ts';
 import { Extension, Mark, mergeAttributes, type Editor } from '@tiptap/core';
@@ -30,7 +31,7 @@ export function prepareInlineDocument(input: RichNode, trackOriginal = true): Ri
 }
 
 export function initializeTemplateTracking(doc: RichNode): RichNode {
-  const next = prepareInlineDocument(doc, false);
+  const next = initializeEditableHighlights(prepareInlineDocument(doc, false));
   function walk(n: RichNode) {
     if (['paragraph', 'heading'].includes(n.type)) n.attrs = { ...n.attrs, templateOriginal: visibleText(n) };
     n.content?.forEach(walk);
@@ -100,6 +101,23 @@ export function countUnchangedParts(doc: RichNode): number {
   walk(doc); return count;
 }
 
+export const TemplateHighlight = Mark.create({
+  name:'templateHighlight', inclusive:false,
+  addAttributes(){return {id:{default:'',parseHTML:el=>el.getAttribute('data-editable-id')}};},
+  parseHTML(){return [{tag:'span[data-template-highlight]'}];},
+  renderHTML({mark}){return ['span',{'data-template-highlight':'','data-editable-id':mark.attrs.id,style:'background-color:#ffff00'},0];},
+});
+export const TemplateSize = Mark.create({
+  name:'templateSize', inclusive:false,
+  addAttributes(){return {
+    id:{default:'',parseHTML:el=>el.getAttribute('data-size-id')},
+    original:{default:'',parseHTML:el=>el.getAttribute('data-size-original')},
+    filled:{default:false,parseHTML:el=>el.getAttribute('data-size-filled')==='true'},
+  };},
+  parseHTML(){return [{tag:'span[data-template-size]'}];},
+  renderHTML({mark}){return ['span',{'data-template-size':'','data-size-id':mark.attrs.id,'data-size-original':mark.attrs.original,'data-size-filled':String(mark.attrs.filled),...(!mark.attrs.filled?{style:'background-color:#ffff00'}:{})},0];},
+});
+
 export const TemplateField = Mark.create({
   name: 'templateField', inclusive: false,
   addAttributes() {
@@ -126,26 +144,25 @@ type FieldRange = { from: number; to: number; mark: PMMark };
 const replacesPromptOnFirstInput = (mark: PMMark) => /\.(number|patient|birthdate)$/i.test(String(mark.attrs.id));
 
 function yellowZeroRange(state: EditorState, pos: number): FieldRange | null {
-  let result: FieldRange | null = null;
+  const ranges: FieldRange[] = [];
   state.doc.descendants((node, from) => {
-    if (result || !node.isText) return;
-    const yellow = node.marks.find(mark => mark.type.name === 'highlight' && String(mark.attrs.color ?? '').toLowerCase() === '#ffff00');
-    if (!yellow) return;
-    for (const match of (node.text ?? '').matchAll(/(?<![\d,])0,0(?![\d,])/g)) {
-      const start = from + match.index!;
-      if (pos >= start && pos <= start + 3) result = { from: start, to: start + 3, mark: yellow };
-    }
+    const mark = node.marks.find(mark => mark.type.name === 'templateSize' && !mark.attrs.filled);
+    if (!node.isText || !mark) return;
+    const previous = ranges.at(-1);
+    if (previous && previous.to === from && previous.mark.attrs.id === mark.attrs.id) previous.to += node.nodeSize;
+    else ranges.push({from, to:from+node.nodeSize, mark});
   });
-  return result;
+  return ranges.find(range => pos >= range.from && pos <= range.to) ?? null;
 }
 
 function replaceYellowZero(view: EditorView, text: string, range: FieldRange): boolean {
   const tr = view.state.tr;
-  const marks = view.state.doc.resolve(range.from).nodeAfter?.marks.filter(mark => !(mark.type.name === 'highlight' && String(mark.attrs.color ?? '').toLowerCase() === '#ffff00')) ?? [];
+  const marks = view.state.doc.resolve(range.from).nodeAfter?.marks.filter(mark => !['templateHighlight','templateSize'].includes(mark.type.name)) ?? [];
+  const filled = range.mark.type.create({...range.mark.attrs,filled:true});
   if (text) {
-    tr.replaceWith(range.from, range.to, view.state.schema.text(text, marks));
+    tr.replaceWith(range.from, range.to, view.state.schema.text(text, [...marks,filled]));
     tr.setSelection(TextSelection.create(tr.doc, range.from + text.length));
-    tr.setStoredMarks(marks);
+    tr.setStoredMarks([...marks,filled]);
   } else tr.delete(range.from, range.to);
   view.dispatch(tr.scrollIntoView());
   return true;
@@ -185,17 +202,16 @@ export const InlineFieldEditing = Extension.create({
           // Copied fields are new occurrences. Keep rich text but never merge
           // their values with the original field through a repeated ID.
           const ids = new Map<string, string>();
+          const copiedId = (old:string) => {const id=ids.get(old)??`pasted_${crypto.randomUUID().replaceAll('-','')}`;ids.set(old,id);return id;};
           const copy = (fragment: Fragment): Fragment => {
             const nodes: import('@tiptap/pm/model').Node[] = [];
             fragment.forEach(node => {
               const marks = node.marks.map(mark => {
-                if (mark.type.name !== 'templateField') return mark;
-                const old = String(mark.attrs.id);
-                const id = ids.get(old) ?? `pasted_${crypto.randomUUID().replaceAll('-', '')}`;
-                ids.set(old, id);
-                return mark.type.create({ ...mark.attrs, id });
+                if (!['templateField','templateSize','templateHighlight'].includes(mark.type.name)) return mark;
+                return mark.type.create({...mark.attrs,id:copiedId(String(mark.attrs.id))});
               });
-              nodes.push((node.isLeaf ? node : node.copy(copy(node.content))).mark(marks));
+              const attrs = node.attrs.editableHighlight ? {...node.attrs,editableHighlight:{...node.attrs.editableHighlight,id:copiedId(node.attrs.editableHighlight.id)}} : node.attrs;
+              nodes.push(node.isText ? node.mark(marks) : node.type.create(attrs,node.isLeaf?node.content:copy(node.content),marks));
             });
             return Fragment.fromArray(nodes);
           };
@@ -233,42 +249,42 @@ export const InlineFieldEditing = Extension.create({
         if (transactions.some(t => ['undo', 'redo'].includes(t.getMeta(reportHistoryKey)?.type))) return null;
         const mapping = new Mapping();
         for (const transaction of transactions) mapping.appendMapping(transaction.mapping);
-        const yellowRanges: Array<{ from: number; to: number; text: string; mark: PMMark }> = [];
-        // setContent replaces the whole template in one transaction. Old ranges
-        // then map to the document edges, where this cleanup could strip yellow
-        // marks from unrelated text in the newly inserted template.
         const replacesWholeDocument = transactions.some(transaction => transaction.steps.some(step =>
           'from' in step && 'to' in step && step.from === 0 && step.to === oldState.doc.content.size));
-        // An accepted review correction keeps authored highlighting. Ordinary
-        // typing over yellow template prompts still clears their fill.
-        const preserveYellow = transactions.some(t => t.getMeta('preserve-yellow-highlight') === true);
-        if (!replacesWholeDocument && !preserveYellow) oldState.doc.descendants((node, pos) => {
-          if (!node.isText) return;
-          const mark = node.marks.find(m => m.type.name === 'highlight' && String(m.attrs.color ?? '').toLowerCase() === '#ffff00');
-          if (!mark) return;
-          const prior = yellowRanges.at(-1);
-          if (prior && prior.to === pos && prior.mark.eq(mark)) { prior.to += node.nodeSize; prior.text += node.text; }
-          else yellowRanges.push({ from: pos, to: pos + node.nodeSize, text: node.text ?? '', mark });
-        });
         let tr: Transaction | undefined;
-        for (const range of yellowRanges) {
-          const from = mapping.map(range.from, -1), to = mapping.map(range.to, 1);
-          if (to <= from) continue;
-          const updatedText = state.doc.textBetween(from, to);
-          if (updatedText === range.text) continue;
-          let unchangedPrefix = 0;
-          while (unchangedPrefix < range.text.length && unchangedPrefix < updatedText.length &&
-              range.text[unchangedPrefix] === updatedText[unchangedPrefix]) unchangedPrefix++;
-          let unchangedSuffix = 0;
-          while (unchangedSuffix < range.text.length - unchangedPrefix &&
-              unchangedSuffix < updatedText.length - unchangedPrefix &&
-              range.text[range.text.length - unchangedSuffix - 1] === updatedText[updatedText.length - unchangedSuffix - 1]) unchangedSuffix++;
-          const changedFrom = from + unchangedPrefix, changedTo = to - unchangedSuffix;
-          if (changedTo <= changedFrom) continue;
-          const mark = state.schema.marks.highlight?.create(range.mark.attrs);
-          if (!mark) continue;
-          tr ??= state.tr;
-          tr.removeMark(changedFrom, changedTo, mark);
+        // Only content edits complete paragraph prompts; selections and formatting do not.
+        const edited = new Set<string>();
+        if (!replacesWholeDocument) oldState.doc.descendants((node,pos) => {
+          if (!node.isTextblock) return;
+          const prompt = node.attrs.editableHighlight, ids=new Set<string>();
+          if(prompt && !prompt.edited)ids.add(prompt.id);
+          node.descendants(child=>{for(const mark of child.marks)if(mark.type.name==='templateHighlight')ids.add(mark.attrs.id);});
+          if(!ids.size)return;
+          const from = mapping.map(pos+1,-1), to = mapping.map(pos+node.nodeSize-1,1);
+          if (to-from !== node.content.size || state.doc.textBetween(Math.max(0,from),Math.min(state.doc.content.size,to)) !== node.textContent)
+            for(const id of ids)edited.add(id);
+        });
+        if (edited.size) state.doc.descendants((node,pos) => {
+          const prompt = node.attrs.editableHighlight;
+          if (prompt && edited.has(prompt.id)) {
+            tr ??= state.tr;
+            tr.setNodeMarkup(pos,undefined,{...node.attrs,editableHighlight:{...prompt,edited:true}});
+          }
+          const mark = node.marks.find(mark=>mark.type.name==='templateHighlight' && edited.has(mark.attrs.id));
+          if (node.isText && mark) { tr ??= state.tr; tr.removeMark(pos,pos+node.nodeSize,mark); }
+        });
+        if (tr?.storedMarks) tr.setStoredMarks(tr.storedMarks.filter(mark=>mark.type.name!=='templateHighlight' || !edited.has(mark.attrs.id)));
+        // IME, deletion, and rich paste can bypass the direct placeholder handler.
+        const sizes = new Map<string,{text:string;nodes:{pos:number;size:number;mark:PMMark}[]}>();
+        state.doc.descendants((node,pos)=>{
+          const mark=node.marks.find(mark=>mark.type.name==='templateSize' && !mark.attrs.filled);
+          if(!node.isText||!mark)return;
+          const group=sizes.get(mark.attrs.id)??{text:'',nodes:[]};
+          group.text+=node.text;group.nodes.push({pos,size:node.nodeSize,mark});sizes.set(mark.attrs.id,group);
+        });
+        if (!replacesWholeDocument) for (const group of sizes.values()) if(group.text!==group.nodes[0].mark.attrs.original) {
+          tr??=state.tr;
+          for(const n of group.nodes) tr.removeMark(n.pos,n.pos+n.size,n.mark).addMark(n.pos,n.pos+n.size,n.mark.type.create({...n.mark.attrs,filled:true}));
         }
         const groups = new Map<string, { text: string; nodes: { pos: number; size: number; mark: PMMark }[] }>();
         state.doc.descendants((node, pos) => {
@@ -294,7 +310,7 @@ export const SourceFormat = Extension.create({
   name: 'sourceFormat',
   addGlobalAttributes() {
     const attr = (defaultValue: unknown = null) => ({ default: defaultValue, renderHTML: () => ({}) });
-    const paragraphAttrs: Record<string, any> = { templateOriginal: attr(), spacingReference: attr(), sourceStyle: { default: null, renderHTML: (a: Record<string,any>) => a.sourceStyle ? { 'data-source-style':a.sourceStyle } : {} } };
+    const paragraphAttrs: Record<string, any> = { editableHighlight: {default:null,parseHTML:(el:HTMLElement)=>{try{return JSON.parse(el.getAttribute('data-editable-highlight')??'null');}catch{return null;}},renderHTML:(a:Record<string,any>)=>a.editableHighlight?{'data-editable-highlight':JSON.stringify(a.editableHighlight)}:{}}, templateOriginal: attr(), spacingReference: attr(), sourceStyle: { default: null, renderHTML: (a: Record<string,any>) => a.sourceStyle ? { 'data-source-style':a.sourceStyle } : {} } };
     for (const [name, property, unit] of [
       ['fontFamily', 'font-family', ''], ['fontSizePt', 'font-size', 'pt'], ['spaceBeforePt', 'margin-top', 'pt'], ['spaceAfterPt', 'margin-bottom', 'pt'], ['lineHeight', 'line-height', ''], ['firstLineIndentPt', 'text-indent', 'pt'], ['leftIndentPt', 'margin-left', 'pt'], ['rightIndentPt', 'margin-right', 'pt'],
     ]) paragraphAttrs[name] = { default: null, renderHTML: (a: Record<string, any>) => a[name] != null ? { style: `${property}:${a[name]}${unit}` } : {} };
@@ -302,7 +318,7 @@ export const SourceFormat = Extension.create({
       ? { ...(a.keepNext ? {style: 'break-after:avoid'} : {}), 'data-keep-next':String(a.keepNext) } : {} };
     paragraphAttrs.pageBreakBefore = { default: null, renderHTML: (a: Record<string, any>) => a.pageBreakBefore ? { style: 'break-before:page', 'data-page-break-before':'true' } : {} };
     return [
-      { types: ['doc'], attributes: Object.fromEntries(['sourceFormat', 'pageWidthMm', 'pageHeightMm', 'marginTopMm', 'marginBottomMm', 'marginLeftMm', 'marginRightMm', 'fontFamily', 'fontSizePt', 'lineHeight', 'spaceAfterPt'].map(k => [k, attr()])) },
+      { types: ['doc'], attributes: Object.fromEntries(['editableHighlightsVersion', 'sourceFormat', 'pageWidthMm', 'pageHeightMm', 'marginTopMm', 'marginBottomMm', 'marginLeftMm', 'marginRightMm', 'fontFamily', 'fontSizePt', 'lineHeight', 'spaceAfterPt'].map(k => [k, attr()])) },
       { types: ['paragraph', 'heading'], attributes: paragraphAttrs },
     ];
   },

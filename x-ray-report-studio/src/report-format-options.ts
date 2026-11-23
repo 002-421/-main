@@ -19,5 +19,10 @@ export function ruleThickness(value: unknown) {
 }
 
 export function manualFillColor(value: unknown) {
-  return MANUAL_FILL_COLORS.find(([color]) => color === String(value).toLowerCase())?.[0];
+  let normalized=String(value).toLowerCase().trim();
+  if(normalized==='yellow')normalized='#ffff00';
+  if(/^#[\da-f]{3}$/.test(normalized))normalized='#'+[...normalized.slice(1)].map(char=>char+char).join('');
+  const rgb=/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/.exec(normalized);
+  if(rgb&&rgb.slice(1).every(n=>Number(n)<=255))normalized='#'+rgb.slice(1).map(n=>Number(n).toString(16).padStart(2,'0')).join('');
+  return MANUAL_FILL_COLORS.find(([color]) => color === normalized)?.[0];
 }

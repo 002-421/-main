@@ -1,0 +1,23 @@
+# Editable template highlights, contract 1
+
+Two system marks are separate from manual `textStyle.backgroundColor` and the existing `templateField` IDs. `templateHighlight` identifies a pending editable paragraph range; `templateSize` identifies one measurement, its original prompt and its filled state. Paragraph `editableHighlight` metadata records original content, stable ID and completion. All data travels with the document and its Undo/Redo history. The 113 source catalog entries and template revisions are unchanged by this runtime schema extension.
+
+Legacy yellow `highlight` runs are interpreted **only at the template boundary** (`initializeTemplateTracking` / `resetInlineTemplate`). A zero-like measurement must be completely inside such an authored editable run; ordinary literal numbers and manually applied yellow never become fields. Legacy saved reports are restored as saved, without interpreting colors or reactivating completed prompts. Existing static legacy marks in already saved reports remain compatible but are not retroactively assigned guessed workflow state. New reports use contract 1.
+
+Any content edit completes only the affected paragraph. Pending sizes survive independently, and entering a size replaces that complete prompt. Selection, formatting, focus, and tab changes do not complete prompts. System cleanup cannot remove manual fill. Manual toggle/off commands affect only manual fill; a pending system prompt stays yellow until content is entered. Copy/paste rekeys the copied system objects, preserving completion states. JSON and own DOCX custom XML preserve states; rendering of pending marks is shared with the existing editor/print pipeline. No pagination or footer rules change.
+
+## DOCX integration status
+
+The existing export embeds template ID, area, independent template revision, application version, baseline hash, full structured draft and a versioned structure manifest. Personal service values are sanitized while native field IDs are retained. Group ZIPs carry one DOCX per template and an automatic manifest. Word comments are advisory and never medical text; unresolved `w:ins` / `w:del` are rejected.
+
+The existing importer supports a limited subset of Word content. It cannot reliably recover inline templateField identities or reportSection boundaries from arbitrary edited OOXML. Therefore imports that lose/add service field IDs, lose service sections, or contain unsupported style/structural edits are blocked, with diagnostics. No medical mapping is guessed. The single-file and group UI paths now use the same baseline/version/identity checks. Approved supported imports retain verified local backup and a new template revision; existing patient reports are untouched.
+
+`node scripts/inspect-template-integration.mjs approved.docx report.json [candidate.json]` is a **limited safe prototype**, not an automatic catalog publisher. It records the source SHA-256, template ID/revision, baseline hash and structural result. It writes a candidate only for a supported, changed, conflict-free document. It never changes the catalog or a profile. Catalog diffs are generated with `scripts/compare-template-catalogs.mjs`; unrelated entries must remain byte-equivalent after canonicalization.
+
+## Next implementation stage
+
+Add durable OOXML content controls/bookmarks for service fields and editorial paragraph/size ranges; preserve them across actual Microsoft Word save operations, with a signed-off source manifest. Reconcile additions/deletions explicitly, preserve unchanged IDs independently of paragraph order, require review for new or removed objects, and reject missing/duplicate anchors. Add a distinct catalog version and source-provenance ledger on approved catalog changes (application version is not the catalog version). Audit table/list/style support before expanding the import subset. Test real Word accept/reject/partial acceptance and comment removal, plus ID retention. Do not describe these unimplemented components as available.
+
+## Acceptance coverage
+
+Structural/content/ID audit covers all 113 templates, with the eight Review v8 and other 105 baseline fingerprints retained. Unit tests cover plain/styled placeholders, selection/formatting, deletion, line split, independent states, history and DOCX persistence. Electron tests cover all eight Spine reports, actual keyboard and clipboard input, multiple sizes, manual fill, Undo/Redo and restart. Browser direct-export/format tests cover DOCX/PDF and manual fill in themes. This is automated coverage, not 113 manual clinical checks or Microsoft Word visual verification.

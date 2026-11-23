@@ -265,6 +265,8 @@ export function validateTemplate(input: unknown): RichNode {
       if (simpleMarks.has(mark.type)) return [{ type: mark.type }];
       const a = mark.attrs ?? {};
       if (!a || typeof a !== 'object' || Array.isArray(a)) return fail();
+      if (mark.type === 'templateHighlight') return [{type:mark.type,attrs:{id:id(a.id)}}];
+      if (mark.type === 'templateSize') return [{type:mark.type,attrs:{id:id(a.id),original:string(a.original,100),filled:a.filled===true}}];
       if (mark.type === 'templateField') {
         return [{ type: mark.type, attrs: { id: id(a.id), hint: string(a.hint, 2000), original: string(a.original ?? a.hint, 100000), filled: a.filled === true } }];
       }
@@ -364,6 +366,11 @@ export function validateTemplate(input: unknown): RichNode {
         if (!isSpacingReference(a.spacingReference)) return fail();
         const {lineHeight, beforePt, afterPt} = a.spacingReference;
         attrs.spacingReference = {lineHeight, beforePt, afterPt};
+      }
+      if (type === 'doc' && a.editableHighlightsVersion === 1) attrs.editableHighlightsVersion = 1;
+      if (['paragraph','heading'].includes(type) && a.editableHighlight != null) {
+        const prompt = a.editableHighlight;
+        attrs.editableHighlight = {id:id(prompt.id),original:string(prompt.original,100000),edited:prompt.edited===true};
       }
       if (a.templateOriginal != null) attrs.templateOriginal = string(a.templateOriginal, 100000);
       if (a.sourceFormat === 'alliance-template') attrs.sourceFormat = a.sourceFormat;

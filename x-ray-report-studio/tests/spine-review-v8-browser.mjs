@@ -1,181 +1,84 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import {existsSync} from 'node:fs';
+import {mkdtemp,rm,mkdir,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { _electron } from 'playwright-core';
-
-const root = process.cwd();
-const profile = await mkdtemp(path.join(os.tmpdir(), 'xrs-spine-v8-'));
-const bundledElectron = path.join(root, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron');
-const electronPath = process.env.ELECTRON_PATH || (existsSync(bundledElectron) ? bundledElectron : undefined);
-const electronOptions = {
-  ...(electronPath ? { executablePath: electronPath } : {}),
-  cwd: root,
-  args: ['.', `--user-data-dir=${profile}`, '--no-sandbox', '--ozone-platform=headless', '--disable-gpu'],
-};
-const ids = ['spine-shop', 'spine-shop-m', 'spine-shop-art', 'spine-gop', 'spine-gop-m', 'spine-pop', 'spine-pop-m', 'spine-kkop'].filter(id => !process.env.SPINE_IDS || process.env.SPINE_IDS.split(',').includes(id));
-const persistedReports = new Map();
-let app = await _electron.launch(electronOptions);
-let page;
-try {
-  page = await app.firstWindow();
-  const rendererErrors = [];
-  page.on('pageerror', error => rendererErrors.push(error.message));
-  await page.locator('.report-content').waitFor();
-  await page.locator('[data-tab="templates"]').click();
-  await page.locator('#area-select').selectOption('spine');
-
-  for (const id of ids) {
-    await page.locator(`[data-template="${id}"]`).click();
-    const patientId = `${id}.patient`;
-    const patient = page.locator(`[data-field-id="${patientId}"]`);
-    await patient.waitFor();
-    const fields = await page.locator('.report-content [data-template-field]').evaluateAll(nodes =>
-      nodes.map(node => node.dataset.fieldId));
-    assert.deepEqual(fields, [
-      `${id}.number`, patientId, `${id}.birthdate`,
-      'HEAD.BASE.2.FIELD.0043', `${id}.reportdate`,
-    ], `${id}: original XRS fields and IDs remain present`);
-    await page.evaluate(() => {
-      const editor = document.querySelector('.report-content').editor;
-      let candidate;
-      editor.state.doc.descendants((node, position) => {
-        if (!node.isText || !node.marks.some(mark => mark.type.name === 'highlight' && mark.attrs.color?.toLowerCase() === '#ffff00')) return;
-        if (!candidate && !node.marks.some(mark => mark.type.name === 'templateField')) candidate = { position, node };
-      });
-      if (!candidate) throw new Error('A yellow text range is required to create the synthetic numeric sequence');
-      // Some templates have fewer than three real numeric prompts. Append a
-      // disposable same-run sequence so each template exercises the reported
-      // adjacent-range failure without changing any stored template.
-      const tr = editor.state.tr.replaceWith(candidate.position, candidate.position + candidate.node.nodeSize,
-        editor.schema.text(candidate.node.text + ' XRSSEQTEST 0,0 0,0 0,0 XRSSEQENDTEST', candidate.node.marks)).setMeta('preserve-yellow-highlight', true);
-      editor.view.dispatch(tr);
-    });
-
-    const replaceWithDigit = async (digit, mode = 'type') => {
-      const selected = await page.evaluate(() => {
-        const root = document.querySelector('.report-content');
-        if (!root) return { error: 'report was not found' };
-        const editable = root.matches('[contenteditable]') ? root : root.querySelector('[contenteditable]') ?? root;
-        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-        let node, afterMarker = false;
-        while ((node = walker.nextNode())) {
-          const text = node.textContent ?? '';
-          const marker = text.indexOf('XRSSEQTEST');
-          if (marker >= 0) {
-            afterMarker = true;
-            const tail = text.slice(marker + 'XRSSEQTEST'.length);
-            const end = tail.indexOf('XRSSEQENDTEST');
-            const targetText = end < 0 ? tail : tail.slice(0, end);
-            const match = /(?<![\d,])0,0(?![\d,])/.exec(targetText);
-            if (match) {
-              const offset = marker + 'XRSSEQTEST'.length + match.index;
-              if (!node.parentElement?.closest('mark[data-color="#ffff00"]')) return { error: 'synthetic sequence lost its yellow mark' };
-              editable.focus();
-              const range = document.createRange();
-              range.setStart(node, offset + 1);
-              range.collapse(true);
-              const selection = getSelection();
-              selection?.removeAllRanges();
-              selection?.addRange(range);
-              return { ok: true, value: text.slice(offset, offset + 3) };
-            }
-            if (end >= 0) return { error: 'no unfilled placeholder remains in the synthetic range' };
-            continue;
-          }
-          if (!afterMarker) continue;
-          const end = text.indexOf('XRSSEQENDTEST');
-          const targetText = end < 0 ? text : text.slice(0, end);
-          const match = /(?<![\d,])0,0(?![\d,])/.exec(targetText);
-          if (!match) {
-            if (end >= 0) return { error: 'no unfilled placeholder remains in the synthetic range' };
-            continue;
-          }
-          if (!node.parentElement?.closest('mark[data-color="#ffff00"]')) return { error: 'synthetic sequence lost its yellow mark' };
-          editable.focus();
-          const range = document.createRange();
-          range.setStart(node, match.index + 1);
-          range.collapse(true);
-          const selection = getSelection();
-          selection?.removeAllRanges();
-          selection?.addRange(range);
-          return { ok: true, value: text.slice(match.index, match.index + 3) };
-        }
-        return { error: 'yellow synthetic 0,0 placeholder was not found', yellow: [...document.querySelectorAll('.report-content mark[data-color="#ffff00"]')].map(el => el.textContent) };
-      });
-      assert.equal(selected.ok, true, `${id}: select the next placeholder in the same yellow run (${JSON.stringify(selected)})`);
-      const before = await page.evaluate(() => {
-        const editor = document.querySelector('.report-content').editor;
-        return { cursor: editor.state.selection.from, text: editor.state.doc.textBetween(0, editor.state.doc.content.size) };
-      });
-      if (mode === 'paste') {
-        await app.evaluate(({clipboard}, value) => clipboard.writeText(value), digit);
-        await page.keyboard.press('Control+v');
-      } else await page.keyboard.insertText(digit);
-      const next = await page.evaluate(({ digit, before }) => {
-        const editor = document.querySelector('.report-content').editor;
-        let zeros = 0;
-        editor.state.doc.descendants(node => {
-          if (!node.isText) return;
-          const yellow = node.marks.some(mark => mark.type.name === 'highlight' && mark.attrs.color?.toLowerCase() === '#ffff00');
-          zeros += [...node.text.matchAll(/(?<![\d,])0,0(?![\d,])/g)].filter(() => yellow).length;
-        });
-        const text = editor.state.doc.textBetween(0, editor.state.doc.content.size);
-        const markerPosition = text.indexOf('XRSSEQTEST');
-        const markerEnd = markerPosition < 0 ? -1 : text.indexOf('XRSSEQENDTEST', markerPosition);
-        const sequenceText = markerPosition < 0 ? '' : text.slice(markerPosition + 'XRSSEQTEST'.length, markerEnd < 0 ? undefined : markerEnd);
-        const sequenceZeros = [...sequenceText.matchAll(/(?<![\d,])0,0(?![\d,])/g)].length;
-        const changed = [...text].findIndex((value, index) => value !== before.text[index]);
-        const cursor = editor.state.selection.from;
-        const previous = editor.state.doc.resolve(cursor).nodeBefore;
-        return { zeros, sequenceZeros, text, changed, previousText: previous?.text ?? '', previousYellow: Boolean(previous?.marks.some(mark => mark.type.name === 'highlight' && mark.attrs.color?.toLowerCase() === '#ffff00')), digit, beforeCursor: before.cursor, cursor };
-      }, { digit, before });
-      assert.ok(next.text.includes(digit), `${id}: entered digit is present (${JSON.stringify(next)})`);
-      assert.ok(next.changed >= 0, `${id}: document changed after typing (${JSON.stringify(next)})`);
-      assert.equal(next.previousYellow, false, `${id}: entered measurement has no yellow fill`);
-      return next;
-    };
-
-    const firstRemaining = await replaceWithDigit('7');
-    assert.equal(firstRemaining.sequenceZeros, 2, `${id}: first entry leaves both later prompts in the same yellow run`);
-    assert.ok(firstRemaining.zeros > 0, `${id}: later highlighted numeric prompts remain after the first edit`);
-    const secondRemaining = await replaceWithDigit('8');
-    assert.equal(secondRemaining.sequenceZeros, 1, `${id}: second measurement is independently replaced within that yellow run`);
-    const thirdRemaining = await replaceWithDigit('9', 'paste');
-    assert.equal(thirdRemaining.sequenceZeros, 0, `${id}: pasted third measurement is replaced without clearing adjacent prompts early`);
-
-    await page.keyboard.press('Control+z');
-    assert.ok(await page.evaluate(() => {
-      const editor = document.querySelector('.report-content').editor;
-      let count = 0;
-      editor.state.doc.descendants(node => {
-        if (node.isText && node.text.includes('0,0') &&
-            node.marks.some(mark => mark.type.name === 'highlight' && mark.attrs.color?.toLowerCase() === '#ffff00')) count++;
-      });
-      return count > 0;
-    }), `${id}: Undo restores a highlighted numeric prompt`);
-    await page.keyboard.press('Control+y');
-    await page.waitForFunction(() => document.querySelector('#save-state')?.textContent === 'Сохранено на компьютере');
-    const reportId = await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
-    const savedText = await page.evaluate(() => document.querySelector('.report-content').editor.state.doc.textBetween(0, document.querySelector('.report-content').editor.state.doc.content.size));
-    persistedReports.set(reportId, savedText);
+import {_electron} from 'playwright-core';
+import {resetInlineTemplate,prepareInlineDocument} from '../src/inline-fields.ts';
+const root=process.cwd(), profile=await mkdtemp(path.join(os.tmpdir(),'xrs-highlight-083-'));
+const bundled=path.join(root,'node_modules','electron','dist',process.platform==='win32'?'electron.exe':'electron');
+const options={executablePath:process.env.ELECTRON_PATH||(existsSync(bundled)?bundled:undefined),cwd:root,args:['.',`--user-data-dir=${profile}`,'--no-sandbox','--ozone-platform=headless','--disable-gpu']};
+const ids=['spine-shop','spine-shop-m','spine-shop-art','spine-gop','spine-gop-m','spine-pop','spine-pop-m','spine-kkop'];
+const synthetic=resetInlineTemplate({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Синтетический размер 0,0 см, 0,00 см и 0,0 см.',marks:[{type:'highlight',attrs:{color:'#ffff00'}}]}]}]}).content[0];
+let app=await _electron.launch(options),page;
+const reports=[],errors=[];
+const snapshot=()=>page.evaluate(()=>JSON.parse(JSON.stringify(document.querySelector('.report-content').editor.getJSON())));
+const state=()=>page.evaluate(()=>{
+ const editor=document.querySelector('.report-content').editor;const sizes=[],paragraphs=[];
+ editor.state.doc.descendants((n,p)=>{
+  if(n.isTextblock&&n.attrs.editableHighlight)paragraphs.push({pos:p,text:n.textContent,...n.attrs.editableHighlight});
+  const m=n.marks.find(m=>m.type.name==='templateSize');if(m)sizes.push({pos:p,text:n.text,...m.attrs});
+ });return {sizes,paragraphs};
+});
+const cursor=pos=>page.evaluate(pos=>{const e=document.querySelector('.report-content').editor;e.chain().focus().setTextSelection(pos).run();},pos);
+try{
+ page=await app.firstWindow();await page.locator('.report-content').waitFor();
+ page.on('pageerror',e=>{errors.push(e.message);console.error('RENDERER',e.stack);});
+ await page.locator('[data-tab="templates"]').click();await page.locator('#area-select').selectOption('spine');
+ for(const id of ids){
+  await page.locator(`[data-template="${id}"]`).click();
+  await page.locator(`[data-field-id="${id}.patient"]`).waitFor();
+  assert.deepEqual(await page.locator('.report-content [data-template-field]').evaluateAll(nodes=>nodes.map(n=>n.dataset.fieldId)),[`${id}.number`,`${id}.patient`,`${id}.birthdate`,'HEAD.BASE.2.FIELD.0043',`${id}.reportdate`]);
+  const initial=await state();assert.ok(initial.paragraphs.length>0,`${id}: structural editable paragraphs`);
+  const first=initial.paragraphs.find(p=>p.text.trim());
+  const before=await snapshot();await cursor(first.pos+2);
+  assert.deepEqual(await snapshot(),before,`${id}: cursor does not complete paragraph`);
+  await page.keyboard.insertText('Синтетический ');
+  let current=await state();assert.equal(current.paragraphs.find(p=>p.id===first.id).edited,true,`${id}: ordinary text clears paragraph fill`);
+  assert.equal(current.sizes.filter(s=>!s.filled).length,initial.sizes.length,`${id}: ordinary text preserves measurements`);
+  assert.equal(current.paragraphs.filter(p=>!p.edited).length,initial.paragraphs.length-1,`${id}: neighboring paragraphs untouched`);
+  // Real template measurements where present, plus the same structural three-size
+  // fixture in every template (KКОП need not contain three actual measurements).
+  if(current.sizes.length){
+   const size=current.sizes[0];await cursor(size.pos+1);await page.keyboard.insertText('7');
+   current=await state();assert.equal(current.sizes.find(s=>s.id===size.id).text,'7');
+   assert.equal(current.sizes.find(s=>s.id===size.id).filled,true);
   }
-
-  assert.deepEqual(rendererErrors, []);
-  await page.waitForFunction(() => document.querySelector('#save-state')?.textContent === 'Сохранено на компьютере');
-  await app.close();
-  app = await _electron.launch(electronOptions);
-  page = await app.firstWindow();
-  await page.locator('.report-content').waitFor();
-  assert.equal(await page.locator('.report-tab').count(), ids.length + 1, 'the eight synthetic reports and the original blank report remain available after relaunch');
-  for (const [reportId, expectedText] of persistedReports) {
-    await page.locator(`[data-report-select="${reportId}"]`).click();
-    const restoredText = await page.evaluate(() => document.querySelector('.report-content').editor.state.doc.textBetween(0, document.querySelector('.report-content').editor.state.doc.content.size));
-    assert.equal(restoredText, expectedText, `${reportId}: edited template text is unchanged after Electron restart`);
-  }
-  console.log('PASS: sequential yellow 0,0 replacement across all eight Spine templates, retained field IDs, Undo/Redo, and workspace persistence after Electron restart.');
-} finally {
-  await app.close().catch(() => {});
-  await rm(profile, { recursive: true, force: true });
-}
+  await page.evaluate(paragraph=>{const e=document.querySelector('.report-content').editor;e.commands.insertContentAt(e.state.doc.content.size,paragraph);},synthetic);
+  current=await state();const triple=current.sizes.filter(s=>s.id.startsWith(synthetic.attrs.editableHighlight.id));
+  assert.equal(triple.length,3);
+  const middle=triple[1],pre=await snapshot();await cursor(middle.pos+1);
+  await page.keyboard.insertText('0,50');
+  current=await state();const afterTriple=current.sizes.filter(s=>s.id.startsWith(synthetic.attrs.editableHighlight.id));
+  assert.deepEqual(afterTriple.map(s=>[s.text,s.filled]),[['0,0',false],['0,50',true],['0,0',false]],`${id}: middle size independent`);
+  const after=await snapshot();await page.keyboard.press('Control+z');
+  assert.deepEqual(await snapshot(),pre,`${id}: Undo restores text AND system state`);
+  await page.keyboard.press('Control+y');assert.deepEqual(await snapshot(),after,`${id}: Redo restores state`);
+  // Paste into the next pending measurement goes through the real editor handler.
+  current=await state();const last=current.sizes.filter(s=>s.id.startsWith(synthetic.attrs.editableHighlight.id))[2];
+  await cursor(last.pos+1);
+  await app.evaluate(({clipboard})=>clipboard.writeText('9,25'));
+  await page.keyboard.press('Control+v');
+  current=await state();assert.equal(current.sizes.find(s=>s.id===last.id).text,'9,25');
+  assert.equal(current.sizes.find(s=>s.id===last.id).filled,true);
+  // Manual fill changes formatting only; removing it cannot mark a size filled.
+  const remaining=current.sizes.filter(s=>s.id.startsWith(synthetic.attrs.editableHighlight.id))[0];
+  await page.evaluate(({pos,text})=>{const e=document.querySelector('.report-content').editor;e.chain().focus().setTextSelection({from:pos,to:pos+text.length}).run();},remaining);
+  const pendingBefore=JSON.stringify((await state()).sizes);
+  await page.locator('#fill-text').click();assert.equal(await page.locator('#fill-text').getAttribute('data-fill-state'),'current');
+  await page.locator('#fill-text').click();assert.equal(await page.locator('#fill-text').getAttribute('data-fill-state'),'none');
+  assert.equal(JSON.stringify((await state()).sizes),pendingBefore,`${id}: manual toggle independent from measurements`);
+  await page.waitForFunction(()=>document.querySelector('#save-state')?.textContent==='Сохранено на компьютере');
+  const reportId=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
+  reports.push({reportId,doc:await snapshot()});console.log(`PASS ${id}: text, sizes, middle replacement, paste, manual toggle, Undo/Redo, persistence`);
+ }
+ assert.deepEqual(errors,[]);
+ await app.close();app=await _electron.launch(options);page=await app.firstWindow();await page.locator('.report-content').waitFor();
+ for(const {reportId,doc}of reports){await page.locator(`[data-report-select="${reportId}"]`).click();assert.deepEqual(prepareInlineDocument(await snapshot()),prepareInlineDocument(doc),`${reportId}: Electron restart retains independent states`);}
+ console.log('PASS: all eight Spine v8 reports, retained 40 field IDs and independent state after Electron restart.');
+}catch(error){
+ await mkdir('test-output/editable-highlights',{recursive:true});
+ await writeFile('test-output/editable-highlights/failure.json',JSON.stringify({error:String(error),rendererErrors:errors},null,2));
+ if(page)await page.screenshot({path:'test-output/editable-highlights/failure.png'}).catch(()=>{});
+ throw error;
+}finally{await app.close().catch(()=>{});await rm(profile,{recursive:true,force:true});}

@@ -50,12 +50,13 @@ export function sanitizeTemplateForExport(input: RichNode): RichNode {
       if (mark) {
         const id = String(mark.attrs?.id ?? '');
         node.text = /birthdate|reportdate/i.test(id) ? 'дд.мм.гггг' : /number/i.test(id) ? 'номер исследования' : 'Ф.И.О.';
-        mark.attrs = { ...mark.attrs, filled: false };
+        mark.attrs = { ...mark.attrs, hint:node.text, original:node.text, filled: false };
         node.marks = [...(node.marks ?? []).filter(item => item.type !== 'highlight'), { type: 'highlight', attrs: { color: '#ffff00' } }];
       }
     }
     if (node.type === 'paragraph') {
-      if (replaceIdentityLine(node, 'person') || replaceIdentityLine(node, 'date') || replaceIdentityLine(node, 'number')) return;
+      const hasFields=(n:RichNode):boolean=>n.type==='reportField'||Boolean(n.marks?.some(m=>m.type==='templateField'))||Boolean(n.content?.some(hasFields));
+      if (!hasFields(node) && (replaceIdentityLine(node, 'person') || replaceIdentityLine(node, 'date') || replaceIdentityLine(node, 'number'))) return;
     }
     node.content?.forEach(visit);
   };

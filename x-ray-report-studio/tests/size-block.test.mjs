@@ -6,6 +6,6 @@ test('size insertion matches compact numeric dimensions followed by orientation 
   const runs=makeSizeBlock(ct).content[0].content;
   const text=runs.map(run=>run.text).join('');
   assert.equal(text,`0,0\u00a0${ct?'мм':'см'} (фронтальный/\u200bсагиттальный/\u200bвертикальный)`);
-  assert.equal(runs.filter(run=>run.text==='0,0'&&run.marks?.[0].attrs.color==='#ffff00').length,1);
+  assert.equal(runs.filter(run=>run.text==='0,0'&&run.marks?.some(mark=>mark.type==='templateSize'&&mark.attrs.filled===false)).length,1);
  }
 });

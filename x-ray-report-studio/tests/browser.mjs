@@ -5,6 +5,7 @@ import { appendFile, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { importOwnDocx } from '../src/docx.ts';
+import {validateTemplate} from '../src/model.ts';
 import { reportTemplates } from '../src/catalog.ts';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 
@@ -93,7 +94,7 @@ async function saveWord(name){
 }
 async function placeAtParagraphStart(locator){await locator.evaluate(el=>{el.closest('[contenteditable]').focus();const range=document.createRange();range.selectNodeContents(el);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});}
 async function reloadWithWorkspaceFixture(raw){await page.evaluate(({key,value})=>{localStorage.setItem(key,value);const original=Storage.prototype.setItem;Storage.prototype.setItem=function(name,next){if(name===key)return;return original.call(this,name,next);};},{key:'mri-report-studio.workspace.v1',value:raw});await page.reload();}
-const yellowZeroSummary=()=>page.evaluate(()=>[...document.querySelectorAll('.report-content mark[data-color="#ffff00"]')].map(mark=>({text:(mark.textContent??'').replace(/\u00a0/g,' ').trim(),visible:!!mark.getClientRects().length,html:mark.outerHTML})));
+const yellowZeroSummary=()=>page.evaluate(()=>[...document.querySelectorAll('.report-content [data-template-size][data-size-filled="false"]')].map(mark=>({text:(mark.textContent??'').replace(/\u00a0/g,' ').trim(),visible:!!mark.getClientRects().length,html:mark.outerHTML})));
 async function captureStartupDom(){
  const snapshot=await page.evaluate(()=>({title:document.title,documentName:document.querySelector('#document-name')?.textContent,selectedTemplate:document.querySelector('.template-card.selected strong')?.textContent,storageKeys:Object.keys(localStorage),reportText:document.querySelector('.report-content')?.innerText,reportHTML:document.querySelector('.report-content')?.outerHTML,marks:[...document.querySelectorAll('.report-content mark')].map(mark=>({text:(mark.textContent??'').replace(/\u00a0/g,' ').trim(),color:mark.getAttribute('data-color'),visible:!!mark.getClientRects().length,html:mark.outerHTML}))}));snapshot.rendererErrors=errors;
  await writeFile(path.join(output,'electron-startup-dom.json'),JSON.stringify(snapshot,null,2));
@@ -102,9 +103,9 @@ async function captureStartupDom(){
  console.log('Electron startup DOM:',JSON.stringify({...snapshot,reportHTML:snapshot.reportHTML?.slice(0,12000)},null,2));
 }
 async function waitForYellowZero(){
- const yellowMarks=page.locator('.report-content mark[data-color="#ffff00"]');
+ const yellowMarks=page.locator('.report-content [data-template-size][data-size-filled="false"]');
  try{
-  await page.waitForFunction(()=>[...document.querySelectorAll('.report-content mark[data-color="#ffff00"]')].some(mark=>(mark.textContent??'').replace(/\u00a0/g,' ').trim().startsWith('0,0')));
+  await page.waitForFunction(()=>[...document.querySelectorAll('.report-content [data-template-size][data-size-filled="false"]')].some(mark=>(mark.textContent??'').replace(/\u00a0/g,' ').trim().startsWith('0,0')));
   const index=await yellowMarks.evaluateAll(marks=>marks.findIndex(mark=>(mark.textContent??'').replace(/\u00a0/g,' ').trim().startsWith('0,0')));
   const yellowZero=yellowMarks.nth(index);await yellowZero.waitFor({state:'visible'});return yellowZero;
  }catch(error){
@@ -147,14 +148,14 @@ try{
  console.log('PASS: calculator handles decimal input, keyboard operations and division by zero without changing the report.');
 
  const editedMeasurement=page.locator('.report-content p').filter({hasText:'максимальная размерами'}).first();
- const measurementMark=editedMeasurement.locator('mark[data-color="#ffff00"]').filter({hasText:'0,0'}).first();
+ const measurementMark=editedMeasurement.locator('[data-template-size][data-size-filled="false"]').filter({hasText:'0,0'}).first();
  await measurementMark.click();
  await measurementMark.evaluate(async el=>{const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){const offset=node.textContent.indexOf('0,0');if(offset<0)continue;const range=document.createRange();range.setStart(node,offset);range.setEnd(node,offset+3);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);document.dispatchEvent(new Event('selectionchange'));await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));return;}throw new Error('Highlighted measurement not found');});
  assert.equal(await measurementMark.evaluate(el=>{const selection=getSelection();return selection?.anchorNode&&el.contains(selection.anchorNode)?selection.toString():'';}),'0,0','selection covers the intended highlighted measurement');
  await page.keyboard.type('0,25');
  await page.waitForFunction(()=>[...document.querySelectorAll('.report-content p')].some(el=>el.textContent?.includes('максимальная размерами 0,25 см')));
  assert.match(await editedMeasurement.innerText(),/максимальная размерами 0,25 см/);
- assert.equal(await editedMeasurement.locator('mark[data-color="#ffff00"]').filter({hasText:'0,25'}).count(),0,'the edited value is no longer yellow-highlighted while untouched highlighted text remains intact');
+ assert.equal(await editedMeasurement.locator('[data-template-size][data-size-filled="false"]').filter({hasText:'0,25'}).count(),0,'the edited value is no longer yellow-highlighted while untouched highlighted text remains intact');
  await page.keyboard.press('Control+z');assert.match(await page.locator('.report-content').innerText(),/справа 0,0 см, слева 0,0 см/);
  console.log('PASS: editing a yellow template measurement removes the yellow fill and Undo restores it.');
 
@@ -281,7 +282,7 @@ try{
 
  await page.locator('#area-select').selectOption('spine');const pit=page.locator('[data-template]').first();const pitId=await pit.getAttribute('data-template');await pit.click();if(await page.locator('#confirm-new').count())await page.locator('#confirm-new').click();
  assert.ok(await page.locator('#template-name').innerText());
- assert.ok(await page.locator('.report-content mark[data-color="#ffff00"]').count()>0,`yellow template highlights render immediately after first selection (${pitId})`);
+ assert.ok(await page.locator('.report-content [data-template-highlight]').count()>0,`yellow template highlights render immediately after first selection (${pitId})`);
  await page.locator('#report-file').setInputFiles(saved.filePath);if(await page.locator('#confirm-open').count())await page.locator('#confirm-open').click();
  await field(patientId).waitFor();assert.equal(await field(patientId).innerText(),'Тестовый Пациент');
  assert.equal(await page.locator('#area-select').inputValue(),'head');
@@ -298,19 +299,17 @@ try{
  const firstText=/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/.exec(originalXml)?.[1];assert.ok(firstText,'template DOCX contains Word text');
  const editedZip={...originalZip,'word/document.xml':strToU8(originalXml.replace(firstText,'СИНТЕТИЧЕСКИЙ ШАБЛОН ИЗ WORD'))};const editedFile=path.join(output,'sidebar-template-edited.docx');await writeFile(editedFile,zipSync(editedZip));
  const backupCount=await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-backups.v1')??'[]').length);
- await page.locator('#template-file').setInputFiles(editedFile);await page.locator('#confirm-template-import').waitFor();
- assert.match(await page.locator('.template-import-diff').innerText(),/СИНТЕТИЧЕСКИЙ ШАБЛОН ИЗ WORD/);
- assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.templates.v4')??'{}')['head-gm']),templateBefore);
- await page.locator('[role="dialog"] footer [data-close]').click();await page.waitForTimeout(100);
- assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-backups.v1')??'[]').length),backupCount,'cancel does not create a backup or mutate templates');
- await page.locator('#template-file').setInputFiles(editedFile);await page.locator('#confirm-template-import').waitFor();await page.locator('#confirm-template-import').click();
- const updatedTemplate=await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.templates.v4')??'{}')['head-gm']);
- assert.match(JSON.stringify(updatedTemplate),/СИНТЕТИЧЕСКИЙ ШАБЛОН ИЗ WORD/);assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-backups.v1')??'[]').length),backupCount+1);
+ await page.locator('#template-file').setInputFiles(editedFile);
+ await page.locator('.toast.error').filter({hasText:/templateField|служебных разделов/}).waitFor();
+ assert.equal(await page.locator('#confirm-template-import').count(),0,'ambiguous Word structure never reaches replacement approval');
+ assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.templates.v4')??'{}')['head-gm']),templateBefore,'lossy Word edit leaves template intact');
+ assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-backups.v1')??'[]').length),backupCount,'refused import cannot change backups');
+ const restorable=await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-backups.v1')??'[]').filter(row=>row.templateId==='head-gm').at(-1).doc);
  await page.locator('#restore-template-backup').click();await page.locator('[data-restore-template-backup]').first().click();await page.locator('#confirm-template-backup-restore').click();
- assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.templates.v4')??'{}')['head-gm']),templateBefore);
- assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-versions.v1')??'{}')['head-gm']),'0.0.4','approved restore creates a new revision without reusing the old version');
+ assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.templates.v4')??'{}')['head-gm']),validateTemplate(restorable),'the independently created template-edit backup still restores');
+ assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-versions.v1')??'{}')['head-gm']),'0.0.3','approved restore creates a new template revision');
  assert.match(await page.locator('.report-content').innerText(),/Тестовый Пациент/,'template restore does not modify open patient reports');
- console.log('PASS: template DOCX export, Word edit preview/cancel, verified backup, replacement and restore are isolated from patient reports.');
+ console.log('PASS: template DOCX export, refusal of lossy Word import, native field protection and verified template-edit backup restore.');
 
  const originalReportTab=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
  const reportTabsBefore=await page.locator('.report-tab').count();
@@ -367,7 +366,7 @@ try{
  const editableReportBefore=await page.locator('.report-content').innerText();
  await insertedField.click();await page.keyboard.press('End');await page.keyboard.insertText('!');
  assert.notEqual(await page.locator('.report-content').innerText(),editableReportBefore,'editing remains available after closing boundary help');await page.keyboard.press('Backspace');
- const systemYellowBefore=await page.locator('#editor mark[data-color="#ffff00"]').allTextContents();
+ const systemYellowBefore=await page.locator('#editor [data-template-highlight], #editor [data-template-size][data-size-filled="false"]').allTextContents();
  await selectField(await insertedField.getAttribute('data-field-id'));await page.locator('#fill-text').click();
  assert.equal(await page.locator('#fill-text').getAttribute('aria-pressed'),'true');
  assert.ok((await page.locator('.report-content [data-manual-fill="#ffff00"]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')));
@@ -375,7 +374,7 @@ try{
  await page.locator('[data-format-toggle=fill]').click();
  await page.locator('[data-format=fill][data-value=off]').click();
  assert.ok(!(await page.locator('.report-content [data-manual-fill]').allTextContents()).some(t=>t.includes('Иследование. Очаг очаг не выявлен.')),'manual fill can be removed');
- assert.deepEqual(await page.locator('#editor mark[data-color="#ffff00"]').allTextContents(),systemYellowBefore,'manual removal preserves the system yellow prompts');
+ assert.deepEqual(await page.locator('#editor [data-template-highlight], #editor [data-template-size][data-size-filled="false"]').allTextContents(),systemYellowBefore,'manual removal preserves the system yellow prompts');
  assert.match(await page.locator('.report-content strong').allTextContents().then(t=>t.join(' ')),/ЗАКЛЮЧЕНИЕ/);
  console.log('PASS: searchable previews and insertion, live spelling/grammar corrections and existing report formatting.');
  await insertedField.click();await page.keyboard.press('Control+End');

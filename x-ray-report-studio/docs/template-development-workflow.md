@@ -4,7 +4,7 @@
 
 - The integration candidate starts from Stable tag `xrs-v0.4.81`, commit `7790d69771d3534349a4fa549ba85e185a15e59f`.
 - The template integration is isolated in `codex/xrs-spine-v8-integration-082`; it does not merge the historical Spine Review branch.
-- The next working branch for template development is `codex/xrs-template-development`, based on the reviewed integration candidate. Keep this branch local until its candidate is accepted and required CI is available.
+- The next working branch for template development is `codex/xrs-template-development`, published from Stable 0.4.82, commit `45cf40c792526ba6469372fd39da32d8e96a3aae`. Subsequent groups must start from the then-current compatible Stable.
 - Approved source: `XRS_Spine_Templates_0.4.77_Review_v8.zip`, SHA-256 `9378885380ee793a79aa9c525201f3e6ee59e8524d13161cc1193a12b6f90d25`. Use files under `Редакция_DOCX/` as the approved medical text; `Оригиналы_XRS_0.4.77/` are comparison references only. The source archive is not duplicated in this repository.
 
 ## Integrated templates
@@ -15,7 +15,7 @@ Medical wording is imported only from approved source paragraphs before the syst
 
 ## Yellow editable ranges
 
-System yellow template highlights and manual user highlights are distinct behavior paths. When a user edits part of a continuous highlighted range, remove the highlight from only the changed text; preserve neighboring unfilled prompts such as `0,0`. Do not replace or redesign the `templateField` system. Keep keyboard input, paste, undo/redo, save, and reopen covered by the targeted Electron/browser test.
+Use [editable-highlights-v1.md](editable-highlights-v1.md) as the single contract for every medical group. Paragraph completion and individual pending measurements are independent system states. Manual fill is independent. Convert authored legacy yellow only when creating a template instance, never by examining colors in a restored patient report. Preserve source medical text, native field IDs and manual formatting. Do not create group-specific editor handlers.
 
 ## Required invariants
 
@@ -52,3 +52,7 @@ Windows CI, Windows packaging, and Microsoft Word must be reported separately. A
 7. After Stable changes, rebase only by recreating the integration candidate from new Stable and reapplying the approved template-only delta. Never merge an old template branch wholesale.
 
 The separate GPT_XRS-Шаблоны chat is a collaboration context, not a Git branch and is not automatically synchronized. Copy the handoff summary from the task report into that chat when continuing work.
+
+## Standard package for a new group
+
+Export from current XRS to DOCX, edit and approve in Word, resolve tracked changes, then run structural inspection. Keep the source DOCX, automatic source SHA-256, template revision, structure manifest, change report and test report together. Run the safe inspection prototype and catalog comparison before integrating. Stop on ambiguous field mapping or unsupported Word structure; never manually guess IDs. Supported imports need explicit preview acceptance, verified backup and rollback. Templates are revised independently of the application; patient reports are never rewritten. A full arbitrary-Word converter is a separate implementation stage documented in the contract.

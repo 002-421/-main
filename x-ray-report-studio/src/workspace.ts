@@ -838,26 +838,27 @@ $('#template-file').onchange=async event=>{
  const input=event.target as HTMLInputElement,file=input.files?.[0];input.value='';if(!file)return;
  try{
   if(file.size>20_000_000)throw new Error('Максимальный размер файла 20 МБ.');
-  const imported=await importOwnDocx(await file.arrayBuffer());
-  if(!imported)throw new Error('В DOCX нет метаданных XRS. Экспортируйте исходный шаблон из библиотеки XRS и редактируйте этот файл в Word.');
-  if(imported.kind!=='template')throw new Error('Этот DOCX экспортирован как протокол. Для замены шаблона нужен файл, экспортированный командой «Экспортировать шаблон в Word».');
-  const templateId=imported.templateId,template=reportTemplates.find(item=>item.id===templateId);
-  if(!templateId||!template)throw new Error('В файле нет действительного идентификатора шаблона библиотеки XRS. Исходный шаблон не изменён.');
-  const candidate=validateTemplate(promoteInlineTemplate(imported.doc));
+  const inspectedState=localStorage.getItem(KEYS.templates);
+  const imported=await inspectTemplateDocx(file,packageLibrary());
+  if(imported.status==='conflict')throw new Error('Конфликт исходной версии шаблона. Экспортируйте актуальный DOCX заново.');
+  if(imported.status==='unchanged'){toast('DOCX не содержит изменений шаблона.');return;}
+  const templateId=imported.id,template=reportTemplates.find(item=>item.id===templateId)!;
+  const candidate=validateTemplate(promoteInlineTemplate(imported.after));
   const old=overrides[templateId]??makeTemplateDocument(templateId);
   editor.schema.nodeFromJSON(candidate).check();
   const oldText=plain(old),newText=plain(candidate);
   const count=(doc:RichNode,type:string)=>{let n=0;const visit=(node:RichNode)=>{if(node.type===type)n++;node.content?.forEach(visit);};visit(doc);return n;};
   const countYellow=(doc:RichNode)=>{let n=0;const visit=(node:RichNode)=>{n+=(node.marks??[]).filter(mark=>mark.type==='highlight'&&String(mark.attrs?.color??'').toLowerCase()==='#ffff00').length;node.content?.forEach(visit);};visit(doc);return n;};
   const previewHtml=(doc:RichNode)=>{const host=document.createElement('div'),previewEditor=makeEditor(host,prepareInlineDocument(doc),()=>{});const html=DOMPurify.sanitize(previewEditor.getHTML());previewEditor.destroy();return html;};
-  const warnings=[...(imported.importWarnings??[])];
+  const warnings=[...(imported.warnings??[])];
   const d=dialog(`Предпросмотр шаблона «${template.title}»`,
    `<p>Проверьте содержимое и форматирование до замены. Существующие протоколы пациентов не изменяются.</p><p>Абзацы: ${count(old,'paragraph')} → ${count(candidate,'paragraph')}; таблицы: ${count(old,'table')} → ${count(candidate,'table')}; жёлтые фрагменты: ${countYellow(old)} → ${countYellow(candidate)}.</p>${warnings.length?`<div class="notice">${warnings.map(esc).join('<br>')}</div>`:'<div class="notice">Неподдерживаемых элементов Word не обнаружено.</div>'}<div class="template-import-diff"><section><h3>Текущий шаблон</h3><div class="report-content">${previewHtml(old)}</div><pre>${esc(oldText)}</pre></section><section><h3>Версия из Word</h3><div class="report-content">${previewHtml(candidate)}</div><pre>${esc(newText)}</pre></section></div>`,
    '<button class="btn" data-close>Отмена</button><button class="btn primary" id="confirm-template-import">Создать резервную копию и заменить шаблон</button>');
   d.querySelector('.dialog')!.classList.add('wide-preview');
   d.querySelector('#confirm-template-import')!.addEventListener('click',()=>{
-   const backupKey='mri-alliance.template-backups.v1',previousTemplates=localStorage.getItem(KEYS.templates),previousVersions=localStorage.getItem(KEYS.templateVersions),oldVersion=currentTemplateVersion(templateId),newVersion=nextTemplateVersion(oldVersion),backupRecord={id:crypto.randomUUID(),templateId,templateTitle:template.title,templateVersion:oldVersion,createdAt:new Date().toISOString(),doc:old};
+   const backupKey='mri-alliance.template-backups.v1',previousTemplates=localStorage.getItem(KEYS.templates),previousVersions=localStorage.getItem(KEYS.templateVersions),oldVersion=currentTemplateVersion(templateId),newVersion=nextTemplateVersion(oldVersion),backupRecord={id:crypto.randomUUID(),templateId,templateTitle:template.title,templateVersion:oldVersion,sourceSha256:imported.sourceSha256,baseSha256:imported.baseSha256,createdAt:new Date().toISOString(),doc:old};
    try{
+    if(localStorage.getItem(KEYS.templates)!==inspectedState)throw new Error('Шаблон изменился после предпросмотра. Повторите импорт.');
     const oldBackups=localStorage.getItem(backupKey),backups=oldBackups?JSON.parse(oldBackups):[];
     if(!Array.isArray(backups))throw new Error('Повреждено хранилище резервных копий шаблонов.');
     const nextBackups=[...backups,backupRecord];localStorage.setItem(backupKey,JSON.stringify(nextBackups));
