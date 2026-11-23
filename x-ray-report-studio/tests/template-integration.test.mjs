@@ -49,3 +49,8 @@ test('new approved yellow in a Word edit receives structural state even if the p
  assert.equal(structure.paragraphs.length,1);assert.equal(structure.sizes.length,1);
  assert.equal(row.after.content[0].content.some(node=>node.marks?.some(mark=>mark.type==='highlight')),false);
 });
+
+test('Word cannot silently reclassify a manual background as a functional system highlight',()=>{
+ const doc=marks=>({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Ручное оформление',marks}]}]});
+ assert.throws(()=>assertTemplateFieldContinuity(doc([{type:'textStyle',attrs:{backgroundColor:'#ffff00'}}]),doc([{type:'highlight',attrs:{color:'#ffff00'}}])),/ручной заливки/);
+});

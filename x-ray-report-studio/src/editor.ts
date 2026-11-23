@@ -31,7 +31,11 @@ const ReportFill = BackgroundColor.extend({
     return [{types: ['textStyle'], attributes: {
       backgroundColor: {
         default: null,
-        parseHTML: element => element.style.backgroundColor ? element.getAttribute('data-manual-fill') || element.style.backgroundColor : null,
+        parseHTML: element => {
+          // A copied system span carries yellow for display, never a manual fill.
+          if (element.matches('[data-template-highlight], [data-template-size], [data-template-field], mark[data-color]')) return null;
+          return element.style.backgroundColor ? element.getAttribute('data-manual-fill') || element.style.backgroundColor : null;
+        },
         renderHTML: attrs => {
           const color = manualFillColor(attrs.backgroundColor);
           if (color) return {'data-manual-fill': color, style: `background-color:${color}`};

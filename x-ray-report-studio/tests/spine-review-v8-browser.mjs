@@ -68,9 +68,39 @@ try{
   await page.locator('#fill-text').click();assert.equal(await page.locator('#fill-text').getAttribute('data-fill-state'),'current');
   await page.locator('#fill-text').click();assert.equal(await page.locator('#fill-text').getAttribute('data-fill-state'),'none');
   assert.equal(JSON.stringify((await state()).sizes),pendingBefore,`${id}: manual toggle independent from measurements`);
+  // Exercise the HTML parser and a real Electron clipboard, not only a PM Slice.
+  const copiedHtml=await page.evaluate(paragraph=>{
+    const e=document.querySelector('.report-content').editor,copy=structuredClone(paragraph),old=copy.attrs.editableHighlight.id;
+    const next=old+'.clipboard';copy.attrs.editableHighlight.id=next;
+    for(const n of copy.content)for(const m of n.marks??[])if(['templateHighlight','templateSize'].includes(m.type))m.attrs.id=m.attrs.id.replace(old,next);
+    e.commands.insertContentAt(e.state.doc.content.size,copy);
+    const html=[...e.view.dom.querySelectorAll('[data-template-highlight]')].find(el=>el.dataset.editableId===next).closest('p').outerHTML;
+    e.commands.insertContentAt(e.state.doc.content.size,{type:'paragraph'});
+    e.chain().focus().setTextSelection(e.state.doc.content.size-1).run();return html;
+  },synthetic);
+  await app.evaluate(({clipboard,ClipboardItem},html)=>clipboard.write([new ClipboardItem({'text/html':html,'text/plain':'Синтетический размер 0,0 см, 0,00 см и 0,0 см.'})]),copiedHtml);
+  await page.keyboard.press('Control+v');
+  const copied=await page.evaluate(()=>{
+    const e=document.querySelector('.report-content').editor;let result;
+    e.state.doc.descendants((node,pos)=>{
+      if(!node.isTextblock)return;
+      const marks=[];node.descendants(n=>marks.push(...n.marks));
+      if(marks.some(m=>m.type.name==='templateHighlight'&&String(m.attrs.id).startsWith('pasted_')))
+        result={pos,manual:marks.filter(m=>m.type.name==='textStyle'&&m.attrs.backgroundColor).length,sizes:[...new Set(marks.filter(m=>m.type.name==='templateSize').map(m=>m.attrs.id))]};
+    });return result;
+  });
+  assert.ok(copied,`${id}: rich paste retains copied structural prompts`);
+  assert.equal(copied.manual,0,`${id}: system HTML must not manufacture manual yellow`);
+  assert.equal(copied.sizes.length,3);
+  await cursor(copied.pos+2);await page.keyboard.insertText('Уточнённый ');
+  const richAfter=await page.evaluate(pos=>{
+    const p=document.querySelector('.report-content').editor.state.doc.nodeAt(pos),marks=[];p.descendants(n=>marks.push(...n.marks));
+    return {paragraph:marks.filter(m=>m.type.name==='templateHighlight').length,manual:marks.filter(m=>m.type.name==='textStyle'&&m.attrs.backgroundColor).length,pending:[...new Set(marks.filter(m=>m.type.name==='templateSize'&&!m.attrs.filled).map(m=>m.attrs.id))].length};
+  },copied.pos);
+  assert.deepEqual(richAfter,{paragraph:0,manual:0,pending:3},`${id}: rich-pasted paragraph clears with sizes still pending`);
   await page.waitForFunction(()=>document.querySelector('#save-state')?.textContent==='Сохранено на компьютере');
   const reportId=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
-  reports.push({reportId,doc:await snapshot()});console.log(`PASS ${id}: text, sizes, middle replacement, paste, manual toggle, Undo/Redo, persistence`);
+  reports.push({reportId,doc:await snapshot()});console.log(`PASS ${id}: text, sizes, middle replacement, plain/HTML clipboard paste, manual toggle, Undo/Redo, persistence`);
  }
  assert.deepEqual(errors,[]);
  await app.close();app=await _electron.launch(options);page=await app.firstWindow();await page.locator('.report-content').waitFor();
