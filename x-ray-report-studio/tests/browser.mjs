@@ -300,7 +300,7 @@ try{
  const editedZip={...originalZip,'word/document.xml':strToU8(originalXml.replace(firstText,'СИНТЕТИЧЕСКИЙ ШАБЛОН ИЗ WORD'))};const editedFile=path.join(output,'sidebar-template-edited.docx');await writeFile(editedFile,zipSync(editedZip));
  const backupCount=await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-backups.v1')??'[]').length);
  await page.locator('#template-file').setInputFiles(editedFile);
- await page.locator('.toast.error').filter({hasText:/templateField|служебных разделов/}).waitFor();
+ await page.locator('.toast.error').filter({hasText:/templateField|служебных разделов|системных ID/}).waitFor();
  assert.equal(await page.locator('#confirm-template-import').count(),0,'ambiguous Word structure never reaches replacement approval');
  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.templates.v4')??'{}')['head-gm']),templateBefore,'lossy Word edit leaves template intact');
  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.template-backups.v1')??'[]').length),backupCount,'refused import cannot change backups');
