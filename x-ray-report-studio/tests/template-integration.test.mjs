@@ -32,3 +32,20 @@ test('manual fill recognizes equivalent persisted CSS colors without confusing s
  for(const value of ['#FFFF00','#ff0','yellow','rgb(255, 255, 0)'])assert.equal(manualFillColor(value),'#ffff00');
  assert.equal(manualFillColor('url(secret)'),undefined);
 });
+
+test('an edited Word file may not lose existing structural highlight IDs',()=>{
+ const original={type:'doc',content:[{type:'paragraph',attrs:{editableHighlight:{id:'original',original:'Размер',edited:false}},content:[{type:'text',text:'Размер',marks:[{type:'templateHighlight',attrs:{id:'original'}}]}]}]};
+ const flattened={type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Размер'}]}]};
+ assert.throws(()=>assertTemplateFieldContinuity(original,flattened),/системных ID/);
+});
+test('new approved yellow in a Word edit receives structural state even if the previous empty contract was version 1',async()=>{
+ const item={id:'safe-flat',title:'Synthetic',areaId:'other',doc:{type:'doc',attrs:{editableHighlightsVersion:1},content:[{type:'paragraph',content:[{type:'text',text:'Размер 0,0 см'}]}]}};
+ const files=unzipSync(await bytes(await exportTemplateDocx(item,'0.4.83')));
+ const xml=strFromU8(files['word/document.xml']);
+ files['word/document.xml']=strToU8(xml.replace('<w:r>','<w:r><w:rPr><w:highlight w:val="yellow"/></w:rPr>'));
+ const row=await inspectTemplateDocx(zipSync(files),[item]);
+ assert.equal(row.status,'changed');
+ const structure=editableHighlightStructure(row.after);
+ assert.equal(structure.paragraphs.length,1);assert.equal(structure.sizes.length,1);
+ assert.equal(row.after.content[0].content.some(node=>node.marks?.some(mark=>mark.type==='highlight')),false);
+});

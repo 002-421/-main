@@ -89,7 +89,7 @@ export async function inspectTemplateDocx(input: Uint8Array | ArrayBuffer | Blob
   return {
     id: meta.templateId, title: current.title, areaId: current.areaId, appVersion: meta.appVersion,
     templateVersion: currentVersion, exportedTemplateVersion: meta.templateVersion,
-    sourceSha256, baseSha256: meta.baseSha256, currentSha256: baseHash, before: current.doc, after:imported.editedInWord?initializeEditableHighlights(after):after,
+    sourceSha256, baseSha256: meta.baseSha256, currentSha256: baseHash, before: current.doc, after:imported.editedInWord?initializeEditableHighlights({...after,attrs:{...after.attrs,editableHighlightsVersion:null}}):after,
     status: baseHash !== meta.baseSha256 || versionConflict ? 'conflict' as const : !imported.editedInWord ? 'unchanged' as const : 'changed' as const,
     warnings,
   };
