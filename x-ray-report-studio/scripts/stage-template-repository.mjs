@@ -1,0 +1,17 @@
+import {cp,mkdir,copyFile,writeFile,readFile} from 'node:fs/promises';
+import {spawnSync} from 'node:child_process';
+import path from 'node:path';
+import {createRequire} from 'node:module';
+const p=createRequire(import.meta.url)('../electron/template-protocol.cjs');
+const target=path.resolve(process.argv[2]??'test-output/XRS-Templates');
+if(target===process.cwd()||target==='/workspace')throw Error('Unsafe staging destination');
+await mkdir(target,{recursive:true});
+await cp('template-updates/repository',target,{recursive:true,filter:source=>!source.split(path.sep).some(part=>['node_modules','out'].includes(part))});
+await mkdir(path.join(target,'scripts/lib'),{recursive:true});
+for(const file of ['template-protocol.cjs','template-transport.cjs'])await copyFile('electron/'+file,path.join(target,'scripts/lib',file));
+const generated='test-output/template-updates/baseline';const run=spawnSync(process.execPath,['scripts/prepare-template-baseline.mjs',generated],{stdio:'inherit'});if(run.status)process.exit(run.status);
+await mkdir(path.join(target,'sources'),{recursive:true});
+const baseline=p.parse(await readFile(path.join(generated,'baseline.json')));await copyFile(path.join(generated,'baseline.json'),path.join(target,'baseline.json'));
+for(const record of baseline.templates)await copyFile(path.join(generated,record.id+'.json'),path.join(target,'sources',record.id+'.json'));
+await writeFile(path.join(target,'SCAFFOLD_STATUS.md'),'# Local staging only\n\nNot a published repository or catalog. Public trust roots, protected environments and end-to-end acceptance are not yet provisioned.\n');
+console.log('Prepared local repository at '+target+' (no GitHub publication performed).');

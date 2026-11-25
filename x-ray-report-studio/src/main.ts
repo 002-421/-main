@@ -14,4 +14,4 @@ function showFailure(error:unknown){
 }
 window.addEventListener('error',event=>{if(event.error)showFailure(event.error);});
 window.addEventListener('unhandledrejection',event=>showFailure(event.reason));
-void import('./workspace').catch(showFailure);
+void import('./template-updates.ts').then(async module=>{await module.loadTemplateCatalog();return import('./workspace');}).catch(showFailure);

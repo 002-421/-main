@@ -1,0 +1,85 @@
+name: Publish approved template catalog
+on:
+  workflow_dispatch:
+    inputs:
+      proposal:
+        description: 'Approved filenames in incoming/, comma-separated, ending .xrsproposal'
+        required: false
+        type: string
+      bootstrap:
+        description: 'First signed catalog with no template changes'
+        type: boolean
+        default: false
+      channel:
+        description: 'Isolated test or working Stable catalog'
+        type: choice
+        default: test
+        options: [test, stable]
+      approved:
+        description: 'Medical editor has approved the package and absence of personal data'
+        required: true
+        type: boolean
+        default: false
+      stable_content_approved:
+        description: 'Explicit permission to publish this content to the working Stable catalog'
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: template-catalog-publication
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main' && inputs.approved
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run validate
+      - name: Require provisioned protected environment
+        env:
+          PROVISIONED: ${{ vars.TEMPLATE_PUBLICATION_PROVISIONED }}
+        run: test "$PROVISIONED" = 'true'
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: catalog-${{ inputs.channel }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts
+      - name: Fetch previous authenticated catalog if present
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CATALOG_CHANNEL: ${{ inputs.channel }}
+        run: node scripts/fetch-previous.cjs
+      - name: Sign approved data
+        env:
+          CATALOG_CHANNEL: ${{ inputs.channel }}
+          BOOTSTRAP_CATALOG: ${{ inputs.bootstrap }}
+          MEDICAL_APPROVAL: ${{ inputs.approved }}
+          WORKING_CATALOG_APPROVAL: ${{ inputs.stable_content_approved }}
+          PROPOSAL_FILE: ${{ inputs.proposal }}
+          TEMPLATE_SIGNING_PRIVATE_KEY: ${{ secrets.TEMPLATE_SIGNING_PRIVATE_KEY }}
+        run: node scripts/publish.cjs
+      - name: Create immutable release and verify public data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release.cjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: publication-diagnostics
+          path: out/publication.json
+          if-no-files-found: ignore

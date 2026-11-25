@@ -1,0 +1,6 @@
+node_modules/
+out/
+previous-manifest.json
+*.pem
+*.key
+.env

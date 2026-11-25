@@ -545,6 +545,11 @@ app.whenReady().then(async () => {
     await fs.writeFile(result.filePath, pdf);
     return { canceled: false, path: result.filePath };
   });
+  const templateUpdates=require('./template-update-service.cjs').createTemplateUpdateService({userData:app.getPath('userData'),appVersion:activeApplicationVersion,source:require('./template-source.cjs'),baseline:require('./template-baseline.cjs'),log:value=>void logStartup(value)});
+  ipcMain.handle('templates:state',async event=>{requireMain(event);return templateUpdates.state();});
+  ipcMain.handle('templates:check',async event=>{requireMain(event);return templateUpdates.check();});
+  ipcMain.handle('templates:install',async(event,planId,confirmed)=>{requireMain(event);if(typeof planId!=='string'||planId.length>100)throw Error('INVALID_PLAN');return templateUpdates.install(planId,confirmed===true);});
+  ipcMain.handle('templates:rollback',async(event,confirmed)=>{requireMain(event);return templateUpdates.rollback(confirmed===true);});
   ipcMain.handle('updates:check', async event => {
     requireMain(event);
     return getUpdateManifest();

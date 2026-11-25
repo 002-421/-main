@@ -2,7 +2,8 @@ import { justifyDescription } from './description-alignment.ts';
 import source from './catalog.json' with { type: 'json' };
 import ctSource from './ct-catalog.json' with { type: 'json' };
 import { addReportSeparators } from './report-separators.ts';
-import type { RichNode } from './model';
+import {validateTemplate, type RichNode} from './model.ts';
+import type {CatalogTemplate} from './template-update-types.ts';
 import { compactTemplateTables, separateRecommendations, highlightDeletionNotes } from './table-layout.ts';
 import piRadsReference from './assets/pi-rads-v21.ts';
 import { highlightBrainAlternatives } from './template-alternatives.ts';
@@ -16,6 +17,7 @@ export type ReportTemplate = {
   templateVersion: string;
   sourceFiles: string[];
   doc: RichNode;
+  retired?: boolean;
 };
 export type ReportBlock = {
   id: string;
@@ -38,6 +40,35 @@ export const reportTemplates = rawReportTemplates.map(template => ({
   templateVersion: typeof template.templateVersion === 'string' ? template.templateVersion : INITIAL_TEMPLATE_VERSION,
 })) as ReportTemplate[];
 export const reportBlocks = source.blocks as ReportBlock[];
+const baseTemplates=structuredClone(reportTemplates),baseAreas=structuredClone(areas);
+const networkTemplates=new Map<string,RichNode>();
+/** Only validated template snapshots are replaced. Existing report documents,
+ * local overrides, histories and doctor settings are never accessed here. */
+export function applyTemplateCatalog(input:CatalogTemplate[]){
+ if(!Array.isArray(input)||input.length>500)throw Error('Некорректный каталог шаблонов.');
+ const prepared=new Map<string,CatalogTemplate>();
+ for(const item of input){
+  if(prepared.has(item.id)||!item.title||!item.areaTitle)throw Error('Конфликт шаблонов.');
+  validateTemplate(item.doc);prepared.set(item.id,structuredClone(item));
+ }
+ const next=structuredClone(baseTemplates),nextAreas=structuredClone(baseAreas);
+ // Keep retired metadata so old tabs and saved reports can still resolve their
+ // template IDs; only the list for creating a report hides retired templates.
+ for(const old of reportTemplates)if(!next.some(t=>t.id===old.id))next.push({...structuredClone(old),retired:true});
+ const docs=new Map<string,RichNode>();
+ for(const item of prepared.values()){
+  const index=next.findIndex(t=>t.id===item.id),previous=index>=0?next[index]:undefined;
+  const row:ReportTemplate={id:item.id,title:item.title,areaId:item.areaId,description:previous?.description??'',sourceFiles:previous?.sourceFiles??[],templateVersion:item.templateVersion,doc:item.doc,retired:item.retired};
+  if(index>=0)next[index]=row;else next.push(row);
+  if(!nextAreas.some(a=>a.id===item.areaId))nextAreas.push({id:item.areaId,title:item.areaTitle});docs.set(item.id,item.doc);
+ }
+ if(!next.some(t=>!t.retired))throw Error('В каталоге нет доступных шаблонов.');
+ reportTemplates.splice(0,reportTemplates.length,...next);areas.splice(0,areas.length,...nextAreas);
+ networkTemplates.clear();for(const [id,doc]of docs)networkTemplates.set(id,doc);
+}
+export const networkTemplate=(id:string)=>networkTemplates.has(id);
+export const templateAvailable=(id:string)=>Boolean(reportTemplates.find(t=>t.id===id&&!t.retired));
+
 
 const plain = (node: RichNode): string => node.type === 'text' ? node.text ?? '' : node.content?.map(plain).join('') ?? '';
 const serviceFooter = /^(?:Данное заключение не является диагнозом|Исследование выполнено на магнитно-резонансном томографе)(?:\s|$)/iu;
@@ -110,6 +141,7 @@ function removeServiceFooter(node: RichNode) {
 export function makeTemplateDocument(templateId = DEFAULT_TEMPLATE_ID): RichNode {
   const template = reportTemplates.find(item => item.id === templateId);
   if (!template) throw new Error('Шаблон исследования не найден.');
+  if(networkTemplates.has(templateId))return structuredClone(networkTemplates.get(templateId)!);
   const document = structuredClone(template.doc);
   normalizeSpinalHeadings(document);
   removeServiceFooter(document);

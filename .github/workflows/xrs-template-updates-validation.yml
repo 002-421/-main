@@ -1,0 +1,53 @@
+name: XRS independent template catalog validation
+on:
+  push:
+    branches: [codex/xrs-template-updates-084]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-templates:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: x-ray-report-studio
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: x-ray-report-studio/package-lock.json
+      - run: npm ci
+      - run: npm run desktop:install
+      - run: npm run build
+      - name: Full unit suite, including real Windows file locks
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force test-output/template-updates | Out-Null
+          npm test 2>&1 | Tee-Object test-output/template-updates/windows-unit.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Signed catalog on two isolated Electron instances over HTTPS
+        run: node tests/template-updates-electron.mjs
+      - name: All eight Spine templates and independent yellow dimensions
+        run: npm run test:spine-review-v8
+      - name: History and persisted views
+        run: npm run test:history-browser
+      - name: Browser DOCX and real Chromium PDF export regression
+        run: |
+          node node_modules/playwright-core/cli.js install chromium
+          node tests/editable-highlight-export-browser.mjs
+      - name: Prepare and validate independent publisher repository locally
+        run: |
+          node scripts/stage-template-repository.mjs
+          npm --prefix test-output/XRS-Templates ci --ignore-scripts
+          npm --prefix test-output/XRS-Templates test
+          npm --prefix test-output/XRS-Templates run validate
+          node tests/template-admin-browser.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: XRS-template-catalog-validation
+          path: x-ray-report-studio/test-output/
+          if-no-files-found: error

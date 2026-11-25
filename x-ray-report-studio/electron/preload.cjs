@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('desktop', {
   getApplicationVersion: () => ipcRenderer.invoke('app:version'),
   onWordSaved: callback => ipcRenderer.on('report:word-saved', (_event, url) => callback(url)),
   exportPDF: filename => ipcRenderer.invoke('report:export-pdf', filename),
+  templateCatalogState: () => ipcRenderer.invoke('templates:state'),
+  checkTemplateUpdates: () => ipcRenderer.invoke('templates:check'),
+  installTemplateUpdates: (planId, confirmed) => ipcRenderer.invoke('templates:install', planId, confirmed),
+  rollbackTemplateUpdates: confirmed => ipcRenderer.invoke('templates:rollback', confirmed),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   installUpdate: () => ipcRenderer.invoke('updates:install'),
   onUpdateProgress: callback => {
