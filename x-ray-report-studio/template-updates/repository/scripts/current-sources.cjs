@@ -4,7 +4,7 @@ const {fetchBytes}=require('./lib/template-transport.cjs');
 const PREFIX='https://github.com/002-421/XRS-Templates/releases/';
 async function applyPublishedSources(raw,root,channel,sources,baseline){
  const auth=p.parse(raw),manifest=p.verify(auth,root,channel);p.validateManifest(manifest,{channel,appVersion:'0.4.84'});
- const result=new Map(sources);for(const entry of manifest.packages){const bytes=await fetchBytes(entry.url,entry.size,{allowedPrefixes:[PREFIX]});const t=p.readPackage(bytes,entry,root,{channel,appVersion:'0.4.84',allowedImages:baseline.allowedImages});const base=sources.get(t.id);if(base){p.continuity(base,t);p.check(p.compare(t.templateVersion,base.templateVersion)>=0,'TEMPLATE_DOWNGRADE');}else p.check(entry.action==='add','UNKNOWN_TEMPLATE');result.set(t.id,t);}return {sources:result,manifest};
+ const result=new Map(sources);for(const entry of manifest.packages){const bytes=await fetchBytes(entry.url,entry.size,{allowedPrefixes:[PREFIX]});const t=p.readPackage(bytes,entry,root,{channel,appVersion:'0.4.84',allowedImages:baseline.allowedImages});const base=sources.get(t.id);if(base){p.continuity(base,t);p.check(p.compare(t.templateVersion,base.templateVersion)>=0,'TEMPLATE_DOWNGRADE');}else p.check(entry.action==='add'||manifest.revisions?.some(r=>r.templateId===t.id&&r.action==='add'),'UNKNOWN_TEMPLATE');result.set(t.id,t);}return {sources:result,manifest};
 }
 async function publicManifest(channel){
  if(channel==='stable')return fetchBytes(PREFIX+'latest/download/manifest.json',p.LIMITS.json,{allowedPrefixes:[PREFIX]});

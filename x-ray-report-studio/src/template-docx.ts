@@ -50,8 +50,7 @@ export async function exportTemplateDocxGroup(items: TemplateDocxItem[], appVers
   return new Blob([zipSync(files, { level: 6 })], { type: 'application/zip' });
 }
 
-export async function inspectTemplateDocx(input: Uint8Array | ArrayBuffer | Blob, library: TemplateDocxItem[]) {
-  const bytes = input instanceof Blob ? new Uint8Array(await input.arrayBuffer()) : input instanceof ArrayBuffer ? new Uint8Array(input) : input;
+export function checkedTemplateDocxParts(bytes:Uint8Array){
   if (bytes.length > 32 * 1024 * 1024) throw Error('DOCX больше 32 МБ.');
   let expanded = 0, oversized = false;
   const files = unzipSync(bytes, { filter: entry => {
@@ -66,6 +65,12 @@ export async function inspectTemplateDocx(input: Uint8Array | ArrayBuffer | Blob
     if (/^word\/.*\.xml$/.test(name) && /<w:(?:ins|del|moveFrom|moveTo|rPrChange|pPrChange|tblPrChange|trPrChange|tcPrChange|sectPrChange)(?:\s|>)/.test(strFromU8(data)))
       throw Error('В DOCX остались неразрешённые исправления Word. Примите или отклоните их в Word, сохраните файл и загрузите снова.');
   }
+  return files;
+}
+
+export async function inspectTemplateDocx(input: Uint8Array | ArrayBuffer | Blob, library: TemplateDocxItem[]) {
+  const bytes = input instanceof Blob ? new Uint8Array(await input.arrayBuffer()) : input instanceof ArrayBuffer ? new Uint8Array(input) : input;
+  const files=checkedTemplateDocxParts(bytes);
   const imported = await importOwnDocx(bytes);
   if (!imported || imported.kind !== 'template' || !imported.templateReview) throw Error('Нет служебных данных XRS-шаблона. Экспортируйте шаблон из XRS.');
   const meta = imported.templateReview;

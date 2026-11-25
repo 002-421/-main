@@ -3,7 +3,7 @@ import source from './catalog.json' with { type: 'json' };
 import ctSource from './ct-catalog.json' with { type: 'json' };
 import { addReportSeparators } from './report-separators.ts';
 import {validateTemplate, type RichNode} from './model.ts';
-import type {CatalogTemplate} from './template-update-types.ts';
+import type {CatalogTemplate,TemplateRevision} from './template-update-types.ts';
 import { compactTemplateTables, separateRecommendations, highlightDeletionNotes } from './table-layout.ts';
 import piRadsReference from './assets/pi-rads-v21.ts';
 import { highlightBrainAlternatives } from './template-alternatives.ts';
@@ -41,10 +41,14 @@ export const reportTemplates = rawReportTemplates.map(template => ({
 })) as ReportTemplate[];
 export const reportBlocks = source.blocks as ReportBlock[];
 const baseTemplates=structuredClone(reportTemplates),baseAreas=structuredClone(areas);
-const networkTemplates=new Map<string,RichNode>();
+let revisionMetadata:TemplateRevision[]=[];
+export const setTemplateRevisions=(rows:TemplateRevision[])=>{revisionMetadata=structuredClone(rows);};
+export const revisionsForTemplate=(id:string)=>revisionMetadata.filter(r=>r.templateId===id);
+const networkTemplates=new Map<string,RichNode>(),networkRecords=new Map<string,CatalogTemplate>();
+export const networkTemplateSource=(id:string)=>{const row=networkRecords.get(id);return row?structuredClone(row):undefined;};
 /** Only validated template snapshots are replaced. Existing report documents,
  * local overrides, histories and doctor settings are never accessed here. */
-export function applyTemplateCatalog(input:CatalogTemplate[]){
+export function applyTemplateCatalog(input:CatalogTemplate[],latestActive:CatalogTemplate[]=input){
  if(!Array.isArray(input)||input.length>500)throw Error('Некорректный каталог шаблонов.');
  const prepared=new Map<string,CatalogTemplate>();
  for(const item of input){
@@ -64,7 +68,7 @@ export function applyTemplateCatalog(input:CatalogTemplate[]){
  }
  if(!next.some(t=>!t.retired))throw Error('В каталоге нет доступных шаблонов.');
  reportTemplates.splice(0,reportTemplates.length,...next);areas.splice(0,areas.length,...nextAreas);
- networkTemplates.clear();for(const [id,doc]of docs)networkTemplates.set(id,doc);
+ networkTemplates.clear();networkRecords.clear();for(const [id,doc]of docs)networkTemplates.set(id,doc);for(const [id,row]of prepared)networkRecords.set(id,structuredClone(row));for(const row of latestActive)if(!row.retired&&reportTemplates.some(t=>t.id===row.id&&!t.retired)){networkRecords.set(row.id,structuredClone(row));networkTemplates.set(row.id,structuredClone(row.doc));const info=reportTemplates.find(t=>t.id===row.id)!;info.templateVersion=row.templateVersion;}
 }
 export const networkTemplate=(id:string)=>networkTemplates.has(id);
 export const templateAvailable=(id:string)=>Boolean(reportTemplates.find(t=>t.id===id&&!t.retired));
@@ -139,10 +143,13 @@ function removeServiceFooter(node: RichNode) {
 
 /** A new independent document with source formatting and blank entry fields. */
 export function makeTemplateDocument(templateId = DEFAULT_TEMPLATE_ID): RichNode {
-  const template = reportTemplates.find(item => item.id === templateId);
-  if (!template) throw new Error('Шаблон исследования не найден.');
-  if(networkTemplates.has(templateId))return structuredClone(networkTemplates.get(templateId)!);
-  const document = structuredClone(template.doc);
+ const template=reportTemplates.find(t=>t.id===templateId);if(!template)throw Error('Шаблон исследования не найден.');
+ if(networkTemplates.has(templateId))return structuredClone(networkTemplates.get(templateId)!);
+ return sourceDocument(template);
+}
+export function makeBuiltinTemplateDocument(id:string):RichNode {const template=baseTemplates.find(t=>t.id===id);if(!template)throw Error('Встроенный шаблон не найден.');return sourceDocument(template);}
+function sourceDocument(template:ReportTemplate):RichNode {
+ const templateId=template.id,document=structuredClone(template.doc);
   normalizeSpinalHeadings(document);
   removeServiceFooter(document);
   const spacing = (node: RichNode) => { if (['doc','paragraph','heading'].includes(node.type)) node.attrs={...node.attrs,lineHeight:1.05}; for(const mark of node.marks ?? []) if(mark.type==='textStyle' && mark.attrs) delete mark.attrs.lineHeight; node.content?.forEach(spacing); }; spacing(document);

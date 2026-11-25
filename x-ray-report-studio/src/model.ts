@@ -367,6 +367,7 @@ export function validateTemplate(input: unknown): RichNode {
         const {lineHeight, beforePt, afterPt} = a.spacingReference;
         attrs.spacingReference = {lineHeight, beforePt, afterPt};
       }
+      if(type==='doc'&&a.templateSource!=null){const source=a.templateSource;if(!source||typeof source!=='object'||!/^\d+\.\d+\.\d+$/.test(source.version)||!['Active','Archived','Personal'].includes(source.status))return fail();attrs.templateSource={id:id(source.id),version:source.version,status:source.status,...(typeof source.sha256==='string'&&/^[a-f0-9]{64}$/.test(source.sha256)?{sha256:source.sha256}:{}),...(typeof source.catalogVersion==='string'?{catalogVersion:string(source.catalogVersion,30)}:{})};}
       if (type === 'doc' && a.editableHighlightsVersion === 1) attrs.editableHighlightsVersion = 1;
       if (['paragraph','heading'].includes(type) && a.editableHighlight != null) {
         const prompt = a.editableHighlight;

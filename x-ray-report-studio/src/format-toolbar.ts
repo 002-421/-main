@@ -1,3 +1,4 @@
+import {FIRST_LINE_INDENTS, selectionIndent, setFirstLineIndent} from './document-typography.ts';
 import type { Editor } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
 import { insertReportLine } from './editor-format';
@@ -18,6 +19,7 @@ export const fillToolbar = menu('fill', 'Цвет заливки', [...MANUAL_FI
 
 export const paragraphToolbar = [
   menu('align', 'Выравнивание', alignments),
+  menu('indent', 'Отступ первой строки', FIRST_LINE_INDENTS.map((points,index)=>[String(points),['Без отступа','1,0 см','1,25 см','1,5 см'][index]])),
   menu('rule', 'Толщина линии', ruleChoices, '<button id="insert-line" type="button" aria-label="Линия">― Линия</button>'),
   menu('list', 'Список', lists),
   '<button id="table-tools" title="Вставить или изменить таблицу" aria-label="Вставить или изменить таблицу"><svg viewBox="0 0 18 18" width="18" height="18" fill="none" stroke="currentColor" aria-hidden="true"><rect x="1.5" y="1.5" width="15" height="15"/><path d="M6.5 1.5v15m5-15v15M1.5 6.5h15m-15 5h15"/></svg></button>',
@@ -78,11 +80,13 @@ export function bindFormatToolbar(editor: Editor, toolbar: HTMLElement) {
     const rule = selection instanceof NodeSelection && selection.node.type.name === 'horizontalRule' ?
       selection.node.attrs.thicknessPt ?? LEGACY_RULE_THICKNESS : thickness;
     const {state,color} = selectionFill();
-    const active: Record<string, unknown> = {list, align, rule: String(rule), fill:state==='none'?'off':state==='mixed'?null:color};
+    const indent=selectionIndent(editor.state);
+    const active: Record<string, unknown> = {indent:indent==='mixed'?null:String(FIRST_LINE_INDENTS.find(p=>Math.abs(p-indent)<.001)??indent),list, align, rule: String(rule), fill:state==='none'?'off':state==='mixed'?null:color};
     for (const choice of choices) {
       const pressed = active[choice.dataset.format!] === choice.dataset.value;
       choice.setAttribute('aria-pressed', String(pressed));
     }
+    const indentToggle=toggles.find(button=>button.dataset.formatToggle==='indent')!;indentToggle.title=indent==='mixed'?'Смешанные отступы':`Отступ первой строки: ${(indent*2.54/72).toFixed(2)} см`;indentToggle.dataset.indentState=indent==='mixed'?'mixed':String(indent);
     const listToggle = toggles.find(button => button.dataset.formatToggle === 'list')!;
     listToggle.textContent = list ? `Список: ${lists.find(([key]) => key === list)?.[1] ?? ''} ▾` : 'Список ▾';
     const alignToggle = toggles.find(button => button.dataset.formatToggle === 'align')!;
@@ -122,6 +126,7 @@ export function bindFormatToolbar(editor: Editor, toolbar: HTMLElement) {
     choice.onmousedown = event => event.preventDefault();
     choice.onclick = () => {
       const {format, value} = choice.dataset;
+      if (format === 'indent') setFirstLineIndent(editor,Number(value));
       if (format === 'align') editor.chain().focus().setTextAlign(value!).run();
       if (format === 'rule') {
         thickness = Number(value);

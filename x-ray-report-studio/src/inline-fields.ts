@@ -195,7 +195,9 @@ function replacePlaceholder(view: EditorView, text: string, range: FieldRange): 
 
 export const InlineFieldEditing = Extension.create({
   name: 'inlineFieldEditing',
+  addOptions(){return {authoring:false};},
   addProseMirrorPlugins() {
+    const authoring=this.options.authoring;
     return [new Plugin({
       props: {
         transformPasted(slice) {
@@ -218,6 +220,7 @@ export const InlineFieldEditing = Extension.create({
           return new Slice(copy(slice.content), slice.openStart, slice.openEnd);
         },
         handleTextInput(view, from, to, text) {
+          if(authoring)return false;
           const zero = yellowZeroRange(view.state, from);
           if (zero && to <= zero.to) return replaceYellowZero(view, text, zero);
           const range = placeholderRange(view.state, from);
@@ -226,6 +229,7 @@ export const InlineFieldEditing = Extension.create({
           return replacePlaceholder(view, text, range);
         },
         handlePaste(view, event) {
+          if(authoring)return false;
           const selection = view.state.selection;
           const zero = yellowZeroRange(view.state, selection.from);
           if (zero && selection.to <= zero.to) {
@@ -243,6 +247,7 @@ export const InlineFieldEditing = Extension.create({
       // Input methods and formatted paste can bypass handleTextInput. A changed
       // prompt is still marked as filled, in the same undo event as the input.
       appendTransaction(transactions, oldState, state) {
+        if(authoring)return null;
         if (!transactions.some(t => t.docChanged) || transactions.some(t => t.getMeta('inline-field-fix'))) return null;
         // History already includes every normalization step. Reapplying field
         // cleanup during replay can drop a highlight that Undo just restored.
@@ -318,7 +323,7 @@ export const SourceFormat = Extension.create({
       ? { ...(a.keepNext ? {style: 'break-after:avoid'} : {}), 'data-keep-next':String(a.keepNext) } : {} };
     paragraphAttrs.pageBreakBefore = { default: null, renderHTML: (a: Record<string, any>) => a.pageBreakBefore ? { style: 'break-before:page', 'data-page-break-before':'true' } : {} };
     return [
-      { types: ['doc'], attributes: Object.fromEntries(['editableHighlightsVersion', 'sourceFormat', 'pageWidthMm', 'pageHeightMm', 'marginTopMm', 'marginBottomMm', 'marginLeftMm', 'marginRightMm', 'fontFamily', 'fontSizePt', 'lineHeight', 'spaceAfterPt'].map(k => [k, attr()])) },
+      { types: ['doc'], attributes: Object.fromEntries(['templateSource','editableHighlightsVersion', 'sourceFormat', 'pageWidthMm', 'pageHeightMm', 'marginTopMm', 'marginBottomMm', 'marginLeftMm', 'marginRightMm', 'fontFamily', 'fontSizePt', 'lineHeight', 'spaceAfterPt'].map(k => [k, attr()])) },
       { types: ['paragraph', 'heading'], attributes: paragraphAttrs },
     ];
   },

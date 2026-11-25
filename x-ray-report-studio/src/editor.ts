@@ -1,3 +1,4 @@
+import {ExternalPaste} from './external-paste.ts';
 import { Editor, Node, Extension, mergeAttributes } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { TextStyleKit, BackgroundColor } from '@tiptap/extension-text-style';
@@ -129,7 +130,7 @@ const ParagraphPresentation = Extension.create({
   },
 });
 
-export type ReportEditorOptions = { getPersonalWords?: () => string[]; onProofStatus?: (status: ProofStatus) => void; onFieldSelect?: (id: string) => void };
+export type ReportEditorOptions = { authoring?:boolean; getPersonalWords?: () => string[]; onProofStatus?: (status: ProofStatus) => void; onFieldSelect?: (id: string) => void };
 
 export function makeEditor(element: HTMLElement, content: RichNode, options: ReportEditorOptions | ((id: string) => void) = {}) {
   const settings = typeof options === 'function' ? { onFieldSelect: options } : options;
@@ -149,7 +150,7 @@ export function makeEditor(element: HTMLElement, content: RichNode, options: Rep
       Superscript,
       Image.configure({ inline: false, allowBase64: true }),
       TableKit.configure({ table: { resizable: true, allowTableNodeSelection: true } }),
-      ReportSection, ReportField, ModuleReference, SourceFormat, TemplateHighlight, TemplateSize, TemplateField, InlineFieldEditing, TemplateReview, ReportHistory, AiReviewDecorations,
+      ExternalPaste, ReportSection, ReportField, ModuleReference, SourceFormat, TemplateHighlight, TemplateSize, TemplateField, InlineFieldEditing.configure({authoring:settings.authoring??false}), TemplateReview, ReportHistory, AiReviewDecorations,
       LiveProofreading.configure({ getPersonalWords: settings.getPersonalWords ?? (() => []), onStatus: settings.onProofStatus }),
     ],
     content: prepareInlineDocument(content),

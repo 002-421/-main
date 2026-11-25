@@ -54,8 +54,8 @@ function rotateRoot(previous,nextEnvelope,now=Date.now()){
 function date(value){check(typeof value==='string'&&Number.isFinite(Date.parse(value))&&new Date(value).toISOString()===value,'DATE');}
 function httpsUrl(value){let url;try{url=new URL(value);}catch{fail('URL');}check(url.protocol==='https:'&&!url.username&&!url.password&&!url.hash,'URL');return url;}
 function validateManifest(manifest,{channel,appVersion,now=Date.now(),expiry=true}={}){
- keys(manifest,['schemaVersion','type','catalogId','catalogVersion','sequence','channel','minimumXrsVersion','publishedAt','expiresAt','publisher','packages']);
- check(manifest.schemaVersion===1&&manifest.type==='xrs-template-catalog','SCHEMA');check(ID.test(manifest.catalogId),'ID');version(manifest.catalogVersion);
+ const names=['schemaVersion','type','catalogId','catalogVersion','sequence','channel','minimumXrsVersion','publishedAt','expiresAt','publisher','packages'];if(manifest.schemaVersion===2)names.push('revisions');keys(manifest,names);
+ check([1,2].includes(manifest.schemaVersion)&&manifest.type==='xrs-template-catalog','SCHEMA');check(ID.test(manifest.catalogId),'ID');version(manifest.catalogVersion);
  check(Number.isSafeInteger(manifest.sequence)&&manifest.sequence>0,'SEQUENCE');check(['stable','test'].includes(manifest.channel)&&(!channel||manifest.channel===channel),'CHANNEL');
  version(manifest.minimumXrsVersion);if(appVersion)check(compare(appVersion,manifest.minimumXrsVersion)>=0,'XRS_VERSION_REQUIRED');
  date(manifest.publishedAt);date(manifest.expiresAt);check(Date.parse(manifest.expiresAt)>Date.parse(manifest.publishedAt),'DATE');
@@ -63,6 +63,12 @@ function validateManifest(manifest,{channel,appVersion,now=Date.now(),expiry=tru
  keys(manifest.publisher,['name','keyId']);string(manifest.publisher.name,200);check(HASH.test(manifest.publisher.keyId),'KEY');
  check(Array.isArray(manifest.packages)&&manifest.packages.length<=LIMITS.templates,'COUNT');const ids=new Set();
  for(const entry of manifest.packages){keys(entry,['templateId','templateVersion','action','url','sha256','size','summary']);check(ID.test(entry.templateId)&&!ids.has(entry.templateId),'DUPLICATE_ID');ids.add(entry.templateId);version(entry.templateVersion);check(['add','update','remove'].includes(entry.action),'ACTION');httpsUrl(entry.url);check(HASH.test(entry.sha256)&&Number.isSafeInteger(entry.size)&&entry.size>0&&entry.size<=LIMITS.archive,'SIZE');string(entry.summary,2000);}
+ if(manifest.schemaVersion===2){
+ check(Array.isArray(manifest.revisions)&&manifest.revisions.length<=2000,'REVISION_COUNT');const versions=new Set(),active=new Map();
+ for(const r of manifest.revisions){keys(r,['templateId','templateVersion','action','url','sha256','size','summary','status','publishedAt','approvedBy']);check(ID.test(r.templateId)&&!versions.has(r.templateId+'@'+r.templateVersion),'DUPLICATE_REVISION');versions.add(r.templateId+'@'+r.templateVersion);version(r.templateVersion);check(['Active','Archived','Revoked'].includes(r.status),'REVISION_STATUS');check(['add','update','remove'].includes(r.action),'ACTION');httpsUrl(r.url);check(HASH.test(r.sha256)&&Number.isSafeInteger(r.size)&&r.size>0&&r.size<=LIMITS.archive,'SIZE');string(r.summary,2000);date(r.publishedAt);string(r.approvedBy,200);check(r.approvedBy.length>0,'APPROVAL');if(r.status==='Active'){check(!active.has(r.templateId)&&r.action!=='remove','MULTIPLE_ACTIVE');active.set(r.templateId,r);}}
+ for(const entry of manifest.packages){const r=manifest.revisions.find(r=>r.templateId===entry.templateId&&r.templateVersion===entry.templateVersion);check(r&&r.status===(entry.action==='remove'?'Revoked':'Active'),'ACTIVE_BINDING');const {status,publishedAt,approvedBy,...payload}=r;check(canonical(payload)===canonical(entry),'ACTIVE_BINDING');}
+ check([...active.values()].every(r=>manifest.packages.some(e=>e.templateId===r.templateId&&e.templateVersion===r.templateVersion)),'ACTIVE_BINDING');
+ }
  return manifest;
 }
 // ZIP_STORED only: deterministic, bounded, uncompressed data. Reject all extra fields,

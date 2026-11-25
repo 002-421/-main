@@ -1,9 +1,17 @@
 # Required one-time provisioning
 
-The GitHub integration can read/write repository contents but the actual attempt
-on 2026-11-25 to PUT `/repos/002-421/XRS-Templates/environments/{name}` returned
-`403 Resource not accessible by integration`. No Environment or secret was created.
-Do not change tokens, grant broad credentials to XRS, or bypass approval gates.
+Audit on 2026-11-25: the owner has configured protected `main` and the three
+Environments `catalog-test`, `catalog-stable`, `catalog-root-recovery`. Their
+required reviewer is `002-421` (ID 210672295), and their deployment policy permits
+only `main`. The integration can push feature branches; it still cannot change
+Environment configuration. The detailed branch-protection API returns 403, so
+required-check settings must be reviewed by the owner before enablement. Do not
+weaken existing protection or treat feature-branch CI as publication permission.
+
+No production keys, public root, signing secrets, trusted authorizing service or
+provisioning flag have been installed. The following is the remaining controlled
+procedure, not a record of completed provisioning. Real key creation requires the
+owner's separate agreement to the secure procedure in PUBLISHER_HANDOFF.md.
 
 1. Owner opens https://github.com/002-421/XRS-Templates/settings/environments .
 2. Create `catalog-test`, `catalog-stable`, `catalog-root-recovery`.

@@ -28,6 +28,10 @@ jobs:
           New-Item -ItemType Directory -Force test-output/template-updates | Out-Null
           npm test 2>&1 | Tee-Object test-output/template-updates/windows-unit.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: External clipboard, first-action font size, indent and DOCX/PDF
+        run: node tests/paste-typography-electron.mjs
+      - name: Local PIN, isolated authoring and approved Draft in Electron
+        run: node tests/template-admin-electron.mjs
       - name: Signed catalog on two isolated Electron instances over HTTPS
         run: node tests/template-updates-electron.mjs
       - name: All eight Spine templates and independent yellow dimensions

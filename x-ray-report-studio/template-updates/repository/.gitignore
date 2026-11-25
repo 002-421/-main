@@ -4,3 +4,4 @@ previous-manifest.json
 *.pem
 *.key
 .env
+approval-record.json

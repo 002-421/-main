@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('desktop', {
   getApplicationVersion: () => ipcRenderer.invoke('app:version'),
   onWordSaved: callback => ipcRenderer.on('report:word-saved', (_event, url) => callback(url)),
   exportPDF: filename => ipcRenderer.invoke('report:export-pdf', filename),
+  templateAdmin: {status:()=>ipcRenderer.invoke('templates:admin-status'),setup:(pin,confirm)=>ipcRenderer.invoke('templates:admin-setup',pin,confirm),unlock:pin=>ipcRenderer.invoke('templates:admin-unlock',pin),lock:token=>ipcRenderer.invoke('templates:admin-lock',token),draft:(token,proposal)=>ipcRenderer.invoke('templates:admin-draft',token,proposal),drafts:token=>ipcRenderer.invoke('templates:admin-drafts',token),export:(token,id)=>ipcRenderer.invoke('templates:admin-export',token,id),publish:token=>ipcRenderer.invoke('templates:admin-publish',token)},
+  templateRevision: (id, version) => ipcRenderer.invoke('templates:revision', id, version),
   templateCatalogState: () => ipcRenderer.invoke('templates:state'),
   checkTemplateUpdates: () => ipcRenderer.invoke('templates:check'),
   installTemplateUpdates: (planId, confirmed) => ipcRenderer.invoke('templates:install', planId, confirmed),

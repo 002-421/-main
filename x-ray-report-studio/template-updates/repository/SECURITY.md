@@ -46,3 +46,20 @@ Report a suspected signing compromise privately to the repository owner. Freeze
 publication, preserve evidence, revoke the online key through the trusted root
 process, publish approved replacement metadata, and verify independent clients.
 Never silently reuse a version, overwrite a tag, or disable signature verification.
+
+## Revision index and local administration
+
+Schema 2 signs the immutable revision history as well as the current package map.
+Each revision binds its package hash, version, status, approval identity and date.
+There is at most one Active revision per template. Previously seen revision data
+cannot be replaced or dropped; Revoked cannot become usable after local rollback.
+Archived data use the same authenticated package cache, quota and compatibility
+checks. The approval identity comes from GitHub's Environment approval history,
+not from an uploaded proposal or the local PIN.
+
+Local PINs use salted scrypt. Attempts are serialized and persisted; bounded
+sessions belong to a renderer and expire by wall and monotonic clocks. Neither
+PIN nor session tokens enter the audit log. Local Drafts are unsigned data and
+are not installable packages. Remote publication is fail-closed until a separately
+authorized publisher service exists. The workflow can produce schema-2 history,
+but a production operator flow for revoking an existing revision remains pending.

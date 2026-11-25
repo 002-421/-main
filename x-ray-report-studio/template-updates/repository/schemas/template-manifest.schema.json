@@ -18,7 +18,10 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "type": {
       "const": "xrs-template-catalog"
@@ -122,6 +125,106 @@
           }
         }
       }
+    },
+    "revisions": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "templateId",
+          "templateVersion",
+          "action",
+          "url",
+          "sha256",
+          "size",
+          "summary",
+          "status",
+          "publishedAt",
+          "approvedBy"
+        ],
+        "properties": {
+          "templateId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$"
+          },
+          "templateVersion": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$"
+          },
+          "action": {
+            "enum": [
+              "add",
+              "update",
+              "remove"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "pattern": "^https://",
+            "maxLength": 2048
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8388608
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "status": {
+            "enum": [
+              "Active",
+              "Archived",
+              "Revoked"
+            ]
+          },
+          "publishedAt": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$"
+          },
+          "approvedBy": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": 2
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "revisions"
+        ],
+        "properties": {
+          "revisions": {}
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "revisions"
+          ],
+          "properties": {
+            "revisions": {}
+          }
+        }
+      }
+    }
+  ]
 }

@@ -1,0 +1,4 @@
+'use strict';
+// GitHub, rather than an untrusted proposal, supplies the publication approver.
+const {execFileSync}=require('node:child_process'),fs=require('node:fs/promises'),p=require('./lib/template-protocol.cjs');
+(async()=>{const run=process.env.GITHUB_RUN_ID,channel=process.env.CATALOG_CHANNEL;p.check(/^\d+$/.test(run??'')&&['stable','test'].includes(channel),'APPROVAL_CONTEXT');const rows=JSON.parse(execFileSync('gh',['api',`repos/002-421/XRS-Templates/actions/runs/${run}/approvals`],{encoding:'utf8',maxBuffer:1000000}));const approved=rows.filter(r=>r.state==='approved'&&r.environments?.some(e=>e.name==='catalog-'+channel)&&r.user?.login);p.check(approved.length,'ENVIRONMENT_APPROVAL_REQUIRED');await fs.writeFile('approval-record.json',p.bytes({runId:run,channel,approvedBy:'github:'+approved.at(-1).user.login}));})().catch(e=>{console.error(e.code??'APPROVAL_CHECK_FAILED');process.exitCode=1;});

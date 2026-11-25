@@ -20,7 +20,7 @@ test('root rotation requires sequential version and old and new authorization; r
 });
 test('unsupported schema, wrong channel, incompatible app, invalid dates, replay-window expiry fail closed',()=>{
  const f=fixture(),m=p.parse(f.manifest([f.template()])).signed;assert.equal(p.validateManifest(m,{channel:'test',appVersion:'0.4.84',now:f.now()}),m);
- for(const [change,error]of [[{schemaVersion:2},'SCHEMA'],[{channel:'stable'},'CHANNEL'],[{minimumXrsVersion:'0.5.0'},'XRS_VERSION_REQUIRED'],[{expiresAt:'2026-11-25T01:00:00.000Z'},'EXPIRED'],[{sequence:0},'SEQUENCE']])code(()=>p.validateManifest({...m,...change},{channel:'test',appVersion:'0.4.84',now:f.now()}),error);
+ for(const [change,error]of [[{schemaVersion:3},'SCHEMA'],[{channel:'stable'},'CHANNEL'],[{minimumXrsVersion:'0.5.0'},'XRS_VERSION_REQUIRED'],[{expiresAt:'2026-11-25T01:00:00.000Z'},'EXPIRED'],[{sequence:0},'SEQUENCE']])code(()=>p.validateManifest({...m,...change},{channel:'test',appVersion:'0.4.84',now:f.now()}),error);
  const duplicate={...m,packages:[m.packages[0],m.packages[0]]};code(()=>p.validateManifest(duplicate),'DUPLICATE_ID');for(const url of ['http://example.invalid/a','https://u:p@example.invalid/a','file:///tmp/a','javascript:alert(1)'])code(()=>p.validateManifest({...m,packages:[{...m.packages[0],url}]}),'URL');
 });
 test('signed package binds archive hash, length, document hash, ID/version and action',()=>{

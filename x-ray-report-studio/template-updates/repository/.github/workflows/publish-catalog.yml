@@ -53,6 +53,7 @@ jobs:
     environment: catalog-${{ inputs.channel }}
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -64,6 +65,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CATALOG_CHANNEL: ${{ inputs.channel }}
         run: node scripts/fetch-previous.cjs
+      - name: Verify the Environment approval identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CATALOG_CHANNEL: ${{ inputs.channel }}
+        run: node scripts/approval-record.cjs
       - name: Sign approved data
         env:
           CATALOG_CHANNEL: ${{ inputs.channel }}
