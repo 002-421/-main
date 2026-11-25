@@ -49,6 +49,15 @@ jobs:
           npm --prefix test-output/XRS-Templates test
           npm --prefix test-output/XRS-Templates run validate
           node tests/template-admin-browser.mjs
+      - name: Verify actual Windows Setup candidate and published 0.4.83 upgrade
+        shell: pwsh
+        run: |
+          python scripts/package_setup.py --candidate-output test-output/release-084 --candidate-version 0.4.84
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify_setup_package.py --zip test-output/release-084/X-ray_Report_Studio_Windows_Setup.zip --source-electron electron --version 0.4.84
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/release-084-updater-electron.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
