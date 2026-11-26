@@ -43,6 +43,8 @@ jobs:
           node node_modules/playwright-core/cli.js install chromium
           node tests/editor-format-browser.mjs
           node tests/editable-highlight-export-browser.mjs
+      - name: Offline AI Review categories in packaged Electron
+        run: node tests/ai-067-electron.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
