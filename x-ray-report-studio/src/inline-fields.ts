@@ -172,10 +172,10 @@ function replaceYellowZero(view: EditorView, text: string, range: FieldRange): b
   return true;
 }
 
-function placeholderRange(state: EditorState, pos?: number): FieldRange | null {
+function placeholderRange(state: EditorState, pos?: number, includeFilledLocal = false): FieldRange | null {
   const ranges: FieldRange[] = [];
   state.doc.descendants((node, at) => {
-    const mark = node.marks.find(m => m.type.name === 'templateField' && m.attrs.filled === false);
+    const mark = node.marks.find(m => m.type.name === 'templateField' && (m.attrs.filled === false || includeFilledLocal && String(m.attrs.id).startsWith('local.editable.')));
     if (!node.isText || !mark) return;
     const previous = ranges.at(-1);
     if (previous && previous.to === at && previous.mark.attrs.id === mark.attrs.id) previous.to = at + node.nodeSize;
@@ -240,8 +240,25 @@ export const InlineFieldEditing = Extension.create({
             const pasted = event.clipboardData?.getData('text/plain');
             if (pasted !== undefined) return replaceYellowZero(view, pasted.replace(/\r\n?/g, '\n'), zero);
           }
-          const range = placeholderRange(view.state, selection.from);
+          const range = placeholderRange(view.state, selection.from, true);
           if (!range || selection.to > range.to) return false;
+          // A local text fragment supports partial edits just like typing. Keep
+          // its identity (and local visual marks) when external HTML is pasted;
+          // the general paste normalizer deliberately strips field identities.
+          if (String(range.mark.attrs.id).startsWith('local.editable.')) {
+            if (selection.empty && selection.from === range.to) return false;
+            const text = event.clipboardData?.getData('text/plain');
+            if (text === undefined) return false;
+            const marks = (view.state.storedMarks ?? selection.$from.marks()).filter(m => !['templateField','templateHighlight','templateSize'].includes(m.type.name));
+            const filled = range.mark.type.create({...range.mark.attrs,filled:true});
+            const tr = view.state.tr, value = text.replace(/\r\n?/g,'\n');
+            if (!value && selection.empty) return false;
+            if (value) tr.replaceWith(selection.from,selection.to,view.state.schema.text(value,[...marks,filled]));
+            else tr.delete(selection.from,selection.to);
+            tr.doc.descendants((node,pos)=>{const mark=node.marks.find(m=>m.type.name==='templateField'&&m.attrs.id===range.mark.attrs.id);if(node.isText&&mark)tr.removeMark(pos,pos+node.nodeSize,mark).addMark(pos,pos+node.nodeSize,filled);});
+            tr.setSelection(TextSelection.create(tr.doc,selection.from+value.length)).setStoredMarks([...marks,filled]);
+            view.dispatch(tr.setMeta('paste',true).setMeta('uiEvent','paste').scrollIntoView());return true;
+          }
           if (!replacesPromptOnFirstInput(range.mark) && (selection.from !== range.from || selection.to !== range.to)) return false;
           const text = event.clipboardData?.getData('text/plain');
           if (text === undefined) return false;
