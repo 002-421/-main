@@ -1,7 +1,7 @@
 name: XRS paste and editable fields validation
 on:
   push:
-    branches: [codex/xrs-086-stable]
+    branches: [codex/xrs-086-consolidated]
   workflow_dispatch:
 permissions:
   contents: read
