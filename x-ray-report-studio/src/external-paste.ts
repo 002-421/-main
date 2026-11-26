@@ -1,13 +1,24 @@
 import {Extension} from '@tiptap/core';
 import {Plugin} from '@tiptap/pm/state';
-import {Fragment,Slice} from '@tiptap/pm/model';
+import {DOMSerializer,Fragment,Slice} from '@tiptap/pm/model';
 import {paragraphStyle,fontPoints} from './document-typography.ts';
+class XrsClipboardSerializer extends DOMSerializer {
+  serializeFragment(fragment:Fragment,options:{document?:Document}={},target?:DocumentFragment):DocumentFragment {
+    const content=super.serializeFragment(fragment,options),document=options.document??globalThis.document;
+    const marker=document.createElement('div');marker.setAttribute('data-xrs-internal-clipboard','');marker.append(content);
+    const output=document.createDocumentFragment();output.append(marker);
+    if(target){target.append(output);return target;}return output;
+  }
+}
 /** Clinical field handlers run first. Word/template import never enters this path. */
 export const ExternalPaste=Extension.create({
  name:'externalPaste',priority:90,
- addProseMirrorPlugins(){let plain=false;return [new Plugin({props:{handleKeyDown(_view,event){plain=Boolean((event.ctrlKey||event.metaKey)&&event.shiftKey&&(event.code==='KeyV'||event.key.toLowerCase()==='v'));return false;},handlePaste(view,event,slice){
+ addProseMirrorPlugins(){let plain=false;const schema=this.editor?.schema;const baseSerializer=schema?DOMSerializer.fromSchema(schema):undefined;const clipboardSerializer=baseSerializer?new XrsClipboardSerializer(baseSerializer.nodes,baseSerializer.marks):undefined;return [new Plugin({props:{clipboardSerializer,handleKeyDown(_view,event){plain=Boolean((event.ctrlKey||event.metaKey)&&event.shiftKey&&(event.code==='KeyV'||event.key.toLowerCase()==='v'));return false;},handlePaste(view,event,slice){
   const plainOnly=plain;plain=false;
   const html=event.clipboardData?.getData('text/html')??'';
+  // ProseMirror's parser preserves the copied marks and the later transform
+  // safely rekeys copied service-field IDs. Do not flatten our own rich copy.
+  if(!plainOnly&&/data-xrs-internal-clipboard\b/.test(html))return false;
   // Preserve internal XRS field copies; their existing plugin rekeys identities.
   if(!plainOnly&&/data-template-(?:field|size|highlight)\b/.test(html))return false;
   const clipboardText=event.clipboardData?.getData('text/plain');
