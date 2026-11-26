@@ -189,6 +189,10 @@ html[data-theme="dark"] .ai-review-panel,html[data-theme="dark"] .ai-review-card
 .settings-update-row,.settings-dialog-actions { display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:wrap; }
 .settings-update-row { justify-content:space-between; padding-bottom:8px; margin-bottom:8px; border-bottom:1px solid var(--border); }
 .settings-update-row small { flex-basis:100%; }
+.settings-template-updates > p { margin:4px 0 8px; font-size:12px; }
+.settings-template-updates #template-catalog-changes { max-height:24vh; overflow:auto; font-size:12px; }
+.settings-template-updates #template-catalog-changes:empty { display:none; }
+.settings-template-updates #template-catalog-changes > button { margin:4px 0 8px; }
 [data-theme=dark] .format-options { background:#202b38; color:#e3edf6; }
 
 
