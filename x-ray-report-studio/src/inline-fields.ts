@@ -43,11 +43,15 @@ export function initializeTemplateTracking(doc: RichNode): RichNode {
 export function resetInlineTemplate(doc: RichNode): RichNode {
   const next = prepareInlineDocument(doc, false);
   const seen = new Set<string>();
+  // Locally authored text fields may have several styled runs. When their
+  // untouched default already equals the hint, retain those runs exactly.
+  const localDefaults=new Set(collectInlineFields(next).filter(f=>f.id.startsWith('local.editable.')&&!f.filled&&f.value===f.hint).map(f=>f.id));
   function walk(n: RichNode) {
     if (n.content) n.content = n.content.filter(child => {
       const mark = fieldMark(child);
       if (mark) {
         const id = String(mark.attrs?.id ?? '');
+        if(localDefaults.has(id))return true;
         if (seen.has(id)) return false;
         seen.add(id);
         const hint = String(mark.attrs?.hint || mark.attrs?.original || 'Введите данные');

@@ -1,0 +1,51 @@
+name: XRS paste and editable fields validation
+on:
+  push:
+    branches: [codex/xrs-paste-fields-084]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-editor:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: x-ray-report-studio
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: x-ray-report-studio/package-lock.json
+      - run: npm ci
+      - run: npm run desktop:install
+      - run: npm run build
+      - name: Full unit and integration suite
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force test-output/paste-fields | Out-Null
+          npm test 2>&1 | Tee-Object test-output/paste-fields/windows-unit.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Actual Electron clipboard, authored fields, restart and DOCX/PDF
+        run: node tests/paste-fields-electron.mjs
+      - name: Font size 12 to 11, indent, external clipboard and export regression
+        run: node tests/paste-typography-electron.mjs
+      - name: All eight Spine templates and original forty fields
+        run: npm run test:spine-review-v8
+      - name: Undo, Redo and persisted views
+        run: npm run test:history-browser
+      - name: Administrative Draft and profile isolation
+        run: node tests/template-admin-electron.mjs
+      - name: Browser formatting, DOCX and actual Chromium PDF
+        run: |
+          node node_modules/playwright-core/cli.js install chromium
+          node tests/editor-format-browser.mjs
+          node tests/editable-highlight-export-browser.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: XRS-paste-fields-validation
+          path: x-ray-report-studio/test-output/
+          if-no-files-found: error
