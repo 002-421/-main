@@ -11,7 +11,7 @@ const options={executablePath:process.env.ELECTRON_PATH||(existsSync(bundled)?bu
 const ids=['spine-shop','spine-shop-m','spine-shop-art','spine-gop','spine-gop-m','spine-pop','spine-pop-m','spine-kkop'];
 const synthetic=resetInlineTemplate({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Синтетический размер 0,0 см, 0,00 см и 0,0 см.',marks:[{type:'highlight',attrs:{color:'#ffff00'}}]}]}]}).content[0];
 let app=await _electron.launch(options),page;
-const reports=[],errors=[];
+const reports=[],errors=[];let currentTemplate='startup';
 const snapshot=()=>page.evaluate(()=>JSON.parse(JSON.stringify(document.querySelector('.report-content').editor.getJSON())));
 const state=()=>page.evaluate(()=>{
  const editor=document.querySelector('.report-content').editor;const sizes=[],paragraphs=[];
@@ -26,6 +26,7 @@ try{
  page.on('pageerror',e=>{errors.push(e.message);console.error('RENDERER',e.stack);});
  await page.locator('[data-tab="templates"]').click();await page.locator('#area-select').selectOption('spine');
  for(const id of ids){
+  currentTemplate=id;
   await page.locator(`[data-template="${id}"]`).click();
   await page.locator(`[data-field-id="${id}.patient"]`).waitFor();
   assert.deepEqual(await page.locator('.report-content [data-template-field]').evaluateAll(nodes=>nodes.map(n=>n.dataset.fieldId)),[`${id}.number`,`${id}.patient`,`${id}.birthdate`,'HEAD.BASE.2.FIELD.0043',`${id}.reportdate`]);
@@ -108,7 +109,12 @@ try{
  console.log('PASS: all eight Spine v8 reports, retained 40 field IDs and independent state after Electron restart.');
 }catch(error){
  await mkdir('test-output/editable-highlights',{recursive:true});
- await writeFile('test-output/editable-highlights/failure.json',JSON.stringify({error:String(error),rendererErrors:errors},null,2));
+ const location=String(error?.stack??'').match(/spine-review-v8-browser\.mjs:(\d+):(\d+)/);
+ // Tests use synthetic values; keep the CI annotation useful without ever
+ // serializing a document, clinical wording, profile path or renderer message.
+ const safe={template:currentTemplate,errorType:error?.name??'Error',testLocation:location?`${location[1]}:${location[2]}`:'unknown',rendererErrorCount:errors.length};
+ console.error(`::error title=Spine v8 synthetic acceptance::${safe.errorType} at ${safe.template}; test line ${safe.testLocation}; see restricted synthetic test artifact`);
+ await writeFile('test-output/editable-highlights/failure.json',JSON.stringify(safe,null,2));
  if(page)await page.screenshot({path:'test-output/editable-highlights/failure.png'}).catch(()=>{});
  throw error;
 }finally{await app.close().catch(()=>{});await rm(profile,{recursive:true,force:true});}
