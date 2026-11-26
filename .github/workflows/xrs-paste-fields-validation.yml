@@ -30,6 +30,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Actual Electron clipboard, authored fields, restart and DOCX/PDF
         run: node tests/paste-fields-electron.mjs
+      - name: Independent settings update rows, network errors and cold restart
+        run: node tests/settings-updates-electron.mjs
+      - name: Existing signed catalog window, archived revisions and rollback
+        run: node tests/template-updates-electron.mjs
       - name: Font size 12 to 11, indent, external clipboard and export regression
         run: node tests/paste-typography-electron.mjs
       - name: All eight Spine templates and original forty fields

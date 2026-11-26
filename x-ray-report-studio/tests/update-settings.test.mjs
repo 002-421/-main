@@ -7,8 +7,8 @@ const main = await readFile(new URL('../electron/main.cjs', import.meta.url), 'u
 const preload = await readFile(new URL('../electron/preload.cjs', import.meta.url), 'utf8');
 
 test('settings expose only current version and a manual Stable update check', () => {
-  assert.match(workspace, /Версия XRS:[^`]+id="update-current-version"/);
-  assert.match(workspace, /id="check-updates"[^>]*>Проверить обновления/);
+  assert.match(workspace, /Версия приложения:[^`]+id="update-current-version"/);
+  assert.match(workspace, /id="check-updates"[^>]*>Обновить/);
   for (const removed of ['beta-opt-in', 'update-channel-select', 'auto-update', 'rollback-update', 'open-update-backups']) {
     assert.doesNotMatch(workspace, new RegExp(removed));
   }
