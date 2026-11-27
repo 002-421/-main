@@ -135,6 +135,8 @@ export type ReportEditorOptions = { authoring?:boolean; getPersonalWords?: () =>
 export function makeEditor(element: HTMLElement, content: RichNode, options: ReportEditorOptions | ((id: string) => void) = {}) {
   const settings = typeof options === 'function' ? { onFieldSelect: options } : options;
   return new Editor({
+    // Universal paste preserves literal text; typing input rules stay enabled.
+    enablePasteRules: false,
     element,
     extensions: [
       StarterKit.configure({
