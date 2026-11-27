@@ -1,2 +1,2 @@
 'use strict';
-module.exports = {"protocolVersion":1,"repository":"002-421/XRS-Templates","commit":"5f148d9afc16d259aa64cb5bad590fb9453e0b92","sha256":"1946edacbae9806aad53312f5ca5b955efc8a483d40fa4028ee2a585462f39fb","sourceTemplates":113};
+module.exports = {"protocolVersion":2,"repository":"002-421/XRS-Templates","commit":"9304ad8142d47832a7f3394157b6f0cca9e3d211","sha256":"f6fff3487494ba2df30bbb2de01222ddeb4d4bab6a482c997b87966480c81170","sourceTemplates":113};

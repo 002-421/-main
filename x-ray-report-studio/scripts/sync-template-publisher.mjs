@@ -11,7 +11,7 @@ const baseline=JSON.parse(await readFile(path.join(source,'baseline.json'),'utf8
 const templates=[];for(const name of (await readdir(path.join(source,'sources'))).filter(n=>n.endsWith('.json')).sort())templates.push(JSON.parse(await readFile(path.join(source,'sources',name),'utf8')));
 const schemas=[];for(const name of (await readdir(path.join(source,'schemas'))).filter(n=>n.endsWith('.json')).sort())schemas.push(JSON.parse(await readFile(path.join(source,'schemas',name),'utf8')));
 const output=path.resolve('electron/template-publisher-runtime.cjs');
-await build({absWorkingDir:source,entryPoints:[path.join(source,'scripts/publisher-admin.cjs')],outfile:output,bundle:true,platform:'node',format:'cjs',target:'node24',legalComments:'inline',plugins:[{name:'embedded-reviewed-sources',setup(builder){
+await build({absWorkingDir:source,entryPoints:[path.join(source,'scripts/simple-publisher-admin.cjs')],outfile:output,bundle:true,platform:'node',format:'cjs',target:'node24',legalComments:'inline',plugins:[{name:'embedded-reviewed-sources',setup(builder){
  builder.onLoad({filter:/[/\\]scripts[/\\]validate\.cjs$/},async args=>{
   let code=await readFile(args.path,'utf8');
   const start=code.indexOf('async function schemas()'),end=code.indexOf('function checkPrivacy');
@@ -22,7 +22,7 @@ await build({absWorkingDir:source,entryPoints:[path.join(source,'scripts/publish
 }}]});
 const bytes=await readFile(output,'utf8'),sha256=createHash('sha256').update(bytes.replaceAll('\r\n','\n')).digest('hex');
 const commit=execFileSync('git',['rev-parse','HEAD'],{cwd:source,encoding:'utf8'}).trim();
-const provenance={protocolVersion:1,repository:'002-421/XRS-Templates',commit,sha256,sourceTemplates:templates.length};
+const provenance={protocolVersion:2,repository:'002-421/XRS-Templates',commit,sha256,sourceTemplates:templates.length};
 await writeFile('electron/template-publisher-provenance.cjs',"'use strict';\nmodule.exports = "+JSON.stringify(provenance)+";\n");
 const notices=[];
 for(const name of ['ajv','fast-deep-equal','fast-uri','json-schema-traverse','require-from-string']){
@@ -33,3 +33,6 @@ for(const name of ['ajv','fast-deep-equal','fast-uri','json-schema-traverse','re
 }
 await writeFile('public/template-publisher-LICENSE.txt',notices.join('\n'));
 console.log(`Publisher snapshot ${commit}: ${templates.length} templates; runtime SHA-256 ${sha256}`);
+
+await writeFile('electron/template-simple-catalog.cjs',await readFile(path.join(source,'scripts/lib/simple-catalog.cjs')));
+await writeFile('electron/template-protocol.cjs',await readFile(path.join(source,'scripts/lib/template-protocol.cjs')));

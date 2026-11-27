@@ -240,18 +240,19 @@ var require_template_protocol = __commonJS({
       for (const b of data) c = crcTable[(c ^ b) & 255] ^ c >>> 8;
       return (c ^ 4294967295) >>> 0;
     }
-    function filename(name) {
-      check(typeof name === "string" && /^(?:package\.json|template\.json)$/.test(name), "ZIP_PATH");
+    function filename(name, options) {
+      check(typeof name === "string" && (options?.catalog === true ? name === "catalog.json" : /^(?:package\.json|template\.json)$/.test(name)), "ZIP_PATH");
     }
-    function zip(files) {
+    function zip(files, options) {
+      const fileLimit = options?.catalog === true ? LIMITS.archive - 1024 : LIMITS.json;
       const locals = [], central = [];
       let offset = 0;
       const names = Object.keys(files).sort();
       check(names.length > 0 && names.length <= LIMITS.entries, "COUNT");
       for (const name of names) {
-        filename(name);
+        filename(name, options);
         const data = Buffer.from(files[name]);
-        check(data.length <= LIMITS.json, "SIZE");
+        check(data.length <= fileLimit, "SIZE");
         const n = Buffer.from(name), local = Buffer.alloc(30);
         local.writeUInt32LE(67324752);
         local.writeUInt16LE(20, 4);
@@ -280,7 +281,8 @@ var require_template_protocol = __commonJS({
       check(result.length <= LIMITS.archive, "SIZE");
       return result;
     }
-    function unzip(raw) {
+    function unzip(raw, options) {
+      const fileLimit = options?.catalog === true ? LIMITS.archive - 1024 : LIMITS.json;
       const b = Buffer.from(raw);
       check(b.length >= 22 && b.length <= LIMITS.archive, "ZIP_SIZE");
       const end = b.length - 22;
@@ -292,9 +294,9 @@ var require_template_protocol = __commonJS({
       for (let i = 0; i < count; i++) {
         check(p2 + 46 <= end && b.readUInt32LE(p2) === 33639248, "ZIP_STRUCTURE");
         const size = b.readUInt32LE(p2 + 24), length = b.readUInt16LE(p2 + 28), at = b.readUInt32LE(p2 + 42), crc = b.readUInt32LE(p2 + 16);
-        check(size <= LIMITS.json && b.readUInt32LE(p2 + 20) === size && b.readUInt16LE(p2 + 8) === 2048 && b.readUInt16LE(p2 + 10) === 0 && b.readUInt16LE(p2 + 30) === 0 && b.readUInt16LE(p2 + 32) === 0 && b.readUInt16LE(p2 + 34) === 0 && b.readUInt32LE(p2 + 38) === 0 && p2 + 46 + length <= end, "ZIP_STRUCTURE");
+        check(size <= fileLimit && b.readUInt32LE(p2 + 20) === size && b.readUInt16LE(p2 + 8) === 2048 && b.readUInt16LE(p2 + 10) === 0 && b.readUInt16LE(p2 + 30) === 0 && b.readUInt16LE(p2 + 32) === 0 && b.readUInt16LE(p2 + 34) === 0 && b.readUInt32LE(p2 + 38) === 0 && p2 + 46 + length <= end, "ZIP_STRUCTURE");
         const name = b.toString("utf8", p2 + 46, p2 + 46 + length);
-        filename(name);
+        filename(name, options);
         check(!Object.hasOwn(files, name) && at === next && at + 30 + length + size <= start, "ZIP_STRUCTURE");
         check(b.readUInt32LE(at) === 67324752 && b.subarray(at + 4, at + 28).equals(b.subarray(p2 + 6, p2 + 30)) && b.readUInt16LE(at + 28) === 0 && b.subarray(at + 30, at + 30 + length).equals(Buffer.from(name)), "ZIP_STRUCTURE");
         const data = b.subarray(at + 30 + length, at + 30 + length + size);
@@ -494,83 +496,206 @@ var require_template_protocol = __commonJS({
   }
 });
 
-// scripts/lib/publication-request.cjs
-var require_publication_request = __commonJS({
-  "scripts/lib/publication-request.cjs"(exports2, module2) {
+// scripts/lib/simple-catalog.cjs
+var require_simple_catalog = __commonJS({
+  "scripts/lib/simple-catalog.cjs"(exports2, module2) {
     "use strict";
     var p2 = require_template_protocol();
-    var OWNER = "002-421";
-    var OWNER_ID = 210672295;
     var REPOSITORY = "002-421/XRS-Templates";
+    var OWNER_ID = 210672295;
+    var PREFIX = `https://github.com/${REPOSITORY}/releases/download/`;
     var UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-    var COMMIT = /^[a-f0-9]{40}$/;
     var HASH = /^[a-f0-9]{64}$/;
-    function validateRequest(request, { now = Date.now(), channel, expiry = true } = {}) {
-      p2.keys(request, ["schemaVersion", "type", "requestId", "channel", "createdAt", "expiresAt", "publisher", "expectedCatalog", "proposals"]);
-      p2.check(request.schemaVersion === 1 && request.type === "xrs-template-publication-request", "REQUEST_SCHEMA");
-      p2.check(UUID.test(request.requestId), "REQUEST_ID");
-      p2.check(["test", "stable"].includes(request.channel) && (!channel || channel === request.channel), "CHANNEL");
-      p2.keys(request.publisher, ["login", "id"]);
-      p2.check(request.publisher.login === OWNER && request.publisher.id === OWNER_ID, "PUBLISHER_IDENTITY");
-      for (const name of ["createdAt", "expiresAt"]) p2.check(typeof request[name] === "string" && Number.isFinite(Date.parse(request[name])) && new Date(request[name]).toISOString() === request[name], "REQUEST_DATE");
-      p2.check(Date.parse(request.createdAt) <= now + 3e5 && (!expiry || Date.parse(request.expiresAt) > now) && Date.parse(request.expiresAt) > Date.parse(request.createdAt) && Date.parse(request.expiresAt) - Date.parse(request.createdAt) <= 864e5, "REQUEST_EXPIRED");
-      p2.keys(request.expectedCatalog, ["version", "sequence", "manifestSha256"]);
-      const expected = request.expectedCatalog;
-      p2.version(expected.version);
-      p2.check(Number.isSafeInteger(expected.sequence) && expected.sequence >= 0 && (expected.sequence === 0 ? expected.version === "0.0.0" && expected.manifestSha256 === null : HASH.test(expected.manifestSha256)), "REQUEST_BASE");
-      p2.check(Array.isArray(request.proposals) && request.proposals.length > 0 && request.proposals.length <= 50, "REQUEST_COUNT");
-      p2.check(p2.bytes(request).length <= p2.LIMITS.json, "SIZE");
-      p2.check(new Set(request.proposals.map((row) => row.template?.id)).size === request.proposals.length, "DUPLICATE_ID");
-      p2.check(request.proposals.filter((row) => row.template?.retired === true).length <= 1, "MASS_REMOVAL_BLOCKED");
-      for (const proposal of request.proposals) p2.check(proposal.channel === request.channel && proposal.medicalApproval?.approved === true, "APPROVAL_REQUIRED");
-      return request;
+    var tag = (version) => "xrs-templates-v" + p2.version(version);
+    var archiveUrl = (version) => PREFIX + tag(version) + "/catalog.xrszip";
+    function contentHash(templates) {
+      return p2.sha256(p2.bytes([...templates].sort((a, b) => a.id.localeCompare(b.id, "en"))));
     }
-    function bindCatalog(request, previousRaw) {
-      const expected = request.expectedCatalog;
-      if (!previousRaw) {
-        p2.check(expected.sequence === 0, "CATALOG_BASE_CONFLICT");
-        return;
+    function validateTemplates(templates, options = {}) {
+      p2.check(Array.isArray(templates) && templates.length > 0 && templates.length <= 500, "CATALOG_COUNT");
+      const ids = /* @__PURE__ */ new Set();
+      for (const row of templates) {
+        p2.validateTemplate(row, options);
+        p2.check(!ids.has(row.id), "DUPLICATE_ID");
+        ids.add(row.id);
       }
-      const previous = p2.parse(previousRaw).signed;
-      p2.check(expected.sequence === previous.sequence && expected.version === previous.catalogVersion && expected.manifestSha256 === p2.sha256(previousRaw), "CATALOG_BASE_CONFLICT");
+      return templates;
     }
-    function reference(requestId) {
-      p2.check(UUID.test(requestId), "REQUEST_ID");
-      return `refs/heads/xrs-submissions/${requestId}`;
+    function makeArchive(templates, catalogVersion, options) {
+      validateTemplates(templates, options);
+      return p2.zip({ "catalog.json": p2.bytes({ schemaVersion: 1, type: "xrs-https-catalog-data", catalogVersion: p2.version(catalogVersion), templates: [...templates].sort((a, b) => a.id.localeCompare(b.id, "en")) }) }, { catalog: true });
     }
-    function runTitle(requestId, hash) {
-      p2.check(UUID.test(requestId) && HASH.test(hash), "REQUEST_BINDING");
-      return `XRS request ${requestId} ${hash}`;
+    function entry(row) {
+      p2.keys(row, ["templateId", "templateVersion", "action", "url", "sha256", "size", "summary", "templateSha256", "archiveVersion"]);
+      p2.string(row.templateId, 120);
+      p2.version(row.templateVersion);
+      p2.version(row.archiveVersion);
+      p2.string(row.summary, 2e3);
+      p2.check(["add", "update", "remove"].includes(row.action) && row.url === archiveUrl(row.archiveVersion) && HASH.test(row.sha256) && HASH.test(row.templateSha256) && Number.isSafeInteger(row.size) && row.size > 0 && row.size <= p2.LIMITS.archive, "CATALOG_ENTRY");
+      return row;
     }
-    function nextCatalogVersion(request) {
-      if (request.expectedCatalog.sequence === 0) return "1.0.0";
-      const parts = request.expectedCatalog.version.split(".").map(Number);
-      parts[2]++;
-      return p2.version(parts.join("."));
+    function manifest(raw, { appVersion = "0.4.86", channel = "stable", now = Date.now(), expiry = true } = {}) {
+      const m = p2.parse(raw);
+      p2.keys(m, ["schemaVersion", "type", "catalogId", "catalogVersion", "sequence", "channel", "minimumXrsVersion", "publishedAt", "publisher", "publicationId", "previousVersion", "previousManifestSha256", "contentSha256", "archive", "packages", "revisions"]);
+      p2.check(m.schemaVersion === 3 && m.type === "xrs-https-template-catalog" && m.catalogId === "xrs-medical-templates" && m.channel === channel && channel === "stable", "CATALOG_SCHEMA");
+      p2.version(m.catalogVersion);
+      p2.version(m.minimumXrsVersion);
+      p2.version(m.previousVersion);
+      p2.check(p2.compare(appVersion, m.minimumXrsVersion) >= 0, "XRS_VERSION_REQUIRED");
+      p2.check(Number.isSafeInteger(m.sequence) && m.sequence >= 1 && UUID.test(m.publicationId) && HASH.test(m.contentSha256), "CATALOG_SCHEMA");
+      p2.check(typeof m.publishedAt === "string" && Number.isFinite(Date.parse(m.publishedAt)) && (!expiry || Date.parse(m.publishedAt) <= now + 3e5), "DATE");
+      p2.keys(m.publisher, ["login", "id", "repository"]);
+      p2.check(m.publisher.login === "002-421" && m.publisher.id === OWNER_ID && m.publisher.repository === REPOSITORY, "PUBLISHER_IDENTITY");
+      p2.check(m.sequence === 1 ? m.previousVersion === "0.0.0" && m.previousManifestSha256 === null : HASH.test(m.previousManifestSha256) && p2.compare(m.catalogVersion, m.previousVersion) > 0, "CATALOG_BASE");
+      p2.keys(m.archive, ["url", "sha256", "size"]);
+      p2.check(m.archive.url === archiveUrl(m.catalogVersion) && HASH.test(m.archive.sha256) && Number.isSafeInteger(m.archive.size) && m.archive.size > 0 && m.archive.size <= p2.LIMITS.archive, "CATALOG_ARCHIVE");
+      p2.check(Array.isArray(m.packages) && m.packages.length > 0 && m.packages.length <= 500 && Array.isArray(m.revisions) && m.revisions.length <= 5e3, "CATALOG_COUNT");
+      const ids = /* @__PURE__ */ new Set(), revisions = /* @__PURE__ */ new Map();
+      for (const row of m.revisions) {
+        p2.keys(row, ["templateId", "templateVersion", "action", "url", "sha256", "size", "summary", "templateSha256", "archiveVersion", "status", "publishedAt", "approvedBy"]);
+        const { status, publishedAt, approvedBy, ...data } = row;
+        entry(data);
+        p2.check(["Active", "Archived", "Revoked"].includes(status) && typeof publishedAt === "string" && Number.isFinite(Date.parse(publishedAt)) && approvedBy === "github:002-421", "REVISION");
+        const key = row.templateId + "@" + row.templateVersion;
+        p2.check(!revisions.has(key), "DUPLICATE_ID");
+        revisions.set(key, row);
+      }
+      for (const row of m.packages) {
+        entry(row);
+        p2.check(!ids.has(row.templateId), "DUPLICATE_ID");
+        ids.add(row.templateId);
+        const found = revisions.get(row.templateId + "@" + row.templateVersion);
+        p2.check(found && found.status === (row.action === "remove" ? "Revoked" : "Active"), "ACTIVE_BINDING");
+        const { status, publishedAt, approvedBy, ...data } = found;
+        p2.check(p2.canonical(data) === p2.canonical(row), "ACTIVE_BINDING");
+      }
+      p2.check([...revisions.values()].filter((r) => r.status === "Active").every((r) => m.packages.some((e) => e.templateId === r.templateId && e.templateVersion === r.templateVersion)), "ACTIVE_BINDING");
+      return m;
     }
-    async function readRequest(api, { requestId, commit, hash, channel, now, allowExpired = false }) {
-      p2.check(COMMIT.test(commit) && HASH.test(hash), "REQUEST_BINDING");
-      const ref = await api("GET", `/git/ref/heads/xrs-submissions/${validateId(requestId)}`);
-      p2.check(ref.ref === reference(requestId) && ref.object?.type === "commit" && ref.object.sha === commit, "REQUEST_REF_CHANGED");
-      const record = await api("GET", `/git/commits/${commit}`);
-      p2.check(record.sha === commit && COMMIT.test(record.tree?.sha), "REQUEST_COMMIT");
-      const tree = await api("GET", `/git/trees/${record.tree.sha}`);
-      p2.check(tree.truncated === false && tree.tree?.length === 1, "REQUEST_TREE");
-      const entry = tree.tree[0];
-      p2.check(entry.path === "request.json" && entry.mode === "100644" && entry.type === "blob" && COMMIT.test(entry.sha) && Number.isInteger(entry.size) && entry.size > 0 && entry.size <= p2.LIMITS.json, "REQUEST_TREE");
-      const blob = await api("GET", `/git/blobs/${entry.sha}`);
-      p2.check(blob.sha === entry.sha && blob.encoding === "base64" && blob.size === entry.size && typeof blob.content === "string" && blob.content.length <= p2.LIMITS.json * 2, "REQUEST_BLOB");
-      const bytes = Buffer.from(blob.content, "base64");
-      p2.check(bytes.length === entry.size && p2.sha256(bytes) === hash, "REQUEST_HASH");
-      const request = validateRequest(p2.parse(bytes), { channel, now, expiry: !allowExpired });
-      p2.check(request.requestId === requestId, "REQUEST_BINDING");
-      return { request, raw: bytes };
+    function packageReader({ allowedImages = [], appVersion = "0.4.86" } = {}) {
+      const cache = /* @__PURE__ */ new Map();
+      return (raw, row) => {
+        p2.check(raw.length === row.size && p2.sha256(raw) === row.sha256, "PACKAGE_HASH");
+        let data = cache.get(row.sha256);
+        if (!data) {
+          const files = p2.unzip(raw, { catalog: true });
+          p2.check(Object.keys(files).length === 1 && files["catalog.json"], "PACKAGE_FILES");
+          data = p2.parse(files["catalog.json"], p2.LIMITS.archive);
+          p2.keys(data, ["schemaVersion", "type", "catalogVersion", "templates"]);
+          p2.check(data.schemaVersion === 1 && data.type === "xrs-https-catalog-data", "CATALOG_SCHEMA");
+          p2.version(data.catalogVersion);
+          validateTemplates(data.templates, { allowedImages });
+          p2.check(data.templates.every((t) => p2.compare(appVersion, t.minimumXrsVersion) >= 0), "XRS_VERSION_REQUIRED");
+          data = { ...data, byId: new Map(data.templates.map((t) => [t.id, t])) };
+          cache.set(row.sha256, data);
+          if (cache.size > 3) cache.delete(cache.keys().next().value);
+        }
+        const template = data.byId.get(row.templateId);
+        p2.check(data.catalogVersion === row.archiveVersion && template && template.templateVersion === row.templateVersion && p2.sha256(p2.bytes(template)) === row.templateSha256 && Boolean(template.retired) === (row.action === "remove"), "PACKAGE_BINDING");
+        return structuredClone(template);
+      };
     }
-    function validateId(id) {
-      p2.check(typeof id === "string" && UUID.test(id), "REQUEST_ID");
-      return id;
+    module2.exports = { REPOSITORY, OWNER_ID, PREFIX, UUID, HASH, tag, archiveUrl, contentHash, validateTemplates, makeArchive, manifest, packageReader };
+  }
+});
+
+// scripts/lib/github-direct.cjs
+var require_github_direct = __commonJS({
+  "scripts/lib/github-direct.cjs"(exports2, module2) {
+    "use strict";
+    var { spawnSync } = require("node:child_process");
+    var p2 = require_template_protocol();
+    var c = require_simple_catalog();
+    function verifyLogin(status, { platform = process.platform, env = process.env } = {}) {
+      p2.check(platform === "win32", "WINDOWS_ADMIN_REQUIRED");
+      p2.check(!["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"].some((k) => env[k]), "ENVIRONMENT_CREDENTIAL_FORBIDDEN");
+      const rows = status?.hosts?.["github.com"];
+      p2.check(Array.isArray(rows) && rows.filter((x) => x.active).length === 1, "GITHUB_LOGIN_REQUIRED");
+      const row = rows.find((x) => x.active);
+      p2.check(row.state === "success" && row.login === "002-421" && row.tokenSource === "keyring" && !row.token, "GITHUB_LOGIN_REQUIRED");
     }
-    module2.exports = { OWNER, OWNER_ID, REPOSITORY, UUID, COMMIT, HASH, validateRequest, bindCatalog, reference, runTitle, nextCatalogVersion, readRequest };
+    function createGitHub({ spawn = spawnSync, env = process.env } = {}) {
+      const safeEnv = { ...env, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" };
+      for (const key of ["GH_DEBUG", "DEBUG", "NODE_DEBUG"]) delete safeEnv[key];
+      const run = (args, input, json = true) => {
+        const r = spawn("gh", args, { input, env: safeEnv, encoding: "utf8", windowsHide: true, timeout: 6e4, maxBuffer: 16 * 1024 * 1024 });
+        if (r.error || r.status !== 0) {
+          const status = Number(/HTTP (\d{3})/.exec(r.stderr ?? "")?.[1]);
+          const code = status === 401 ? "GITHUB_UNAUTHORIZED" : status === 403 ? "GITHUB_FORBIDDEN" : status === 404 ? "SOURCE_NOT_FOUND" : status === 422 ? "VERSION_CONFLICT" : r.error?.code === "ENOENT" || /unknown flag/.test(r.stderr ?? "") ? "GITHUB_CLI_REQUIRED" : "GITHUB_UNAVAILABLE";
+          throw Object.assign(Error(code), { code, httpStatus: status || void 0 });
+        }
+        if (!json || !r.stdout.trim()) return null;
+        try {
+          return JSON.parse(r.stdout);
+        } catch {
+          p2.fail("GITHUB_RESPONSE_INVALID");
+        }
+      };
+      return { status: () => run(["auth", "status", "--hostname", "github.com", "--active", "--json", "hosts"]), api: (method, route, body) => {
+        p2.check(["GET", "POST", "PATCH"].includes(method) && /^\/(?:user$|repos\/002-421\/XRS-Templates(?:\/|$))/.test(route) && !route.includes("..") && !route.includes("#"), "GITHUB_ENDPOINT");
+        if (method === "PATCH") p2.check(/^\/repos\/002-421\/XRS-Templates\/releases\/\d+$/.test(route), "GITHUB_ENDPOINT");
+        return run(["api", "--hostname", "github.com", "--method", method, route, ...body === void 0 ? [] : ["--input", "-"]], body === void 0 ? void 0 : JSON.stringify(body));
+      }, upload: (tag, file) => {
+        p2.check(/^xrs-templates-v\d+\.\d+\.\d+$/.test(tag), "TAG");
+        return run(["release", "upload", tag, file, "--repo", c.REPOSITORY], void 0, false);
+      } };
+    }
+    module2.exports = { verifyLogin, createGitHub };
+  }
+});
+
+// scripts/lib/template-transport.cjs
+var require_template_transport = __commonJS({
+  "scripts/lib/template-transport.cjs"(exports2, module2) {
+    "use strict";
+    var p2 = require_template_protocol();
+    async function fetchBytes(input, limit, { allowedPrefixes, fetchImpl = fetch, timeoutMs = 3e4 } = {}) {
+      p2.check(Number.isSafeInteger(limit) && limit > 0 && limit <= p2.LIMITS.archive, "SIZE");
+      const original = p2.httpsUrl(input);
+      p2.check(Array.isArray(allowedPrefixes) && allowedPrefixes.some((prefix) => original.href.startsWith(p2.httpsUrl(prefix).href) && original.origin === p2.httpsUrl(prefix).origin), "SOURCE_NOT_TRUSTED");
+      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs);
+      let url = original;
+      try {
+        for (let redirects = 0; redirects <= 4; redirects++) {
+          const response = await fetchImpl(url.href, { redirect: "manual", signal: controller.signal, headers: { Accept: "application/octet-stream", "Cache-Control": "no-cache" } });
+          if ([301, 302, 303, 307, 308].includes(response.status)) {
+            const location = response.headers.get("location");
+            await response.body?.cancel();
+            p2.check(location, "REDIRECT");
+            const next = p2.httpsUrl(new URL(location, url).href);
+            const githubAsset = original.hostname === "github.com" && ["release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(next.hostname);
+            p2.check(next.origin === original.origin && allowedPrefixes.some((prefix) => next.href.startsWith(prefix)) || githubAsset, "REDIRECT_NOT_TRUSTED");
+            url = next;
+            continue;
+          }
+          if (!response.ok) {
+            await response.body?.cancel();
+            p2.fail(response.status === 404 ? "SOURCE_NOT_FOUND" : "NETWORK_STATUS");
+          }
+          const size = Number(response.headers.get("content-length"));
+          p2.check(!size || Number.isSafeInteger(size) && size >= 0 && size <= limit, "NETWORK_SIZE");
+          let total = 0;
+          const chunks = [];
+          p2.check(response.body, "NETWORK_BODY");
+          for await (const chunk of response.body) {
+            total += chunk.length;
+            if (total > limit) {
+              controller.abort();
+              p2.fail("NETWORK_SIZE");
+            }
+            chunks.push(Buffer.from(chunk));
+          }
+          return Buffer.concat(chunks);
+        }
+        p2.fail("TOO_MANY_REDIRECTS");
+      } catch (e) {
+        if (e.name === "TemplateProtocolError") throw e;
+        p2.fail(controller.signal.aborted ? "NETWORK_TIMEOUT" : "NETWORK_UNAVAILABLE");
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    module2.exports = { fetchBytes };
   }
 });
 
@@ -8101,61 +8226,6 @@ var require_root_chain = __commonJS({
   }
 });
 
-// scripts/lib/template-transport.cjs
-var require_template_transport = __commonJS({
-  "scripts/lib/template-transport.cjs"(exports2, module2) {
-    "use strict";
-    var p2 = require_template_protocol();
-    async function fetchBytes(input, limit, { allowedPrefixes, fetchImpl = fetch, timeoutMs = 3e4 } = {}) {
-      p2.check(Number.isSafeInteger(limit) && limit > 0 && limit <= p2.LIMITS.archive, "SIZE");
-      const original = p2.httpsUrl(input);
-      p2.check(Array.isArray(allowedPrefixes) && allowedPrefixes.some((prefix) => original.href.startsWith(p2.httpsUrl(prefix).href) && original.origin === p2.httpsUrl(prefix).origin), "SOURCE_NOT_TRUSTED");
-      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs);
-      let url = original;
-      try {
-        for (let redirects = 0; redirects <= 4; redirects++) {
-          const response = await fetchImpl(url.href, { redirect: "manual", signal: controller.signal, headers: { Accept: "application/octet-stream", "Cache-Control": "no-cache" } });
-          if ([301, 302, 303, 307, 308].includes(response.status)) {
-            const location = response.headers.get("location");
-            await response.body?.cancel();
-            p2.check(location, "REDIRECT");
-            const next = p2.httpsUrl(new URL(location, url).href);
-            const githubAsset = original.hostname === "github.com" && ["release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(next.hostname);
-            p2.check(next.origin === original.origin && allowedPrefixes.some((prefix) => next.href.startsWith(prefix)) || githubAsset, "REDIRECT_NOT_TRUSTED");
-            url = next;
-            continue;
-          }
-          if (!response.ok) {
-            await response.body?.cancel();
-            p2.fail(response.status === 404 ? "SOURCE_NOT_FOUND" : "NETWORK_STATUS");
-          }
-          const size = Number(response.headers.get("content-length"));
-          p2.check(!size || Number.isSafeInteger(size) && size >= 0 && size <= limit, "NETWORK_SIZE");
-          let total = 0;
-          const chunks = [];
-          p2.check(response.body, "NETWORK_BODY");
-          for await (const chunk of response.body) {
-            total += chunk.length;
-            if (total > limit) {
-              controller.abort();
-              p2.fail("NETWORK_SIZE");
-            }
-            chunks.push(Buffer.from(chunk));
-          }
-          return Buffer.concat(chunks);
-        }
-        p2.fail("TOO_MANY_REDIRECTS");
-      } catch (e) {
-        if (e.name === "TemplateProtocolError") throw e;
-        p2.fail(controller.signal.aborted ? "NETWORK_TIMEOUT" : "NETWORK_UNAVAILABLE");
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-    module2.exports = { fetchBytes };
-  }
-});
-
 // scripts/lib/historical-package.cjs
 var require_historical_package = __commonJS({
   "scripts/lib/historical-package.cjs"(exports2, module2) {
@@ -8313,387 +8383,271 @@ var require_validate2 = __commonJS({
       console.error(e.code ?? "VALIDATION_FAILED");
       process.exitCode = 1;
     });
-    module2.exports = { ROOT, schemas, loadSources, validateProposal, main };
+    module2.exports = { checkPrivacy, ROOT, schemas, loadSources, validateProposal, main };
   }
 });
 
-// scripts/lib/publication-validation.cjs
-var require_publication_validation = __commonJS({
-  "scripts/lib/publication-validation.cjs"(exports2, module2) {
+// scripts/lib/simple-publisher.cjs
+var require_simple_publisher = __commonJS({
+  "scripts/lib/simple-publisher.cjs"(exports2, module2) {
     "use strict";
     var fs = require("node:fs/promises");
     var path = require("node:path");
+    var os = require("node:os");
     var p2 = require_template_protocol();
-    var r = require_publication_request();
-    var { schemas, loadSources, validateProposal } = require_validate2();
-    var { applyPublishedSources, publicManifest } = require_current_sources();
-    async function validateContent(request, { trust, roots = [], appVersion = "0.4.86" } = {}) {
-      r.validateRequest(request);
-      const loaded = await loadSources();
-      let sources = loaded.sources;
-      if (request.expectedCatalog.sequence > 0) {
-        const root = trust ?? p2.parse(await fs.readFile(path.join(require_validate2().ROOT, "trust/root.json")));
-        p2.validateRoot(root);
-        if (!roots.length && !trust) roots = await require_root_chain().readRootHistory(root, path.join(require_validate2().ROOT, "trust"));
-        const raw = await publicManifest(request.channel);
-        sources = (await applyPublishedSources(raw, root, request.channel, sources, loaded.baseline, appVersion, roots)).sources;
-        r.bindCatalog(request, raw);
-      }
-      const ajv = await schemas();
-      for (const proposal of request.proposals) await validateProposal(p2.bytes(proposal), sources, loaded.baseline, ajv);
-      return { hash: p2.sha256(p2.bytes(request)), count: request.proposals.length };
-    }
-    module2.exports = { validateContent };
-  }
-});
-
-// scripts/lib/github-publisher.cjs
-var require_github_publisher = __commonJS({
-  "scripts/lib/github-publisher.cjs"(exports2, module2) {
-    "use strict";
-    var { spawnSync } = require("node:child_process");
-    var p2 = require_template_protocol();
-    var r = require_publication_request();
-    var { validateContent } = require_publication_validation();
+    var c = require_simple_catalog();
+    var { createGitHub, verifyLogin } = require_github_direct();
     var { fetchBytes } = require_template_transport();
-    var { readAuthenticatedPackage } = require_historical_package();
-    function createGh({ spawn = spawnSync, env = process.env } = {}) {
-      const safeEnv = { ...env };
-      delete safeEnv.GH_DEBUG;
-      delete safeEnv.DEBUG;
-      function execute(args, input) {
-        const result = spawn("gh", args, { input, env: safeEnv, encoding: "utf8", windowsHide: true, timeout: 6e4, maxBuffer: 8 * 1024 * 1024 });
-        if (result.error || result.status !== 0) {
-          const error = Object.assign(new Error("GITHUB_REQUEST_FAILED"), { code: "GITHUB_REQUEST_FAILED" });
-          const status = /HTTP (\d{3})/.exec(result.stderr ?? "");
-          if (status) {
-            error.httpStatus = Number(status[1]);
-            if (error.httpStatus === 401) error.code = "GITHUB_UNAUTHORIZED";
-            else if (error.httpStatus === 403) error.code = "GITHUB_FORBIDDEN";
-            else if (error.httpStatus === 429) error.code = "GITHUB_RATE_LIMIT";
-            error.message = error.code;
-          }
-          throw error;
-        }
-        if (!result.stdout.trim()) return null;
-        try {
-          return JSON.parse(result.stdout);
-        } catch {
-          p2.fail("GITHUB_RESPONSE_INVALID");
-        }
+    var SimplePublisher2 = class {
+      constructor({ gh = createGitHub(), platform = process.platform, env = process.env, download = fetchBytes, loadSources = () => require_validate2().loadSources(), privacy = (row) => require_validate2().checkPrivacy(row), now = () => Date.now() } = {}) {
+        Object.assign(this, { gh, platform, env, download, loadSources, privacy, now });
       }
-      return {
-        status: () => execute(["auth", "status", "--hostname", "github.com", "--active", "--json", "hosts"]),
-        api: (method, endpoint, body) => {
-          p2.check(["GET", "POST", "DELETE"].includes(method) && /^\/(?:user$|repos\/002-421\/XRS-Templates(?:\/|$))/.test(endpoint) && !endpoint.includes("..") && !endpoint.includes("#"), "GITHUB_ENDPOINT");
-          if (method === "DELETE") p2.check(new RegExp("^/repos/002-421/XRS-Templates/git/refs/heads/xrs-(?:submissions|dispatches)/[a-f0-9-]{36}$").test(endpoint), "GITHUB_ENDPOINT");
-          const args = ["api", "--hostname", "github.com", "--method", method, endpoint];
-          if (body !== void 0) args.push("--input", "-");
-          return execute(args, body === void 0 ? void 0 : JSON.stringify(body));
-        }
-      };
-    }
-    function verifyCredentialStatus(status, { platform = process.platform, env = process.env } = {}) {
-      p2.check(platform === "win32", "WINDOWS_11_REQUIRED");
-      p2.check(!["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"].some((name) => env[name]), "ENVIRONMENT_CREDENTIAL_FORBIDDEN");
-      const rows = status?.hosts?.["github.com"];
-      p2.check(Array.isArray(rows) && rows.filter((row) => row.active).length === 1, "GITHUB_LOGIN_REQUIRED");
-      const active = rows.find((row) => row.active);
-      p2.check(active.state === "success" && active.login === r.OWNER && active.tokenSource === "keyring" && !active.token, "SECURE_OWNER_LOGIN_REQUIRED");
-      return { login: active.login, storage: "windows-credential-manager" };
-    }
-    var GitHubPublisher2 = class {
-      constructor({ gh = createGh(), platform = process.platform, env = process.env, now = () => Date.now(), validate, trust = null, roots = [], download = fetchBytes, appVersion = "0.4.86" } = {}) {
-        this.gh = gh;
-        this.platform = platform;
-        this.env = env;
-        this.now = now;
-        this.trust = trust;
-        this.roots = roots;
-        this.download = download;
-        this.appVersion = appVersion;
-        this.validate = validate ?? ((request) => validateContent(request, { trust: this.trust, roots: this.roots, appVersion: this.appVersion }));
-      }
-      api(method, path, body) {
-        return this.gh.api(method, `/repos/${r.REPOSITORY}${path}`, body);
+      api(method, route, body) {
+        return this.gh.api(method, "/repos/" + c.REPOSITORY + route, body);
       }
       async authorize() {
-        verifyCredentialStatus(await this.gh.status(), { platform: this.platform, env: this.env });
+        verifyLogin(await this.gh.status(), this);
         const user = await this.gh.api("GET", "/user");
-        p2.check(user.id === r.OWNER_ID && user.login === r.OWNER && user.type === "User", "PUBLISHER_IDENTITY");
+        p2.check(user.id === c.OWNER_ID && user.login === "002-421" && user.type === "User", "PUBLISHER_IDENTITY");
         const repo = await this.api("GET", "");
-        p2.check(repo.full_name === r.REPOSITORY && repo.permissions?.push === true, "PUBLISHER_PERMISSION");
+        p2.check(repo.full_name === c.REPOSITORY && repo.permissions?.push === true, "PUBLISHER_PERMISSION");
         return { login: user.login, id: user.id };
       }
-      async capabilities() {
-        const publisher = await this.authorize();
-        let stable = false;
-        try {
-          const variable = await this.api("GET", "/actions/variables/TEMPLATE_PUBLICATION_PROVISIONED");
-          stable = variable.name === "TEMPLATE_PUBLICATION_PROVISIONED" && variable.value === "true";
-        } catch (error) {
-          if (error.httpStatus !== 404) throw error;
-        }
-        return { status: "authorized", publisher, stableEnabled: stable };
-      }
-      async stage(request) {
-        request = p2.parse(p2.bytes(request));
-        await this.authorize();
-        r.validateRequest(request, { now: this.now() });
-        const checked = await this.validate(request);
-        p2.check(checked?.hash === p2.sha256(p2.bytes(request)), "LOCAL_VALIDATION_REQUIRED");
-        const raw = p2.bytes(request), hash = p2.sha256(raw), refName = r.reference(request.requestId);
-        let existing;
-        try {
-          existing = await this.api("GET", `/git/ref/heads/xrs-submissions/${request.requestId}`);
-        } catch (error) {
-          if (error.httpStatus !== 404) throw error;
-        }
-        if (existing) {
-          const commit2 = existing.object?.sha;
-          await r.readRequest(this.api.bind(this), { requestId: request.requestId, commit: commit2, hash, channel: request.channel, now: this.now() });
-          return { requestId: request.requestId, commit: commit2, hash, status: "prepared", reused: true };
-        }
-        const main = await this.api("GET", "/git/ref/heads/main");
-        p2.check(r.COMMIT.test(main.object?.sha), "WORKFLOW_SHA");
-        const blob = await this.api("POST", "/git/blobs", { encoding: "base64", content: raw.toString("base64") });
-        p2.check(r.COMMIT.test(blob.sha), "REQUEST_BLOB");
-        const tree = await this.api("POST", "/git/trees", { tree: [{ path: "request.json", mode: "100644", type: "blob", sha: blob.sha }] });
-        p2.check(r.COMMIT.test(tree.sha), "REQUEST_TREE");
-        const commit = await this.api("POST", "/git/commits", { message: `XRS data request ${request.requestId}`, tree: tree.sha, parents: [main.object.sha] });
-        p2.check(r.COMMIT.test(commit.sha), "REQUEST_COMMIT");
-        await this.api("POST", "/git/refs", { ref: refName, sha: commit.sha });
-        await r.readRequest(this.api.bind(this), { requestId: request.requestId, commit: commit.sha, hash, channel: request.channel, now: this.now() });
-        return { requestId: request.requestId, commit: commit.sha, hash, status: "prepared", reused: false };
-      }
-      async dispatch(staged, { confirmed = false, stableConfirmed = false } = {}) {
-        await this.authorize();
-        const { request } = await r.readRequest(this.api.bind(this), { requestId: staged.requestId, commit: staged.commit, hash: staged.hash, now: this.now() });
-        p2.check(confirmed === true && (request.channel !== "stable" || stableConfirmed === true), "PUBLICATION_CONFIRMATION_REQUIRED");
-        if (request.channel === "stable") p2.check((await this.capabilities()).stableEnabled, "STABLE_PUBLICATION_LOCKED");
-        const main = await this.api("GET", "/git/ref/heads/main");
-        p2.check(r.COMMIT.test(main.object?.sha), "WORKFLOW_SHA");
-        const prior = await this.status(staged);
-        if (prior.status !== "not-started") return prior;
-        let marker;
-        try {
-          marker = await this.api("GET", `/git/ref/heads/xrs-dispatches/${request.requestId}`);
-        } catch (error) {
-          if (error.httpStatus !== 404) throw error;
-        }
-        p2.check(!marker, "DISPATCH_STATUS_UNKNOWN");
-        await this.api("POST", "/git/refs", { ref: `refs/heads/xrs-dispatches/${request.requestId}`, sha: staged.commit });
-        await this.api("POST", "/actions/workflows/publish-catalog.yml/dispatches", { ref: "main", inputs: { request_id: staged.requestId, request_commit: staged.commit, request_sha256: staged.hash, channel: request.channel, approved: true, stable_content_approved: stableConfirmed === true } });
-        return { status: "submitted", workflowSha: main.object.sha, requestId: staged.requestId, hash: staged.hash };
-      }
-      async status(staged) {
-        await this.authorize();
-        const title = r.runTitle(staged.requestId, staged.hash);
-        const rows = await this.api("GET", "/actions/workflows/publish-catalog.yml/runs?event=workflow_dispatch&per_page=100");
-        const runs = (rows.workflow_runs ?? []).filter((run2) => run2.display_title === title);
-        p2.check(runs.length <= 1, "DUPLICATE_PUBLICATION_RUN");
-        if (!runs.length) return { status: "not-started", requestId: staged.requestId };
-        const run = runs[0];
-        p2.check(Number.isSafeInteger(run.id) && run.id > 0 && run.actor?.id === r.OWNER_ID && run.head_branch === "main" && r.COMMIT.test(run.head_sha) && run.path === ".github/workflows/publish-catalog.yml", "WORKFLOW_CONTEXT");
-        return { status: run.status === "completed" ? run.conclusion === "success" ? "workflow-succeeded" : "failed" : "awaiting-workflow", runId: run.id, workflowSha: run.head_sha, requestId: staged.requestId, hash: staged.hash, url: `https://github.com/${r.REPOSITORY}/actions/runs/${run.id}` };
-      }
-      async approve(staged, confirmation) {
-        await this.authorize();
-        const { request } = await r.readRequest(this.api.bind(this), { requestId: staged.requestId, commit: staged.commit, hash: staged.hash, now: this.now() });
-        const current = await this.status(staged);
-        p2.check(confirmation?.confirmed === true && current.status === "awaiting-workflow" && confirmation.runId === current.runId && confirmation.workflowSha === current.workflowSha && confirmation.hash === staged.hash && confirmation.channel === request.channel && confirmation.catalogVersion === r.nextCatalogVersion(request), "ENVIRONMENT_CONFIRMATION_REQUIRED");
-        const jobs = await this.api("GET", `/actions/runs/${current.runId}/jobs?per_page=100`);
-        p2.check(jobs.total_count <= 100 && jobs.jobs?.some((job) => job.name === "validate" && job.conclusion === "success"), "VALIDATION_REQUIRED");
-        const pending = await this.api("GET", `/actions/runs/${current.runId}/pending_deployments`);
-        const target = pending.find((row) => row.environment?.name === `catalog-${request.channel}`);
-        p2.check(target?.current_user_can_approve === true && Number.isSafeInteger(target.environment.id), "ENVIRONMENT_REVIEW_UNAVAILABLE");
-        await this.api("POST", `/actions/runs/${current.runId}/pending_deployments`, { environment_ids: [target.environment.id], state: "approved", comment: `XRS request ${request.requestId}, sha256 ${staged.hash}` });
-        return { status: "approved-awaiting-publication", runId: current.runId, requestId: request.requestId };
-      }
-      async inspect(channel) {
-        await this.authorize();
-        p2.check(["test", "stable"].includes(channel), "CHANNEL");
-        p2.check(this.trust, "TRUST_NOT_CONFIGURED");
-        p2.validateRoot(this.trust, this.now());
-        const releases = [];
+      async current() {
+        let latest = null;
         for (let page = 1; page <= 20; page++) {
-          const rows2 = await this.api("GET", `/releases?per_page=100&page=${page}`);
-          p2.check(Array.isArray(rows2), "GITHUB_RESPONSE_INVALID");
-          releases.push(...rows2);
-          if (rows2.length < 100) break;
+          const rows = await this.api("GET", `/releases?per_page=100&page=${page}`);
+          p2.check(Array.isArray(rows), "GITHUB_RESPONSE_INVALID");
+          for (const r of rows) if (!r.draft && !r.prerelease && /^xrs-templates-v\d+\.\d+\.\d+$/.test(r.tag_name) && (!latest || p2.compare(r.tag_name.slice(15), latest.tag_name.slice(15)) > 0)) latest = r;
+          if (rows.length < 100) break;
           p2.check(page < 20, "RELEASE_SEARCH_LIMIT");
         }
-        const prefix = channel === "test" ? "test-catalog-v" : "catalog-v";
-        const rows = releases.filter((row) => !row.draft && new RegExp("^" + prefix + "\\d+\\.\\d+\\.\\d+$").test(row.tag_name));
-        rows.sort((a, b) => p2.compare(b.tag_name.slice(prefix.length), a.tag_name.slice(prefix.length)));
-        if (!rows.length) return { status: "inspected", channel, version: "0.0.0", sequence: 0, manifestSha256: null, count: 0, revisions: [], publishedAt: null };
-        const url = `https://github.com/${r.REPOSITORY}/releases/download/${rows[0].tag_name}/manifest.json`;
-        const raw = await this.download(url, p2.LIMITS.json, { allowedPrefixes: [`https://github.com/${r.REPOSITORY}/releases/download/`] });
-        const manifest = p2.verify(p2.parse(raw), this.trust, channel);
-        p2.validateManifest(manifest, { channel, appVersion: this.appVersion, now: this.now() });
-        return { status: "inspected", channel, version: manifest.catalogVersion, sequence: manifest.sequence, manifestSha256: p2.sha256(raw), count: manifest.packages.length, publishedAt: manifest.publishedAt, revisions: manifest.revisions ?? manifest.packages.map((x) => ({ ...x, status: x.action === "remove" ? "Revoked" : "Active" })), publication: manifest.publication ?? null };
-      }
-      async templateSource(channel, id, version) {
-        p2.string(id, 120);
-        p2.check(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/.test(id), "ID");
-        if (version) p2.version(version);
-        const catalog = await this.inspect(channel), { sources, baseline } = await require_validate2().loadSources();
-        const entry = catalog.revisions.find((row) => row.templateId === id && (version ? row.templateVersion === version : row.status === "Active"));
-        if (!entry) {
-          const builtin = sources.get(id);
-          p2.check(builtin && (!version || version === builtin.templateVersion), "REVISION_NOT_FOUND");
-          return { status: "inspected", template: builtin, catalog };
+        if (!latest) return null;
+        const raw = await this.download(c.PREFIX + latest.tag_name + "/catalog-manifest.json", p2.LIMITS.json, { allowedPrefixes: [c.PREFIX] });
+        const manifest = c.manifest(raw, { now: this.now() });
+        p2.check(c.tag(manifest.catalogVersion) === latest.tag_name, "CATALOG_BINDING");
+        const archive = await this.download(manifest.archive.url, manifest.archive.size, { allowedPrefixes: [c.PREFIX] });
+        p2.check(archive.length === manifest.archive.size && p2.sha256(archive) === manifest.archive.sha256, "PACKAGE_HASH");
+        const data = p2.parse(p2.unzip(archive, { catalog: true })["catalog.json"], p2.LIMITS.archive);
+        const { baseline } = await this.loadSources();
+        c.validateTemplates(data.templates, { allowedImages: baseline.allowedImages });
+        p2.check(data.catalogVersion === manifest.catalogVersion && c.contentHash(data.templates) === manifest.contentSha256 && data.templates.length === manifest.packages.length, "CATALOG_BINDING");
+        for (const row of data.templates) {
+          const entry = manifest.packages.find((x) => x.templateId === row.id);
+          p2.check(entry && entry.templateVersion === row.templateVersion && entry.templateSha256 === p2.sha256(p2.bytes(row)), "CATALOG_BINDING");
         }
-        p2.check(entry.status !== "Revoked", "REVISION_REVOKED");
-        const bytes = await this.download(entry.url, entry.size, { allowedPrefixes: [`https://github.com/${r.REPOSITORY}/releases/download/`] });
-        return { status: "inspected", template: readAuthenticatedPackage(bytes, entry, this.trust, this.roots, { channel, appVersion: this.appVersion, allowedImages: baseline.allowedImages }), catalog };
+        return { manifest, raw, templates: data.templates };
       }
-      async verifyPublication(staged) {
+      async inspect() {
         await this.authorize();
-        p2.check(this.trust, "TRUST_NOT_CONFIGURED");
-        p2.validateRoot(this.trust, this.now());
-        let request;
-        try {
-          ({ request } = await r.readRequest(this.api.bind(this), { requestId: staged.requestId, commit: staged.commit, hash: staged.hash, now: this.now(), allowExpired: true }));
-        } catch (error) {
-          if (error.httpStatus !== 404 || !staged.request) throw error;
-          request = r.validateRequest(staged.request, { now: this.now(), expiry: false });
-          p2.check(request.requestId === staged.requestId && p2.sha256(p2.bytes(request)) === staged.hash, "REQUEST_BINDING");
-        }
-        const version = r.nextCatalogVersion(request), tag = `${request.channel === "test" ? "test-" : ""}catalog-v${version}`;
-        const prefix = `https://github.com/${r.REPOSITORY}/releases/download/`;
-        const raw = await this.download(prefix + tag + "/manifest.json", p2.LIMITS.json, { allowedPrefixes: [prefix] });
-        const manifest = p2.verify(p2.parse(raw), this.trust, request.channel);
-        p2.validateManifest(manifest, { channel: request.channel, appVersion: this.appVersion, now: this.now() });
-        p2.check(manifest.catalogVersion === version && manifest.sequence === request.expectedCatalog.sequence + 1 && manifest.publication?.id === request.requestId && manifest.publication.requestSha256 === staged.hash && manifest.publication.previousVersion === request.expectedCatalog.version && manifest.publication.previousManifestSha256 === request.expectedCatalog.manifestSha256, "PUBLICATION_BINDING");
-        const { baseline } = await require_validate2().loadSources();
-        for (const proposal of request.proposals) {
-          const entry = manifest.packages.find((row) => row.templateId === proposal.template.id);
-          p2.check(entry && entry.templateVersion === proposal.template.templateVersion, "PUBLICATION_BINDING");
-          const bytes = await this.download(entry.url, entry.size, { allowedPrefixes: [prefix] });
-          const template = readAuthenticatedPackage(bytes, entry, this.trust, this.roots, { channel: request.channel, appVersion: this.appVersion, allowedImages: baseline.allowedImages });
-          p2.check(p2.canonical(template) === p2.canonical(proposal.template), "PUBLICATION_BINDING");
-        }
-        return { status: "published", requestId: request.requestId, channel: request.channel, catalogVersion: version, manifestSha256: p2.sha256(raw), publishedAt: manifest.publishedAt, changed: request.proposals.length, url: `https://github.com/${r.REPOSITORY}/releases/tag/${tag}` };
+        const current = await this.current();
+        return { status: "inspected", version: current?.manifest.catalogVersion ?? "0.0.0", count: current?.templates.length ?? 113, manifestSha256: current ? p2.sha256(current.raw) : null, revisions: current?.manifest.revisions ?? [] };
       }
-      async cleanup(staged) {
-        const verified = await this.verifyPublication(staged);
-        for (const kind of ["submissions", "dispatches"]) {
-          let ref;
-          try {
-            ref = await this.api("GET", `/git/ref/heads/xrs-${kind}/${staged.requestId}`);
-          } catch (error) {
-            if (error.httpStatus === 404) continue;
-            throw error;
-          }
-          p2.check(ref.object?.sha === staged.commit, "REQUEST_REF_CHANGED");
-          await this.api("DELETE", `/git/refs/heads/xrs-${kind}/${staged.requestId}`);
+      async source(id, version) {
+        await this.authorize();
+        const current = await this.current(), { sources, baseline } = await this.loadSources();
+        let template = current?.templates.find((t) => t.id === id) ?? sources.get(id);
+        if (version && template?.templateVersion !== version) {
+          const entry = current?.manifest.revisions.find((r) => r.templateId === id && r.templateVersion === version);
+          p2.check(entry && entry.status !== "Revoked", "REVISION_NOT_FOUND");
+          const raw = await this.download(entry.url, entry.size, { allowedPrefixes: [c.PREFIX] });
+          template = c.packageReader({ allowedImages: baseline.allowedImages })(raw, entry);
         }
-        return { ...verified, status: "cleaned" };
+        p2.check(template, "REVISION_NOT_FOUND");
+        return { template, catalog: { version: current?.manifest.catalogVersion ?? "0.0.0", revisions: current?.manifest.revisions ?? [] } };
+      }
+      async prepare(id, approved) {
+        await this.authorize();
+        p2.check(c.UUID.test(id) && Array.isArray(approved) && approved.length <= 500, "PUBLICATION_REQUEST");
+        const current = await this.current(), { sources, baseline } = await this.loadSources(), before = new Map((current?.templates ?? [...sources.values()]).map((t) => [t.id, t])), next = new Map(before), summaries = /* @__PURE__ */ new Map();
+        p2.check(new Set(approved.map((a) => a.template?.id)).size === approved.length, "DUPLICATE_ID");
+        p2.check(approved.filter((a) => a.template?.retired).length <= 1, "MASS_REMOVAL_BLOCKED");
+        for (const row of approved) {
+          p2.check(row.medicalApproval?.approved === true && typeof row.medicalApproval.reference === "string" && row.medicalApproval.reference.trim(), "MEDICAL_APPROVAL_REQUIRED");
+          this.privacy(row);
+          const t = row.template, old = before.get(t.id);
+          p2.check(old, "UNKNOWN_TEMPLATE");
+          p2.validateTemplate(t, { allowedImages: baseline.allowedImages });
+          if (p2.canonical(t) === p2.canonical(old)) continue;
+          p2.check(row.baseVersion === old.templateVersion && row.baseSha256 === p2.sha256(p2.bytes(old)), "BASE_CONFLICT");
+          p2.continuity(old, t);
+          p2.check(p2.compare(t.templateVersion, old.templateVersion) > 0, "VERSION_NOT_INCREASED");
+          p2.check(p2.canonical({ ...t, templateVersion: old.templateVersion }) !== p2.canonical(old), "NO_CONTENT_CHANGE");
+          next.set(t.id, t);
+          summaries.set(t.id, row.summary);
+        }
+        const templates = [...next.values()].sort((a, b) => a.id.localeCompare(b.id, "en")), contentSha256 = c.contentHash(templates);
+        if (current?.manifest.contentSha256 === contentSha256) return { status: "up-to-date", catalogVersion: current.manifest.catalogVersion, manifestSha256: p2.sha256(current.raw) };
+        const version = current ? current.manifest.catalogVersion.split(".").map(Number) : [1, 0, 0];
+        if (current) version[2]++;
+        return { status: "prepared", request: { schemaVersion: 1, type: "xrs-https-publication-request", id, createdAt: new Date(this.now()).toISOString(), catalogVersion: version.join("."), sequence: (current?.manifest.sequence ?? 0) + 1, previousVersion: current?.manifest.catalogVersion ?? "0.0.0", previousManifestSha256: current ? p2.sha256(current.raw) : null, contentSha256, templates, summaries: Object.fromEntries(summaries) } };
+      }
+      async publish(request) {
+        await this.authorize();
+        p2.keys(request, ["schemaVersion", "type", "id", "createdAt", "catalogVersion", "sequence", "previousVersion", "previousManifestSha256", "contentSha256", "templates", "summaries"]);
+        p2.check(request.schemaVersion === 1 && request.type === "xrs-https-publication-request" && c.UUID.test(request.id), "PUBLICATION_REQUEST");
+        p2.version(request.catalogVersion);
+        p2.check(Number.isFinite(Date.parse(request.createdAt)) && Date.parse(request.createdAt) <= this.now() + 3e5, "DATE");
+        this.privacy(request.summaries);
+        const { baseline } = await this.loadSources();
+        c.validateTemplates(request.templates, { allowedImages: baseline.allowedImages });
+        for (const t of request.templates) this.privacy(t);
+        p2.check(c.contentHash(request.templates) === request.contentSha256, "REQUEST_HASH");
+        const tag = c.tag(request.catalogVersion), requestHash = p2.sha256(p2.bytes(request));
+        let release;
+        try {
+          release = await this.api("GET", "/releases/tags/" + tag);
+        } catch (e) {
+          if (e.httpStatus !== 404) throw e;
+        }
+        if (release && !release.draft) return this.verify(request);
+        const current = await this.current();
+        p2.check((current?.manifest.catalogVersion ?? "0.0.0") === request.previousVersion && (current ? p2.sha256(current.raw) : null) === request.previousManifestSha256, "CATALOG_BASE_CONFLICT");
+        const expected = request.previousVersion === "0.0.0" ? "1.0.0" : request.previousVersion.replace(/\d+$/, (n) => String(Number(n) + 1));
+        p2.check(expected === request.catalogVersion && request.sequence === (current?.manifest.sequence ?? 0) + 1, "VERSION_CONFLICT");
+        const base = new Map((current?.templates ?? [...(await this.loadSources()).sources.values()]).map((t) => [t.id, t]));
+        p2.check(base.size === request.templates.length, "MISSING_CATALOG_ENTRY");
+        for (const t of request.templates) {
+          const old = base.get(t.id);
+          p2.check(old, "UNKNOWN_TEMPLATE");
+          p2.continuity(old, t);
+          if (p2.canonical(old) !== p2.canonical(t)) p2.check(p2.compare(t.templateVersion, old.templateVersion) > 0, "VERSION_NOT_INCREASED");
+        }
+        const archive = c.makeArchive(request.templates, request.catalogVersion, { allowedImages: baseline.allowedImages }), archiveMeta = { url: c.archiveUrl(request.catalogVersion), size: archive.length, sha256: p2.sha256(archive) }, packages = [], revisions = new Map((current?.manifest.revisions ?? []).map((r) => [r.templateId + "@" + r.templateVersion, r]));
+        for (const t of request.templates) {
+          const old = current?.manifest.packages.find((r) => r.templateId === t.id);
+          let entry = old;
+          if (!old || old.templateSha256 !== p2.sha256(p2.bytes(t))) {
+            for (const [key, row] of revisions) if (row.templateId === t.id && row.status === "Active") revisions.set(key, { ...row, status: "Archived" });
+            entry = { templateId: t.id, templateVersion: t.templateVersion, action: t.retired ? "remove" : "update", ...archiveMeta, templateSha256: p2.sha256(p2.bytes(t)), archiveVersion: request.catalogVersion, summary: request.summaries[t.id] ?? "\u041F\u0435\u0440\u0432\u043E\u043D\u0430\u0447\u0430\u043B\u044C\u043D\u044B\u0439 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043D\u043D\u044B\u0439 \u043A\u0430\u0442\u0430\u043B\u043E\u0433" };
+            revisions.set(t.id + "@" + t.templateVersion, { ...entry, status: t.retired ? "Revoked" : "Active", publishedAt: request.createdAt, approvedBy: "github:002-421" });
+          }
+          packages.push(entry);
+        }
+        const manifest = { schemaVersion: 3, type: "xrs-https-template-catalog", catalogId: "xrs-medical-templates", catalogVersion: request.catalogVersion, sequence: request.sequence, channel: "stable", minimumXrsVersion: request.templates.reduce((v, t) => p2.compare(v, t.minimumXrsVersion) >= 0 ? v : t.minimumXrsVersion, "0.4.86"), publishedAt: request.createdAt, publisher: { login: "002-421", id: c.OWNER_ID, repository: c.REPOSITORY }, publicationId: request.id, previousVersion: request.previousVersion, previousManifestSha256: request.previousManifestSha256, contentSha256: request.contentSha256, archive: archiveMeta, packages, revisions: [...revisions.values()] };
+        const raw = p2.bytes(manifest);
+        c.manifest(raw, { now: this.now() });
+        const metadata = p2.canonical({ type: "xrs-catalog-reservation", publicationId: request.id, requestSha256: requestHash });
+        let reservation;
+        try {
+          reservation = await this.api("GET", "/git/ref/tags/" + tag);
+        } catch (e) {
+          if (e.httpStatus !== 404) throw e;
+        }
+        if (!reservation) {
+          const main = await this.api("GET", "/git/ref/heads/main"), object = await this.api("POST", "/git/tags", { tag, message: metadata, object: main.object.sha, type: "commit" });
+          try {
+            reservation = await this.api("POST", "/git/refs", { ref: "refs/tags/" + tag, sha: object.sha });
+          } catch (e) {
+            if (e.httpStatus !== 422) throw e;
+            reservation = await this.api("GET", "/git/ref/tags/" + tag);
+          }
+        }
+        p2.check(reservation.object?.type === "tag", "VERSION_CONFLICT");
+        const reserved = await this.api("GET", "/git/tags/" + reservation.object.sha);
+        p2.check(reserved.message === metadata, "VERSION_CONFLICT");
+        if (!release) release = await this.api("POST", "/releases", { tag_name: tag, name: "XRS templates " + request.catalogVersion, body: `Approved XRS template data. Publication ${request.id}.`, draft: true, prerelease: false, make_latest: "false" });
+        p2.check(release.draft && Number.isSafeInteger(release.id), "RELEASE_STATE");
+        const files = /* @__PURE__ */ new Map([["catalog.xrszip", archive], ["catalog-manifest.json", raw]]), temp = await fs.mkdtemp(path.join(os.tmpdir(), "xrs-catalog-upload-"));
+        try {
+          for (const [name, bytes] of files) {
+            const asset = release.assets?.find((a) => a.name === name);
+            if (asset) {
+              p2.check(asset.digest === "sha256:" + p2.sha256(bytes) && asset.size === bytes.length, "ASSET_CONFLICT");
+              continue;
+            }
+            const file = path.join(temp, name);
+            await fs.writeFile(file, bytes, { mode: 384 });
+            await this.gh.upload(tag, file);
+          }
+          release = await this.api("GET", "/releases/tags/" + tag);
+          p2.check(release.draft && release.assets.length === 2, "RELEASE_ASSETS");
+          for (const [name, bytes] of files) {
+            const asset = release.assets.find((a) => a.name === name);
+            p2.check(asset?.digest === "sha256:" + p2.sha256(bytes) && asset.size === bytes.length, "ASSET_CONFLICT");
+          }
+          await this.api("PATCH", "/releases/" + release.id, { draft: false, make_latest: "true" });
+        } finally {
+          await fs.rm(temp, { recursive: true, force: true });
+        }
+        return this.verify(request);
+      }
+      async verify(request) {
+        await this.authorize();
+        const tag = c.tag(request.catalogVersion), release = await this.api("GET", "/releases/tags/" + tag);
+        p2.check(!release.draft && !release.prerelease, "PUBLICATION_NOT_VISIBLE");
+        const raw = await this.download(c.PREFIX + tag + "/catalog-manifest.json", p2.LIMITS.json, { allowedPrefixes: [c.PREFIX] }), m = c.manifest(raw, { now: this.now() });
+        p2.check(m.publicationId === request.id && m.contentSha256 === request.contentSha256 && m.catalogVersion === request.catalogVersion && m.previousManifestSha256 === request.previousManifestSha256, "PUBLICATION_BINDING");
+        const archive = await this.download(m.archive.url, m.archive.size, { allowedPrefixes: [c.PREFIX] });
+        p2.check(archive.length === m.archive.size && p2.sha256(archive) === m.archive.sha256, "PACKAGE_HASH");
+        const data = p2.parse(p2.unzip(archive, { catalog: true })["catalog.json"], p2.LIMITS.archive);
+        p2.check(c.contentHash(data.templates) === request.contentSha256, "PUBLICATION_BINDING");
+        return { status: "published", catalogVersion: m.catalogVersion, publicationId: request.id, publishedAt: m.publishedAt, manifestSha256: p2.sha256(raw), sha256: m.archive.sha256, changed: m.packages.filter((e) => e.archiveVersion === m.catalogVersion).length, url: `https://github.com/${c.REPOSITORY}/releases/tag/${tag}` };
       }
     };
-    module2.exports = { createGh, verifyCredentialStatus, GitHubPublisher: GitHubPublisher2 };
+    module2.exports = { SimplePublisher: SimplePublisher2 };
   }
 });
 
-// scripts/lib/publisher-contract.cjs
-var require_publisher_contract = __commonJS({
-  "scripts/lib/publisher-contract.cjs"(exports2, module2) {
-    "use strict";
-    var p2 = require_template_protocol();
-    var VERSION = 1;
-    var operations = /* @__PURE__ */ new Set(["authorize", "capabilities", "inspect", "source", "stage", "dispatch", "status", "approve", "verify", "cleanup"]);
-    function command(envelope) {
-      p2.keys(envelope, ["protocolVersion", "operationId", "command", "context"]);
-      p2.check(envelope.protocolVersion === VERSION, "PUBLISHER_PROTOCOL_VERSION");
-      p2.check(typeof envelope.operationId === "string" && /^[a-f0-9-]{36}$/.test(envelope.operationId), "OPERATION_ID");
-      p2.check(envelope.command && operations.has(envelope.command.operation), "ADMIN_COMMAND");
-      p2.keys(envelope.context, ["trust", "appVersion", "roots"], ["trust", "appVersion"]);
-      p2.version(envelope.context.appVersion);
-      if (envelope.context.roots) p2.check(Array.isArray(envelope.context.roots) && envelope.context.roots.length <= 65, "ROOT_CHAIN_LIMIT");
-      if (envelope.context.trust) p2.validateRoot(envelope.context.trust, Date.now(), false);
-      return envelope.command;
-    }
-    function response(envelope, result, error) {
-      const names = { prepared: "PREPARED", submitted: "SUBMITTED", "not-started": "PREPARED", "awaiting-workflow": "RUNNING", "approved-awaiting-publication": "RUNNING", "workflow-succeeded": "RUNNING", published: "PUBLISHED", failed: "FAILED", authorized: "VALIDATED", inspected: "VALIDATED", cleaned: "PUBLISHED" };
-      const code = error ? typeof error.code === "string" && /^[A-Z0-9_]{1,100}$/.test(error.code) ? error.code : "ADMIN_PUBLICATION_FAILED" : null;
-      return { protocolVersion: VERSION, operationId: envelope.operationId, status: code ? code === "DISPATCH_STATUS_UNKNOWN" ? "UNKNOWN_REQUIRES_RECONCILIATION" : "FAILED" : names[result?.status] ?? "RUNNING", error: code, result: code ? null : result };
-    }
-    module2.exports = { VERSION, command, response };
-  }
-});
-
-// scripts/publisher-admin.cjs
+// scripts/simple-publisher-admin.cjs
 var p = require_template_protocol();
-var { GitHubPublisher } = require_github_publisher();
-var contract = require_publisher_contract();
-async function handleCommand(command, publisher = new GitHubPublisher()) {
-  p.check(command && typeof command.operation === "string", "ADMIN_COMMAND");
-  switch (command.operation) {
-    case "authorize":
-      p.keys(command, ["operation"]);
-      return { status: "authorized", publisher: await publisher.authorize() };
-    case "capabilities":
-      p.keys(command, ["operation"]);
-      return publisher.capabilities();
-    case "inspect":
-      p.keys(command, ["operation", "channel"]);
-      return publisher.inspect(command.channel);
-    case "source":
-      p.keys(command, ["operation", "channel", "id", "version"], ["operation", "channel", "id"]);
-      return publisher.templateSource(command.channel, command.id, command.version);
-    case "verify":
-      p.keys(command, ["operation", "staged"]);
-      return publisher.verifyPublication(command.staged);
-    case "cleanup":
-      p.keys(command, ["operation", "staged"]);
-      return publisher.cleanup(command.staged);
-    case "stage":
-      p.keys(command, ["operation", "request", "publicUploadConfirmed"]);
-      p.check(command.publicUploadConfirmed === true, "PUBLIC_DATA_CONFIRMATION_REQUIRED");
-      return publisher.stage(command.request);
-    case "dispatch":
-      p.keys(command, ["operation", "staged", "confirmation"]);
-      return publisher.dispatch(command.staged, command.confirmation);
-    case "status":
-      p.keys(command, ["operation", "staged"]);
-      return publisher.status(command.staged);
-    case "approve":
-      p.keys(command, ["operation", "staged", "confirmation"]);
-      return publisher.approve(command.staged, command.confirmation);
-    default:
-      p.fail("ADMIN_COMMAND");
-  }
-}
-async function handleEnvelope(envelope, publisher) {
-  let result;
+var { SimplePublisher } = require_simple_publisher();
+async function handleEnvelope(envelope, publisher = new SimplePublisher()) {
   try {
-    const command = contract.command(envelope);
-    result = await handleCommand(command, publisher ?? new GitHubPublisher({ trust: envelope.context.trust, roots: envelope.context.roots ?? [], appVersion: envelope.context.appVersion }));
-    return contract.response(envelope, result);
+    p.keys(envelope, ["protocolVersion", "operationId", "command", "context"]);
+    p.check(envelope.protocolVersion === 2, "PUBLISHER_PROTOCOL_VERSION");
+    p.check(require_simple_catalog().UUID.test(envelope.operationId), "OPERATION_ID");
+    p.keys(envelope.context, ["appVersion"]);
+    p.version(envelope.context.appVersion);
+    const cmd = envelope.command;
+    let result;
+    switch (cmd.operation) {
+      case "capabilities":
+      case "authorize":
+        p.keys(cmd, ["operation"]);
+        result = { status: "authorized", publisher: await publisher.authorize() };
+        break;
+      case "inspect":
+        p.keys(cmd, ["operation"]);
+        result = await publisher.inspect();
+        break;
+      case "source":
+        p.keys(cmd, ["operation", "id", "version"], ["operation", "id"]);
+        result = await publisher.source(cmd.id, cmd.version);
+        break;
+      case "prepare":
+        p.keys(cmd, ["operation", "id", "approved"]);
+        result = await publisher.prepare(cmd.id, cmd.approved);
+        break;
+      case "publish":
+        p.keys(cmd, ["operation", "request"]);
+        result = await publisher.publish(cmd.request);
+        break;
+      default:
+        p.fail("ADMIN_COMMAND");
+    }
+    return { protocolVersion: 2, operationId: envelope.operationId, status: result.status === "published" ? "PUBLISHED" : result.status === "up-to-date" ? "UP_TO_DATE" : result.status === "prepared" ? "PREPARED" : "VALIDATED", error: null, result };
   } catch (error) {
-    return contract.response({ operationId: typeof envelope?.operationId === "string" ? envelope.operationId : null }, null, error);
+    return { protocolVersion: 2, operationId: envelope?.operationId ?? null, status: "FAILED", error: /^[A-Z0-9_]{1,100}$/.test(error.code ?? "") ? error.code : "PUBLICATION_FAILED", result: null };
   }
 }
 if (require.main === module) (async () => {
   const chunks = [];
-  let length = 0;
+  let size = 0;
   for await (const chunk of process.stdin) {
-    length += chunk.length;
-    p.check(length <= p.LIMITS.json + 64e3, "SIZE");
+    size += chunk.length;
+    p.check(size <= p.LIMITS.archive + 64e3, "SIZE");
     chunks.push(chunk);
   }
-  let command;
+  let input;
   try {
-    command = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
     p.fail("JSON");
   }
-  const result = await handleEnvelope(command);
-  process.stdout.write(JSON.stringify(result) + "\n");
+  process.stdout.write(JSON.stringify(await handleEnvelope(input)) + "\n");
 })().catch((error) => {
-  const code = typeof error.code === "string" && /^[A-Z0-9_]{1,100}$/.test(error.code) ? error.code : "ADMIN_PUBLICATION_FAILED";
-  process.stdout.write(JSON.stringify({ status: "blocked", error: code }) + "\n");
+  process.stdout.write(JSON.stringify({ protocolVersion: 2, operationId: null, status: "FAILED", error: error.code ?? "PUBLICATION_FAILED", result: null }) + "\n");
   process.exitCode = 1;
 });
-module.exports = { handleCommand, handleEnvelope, GitHubPublisher };
+module.exports = { handleEnvelope, SimplePublisher };

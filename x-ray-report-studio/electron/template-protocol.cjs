@@ -76,20 +76,22 @@ function validateManifest(manifest,{channel,appVersion,now=Date.now(),expiry=tru
 // descriptors, comments, symlinks, duplicate entries, unsafe paths and hidden trailing data.
 const crcTable=Array.from({length:256},(_,n)=>{for(let i=0;i<8;i++)n=(n&1)?0xedb88320^(n>>>1):n>>>1;return n>>>0;});
 function crc32(data){let c=0xffffffff;for(const b of data)c=crcTable[(c^b)&255]^(c>>>8);return (c^0xffffffff)>>>0;}
-function filename(name){check(typeof name==='string'&&/^(?:package\.json|template\.json)$/.test(name),'ZIP_PATH');}
-function zip(files){
+function filename(name,options){check(typeof name==='string'&&(options?.catalog===true?name==='catalog.json':/^(?:package\.json|template\.json)$/.test(name)),'ZIP_PATH');}
+function zip(files,options){
+ const fileLimit=options?.catalog===true?LIMITS.archive-1024:LIMITS.json;
  const locals=[],central=[];let offset=0;const names=Object.keys(files).sort();check(names.length>0&&names.length<=LIMITS.entries,'COUNT');
- for(const name of names){filename(name);const data=Buffer.from(files[name]);check(data.length<=LIMITS.json,'SIZE');const n=Buffer.from(name),local=Buffer.alloc(30);local.writeUInt32LE(0x04034b50);local.writeUInt16LE(20,4);local.writeUInt16LE(0x800,6);local.writeUInt16LE(33,12);local.writeUInt32LE(crc32(data),14);local.writeUInt32LE(data.length,18);local.writeUInt32LE(data.length,22);local.writeUInt16LE(n.length,26);
+ for(const name of names){filename(name,options);const data=Buffer.from(files[name]);check(data.length<=fileLimit,'SIZE');const n=Buffer.from(name),local=Buffer.alloc(30);local.writeUInt32LE(0x04034b50);local.writeUInt16LE(20,4);local.writeUInt16LE(0x800,6);local.writeUInt16LE(33,12);local.writeUInt32LE(crc32(data),14);local.writeUInt32LE(data.length,18);local.writeUInt32LE(data.length,22);local.writeUInt16LE(n.length,26);
  const head=Buffer.alloc(46);head.writeUInt32LE(0x02014b50);head.writeUInt16LE(20,4);local.copy(head,6,4,28);head.writeUInt32LE(offset,42);central.push(head,n);locals.push(local,n,data);offset+=local.length+n.length+data.length;}
  const directory=Buffer.concat(central),end=Buffer.alloc(22);end.writeUInt32LE(0x06054b50);end.writeUInt16LE(names.length,8);end.writeUInt16LE(names.length,10);end.writeUInt32LE(directory.length,12);end.writeUInt32LE(offset,16);const result=Buffer.concat([...locals,directory,end]);check(result.length<=LIMITS.archive,'SIZE');return result;
 }
-function unzip(raw){
+function unzip(raw,options){
+ const fileLimit=options?.catalog===true?LIMITS.archive-1024:LIMITS.json;
  const b=Buffer.from(raw);check(b.length>=22&&b.length<=LIMITS.archive,'ZIP_SIZE');const end=b.length-22;check(b.readUInt32LE(end)===0x06054b50&&b.readUInt16LE(end+4)===0&&b.readUInt16LE(end+6)===0&&b.readUInt16LE(end+20)===0,'ZIP_STRUCTURE');
  const count=b.readUInt16LE(end+10),start=b.readUInt32LE(end+16);check(count>0&&count<=LIMITS.entries&&count===b.readUInt16LE(end+8)&&start+b.readUInt32LE(end+12)===end,'ZIP_STRUCTURE');let p=start,next=0;const files=Object.create(null);
  for(let i=0;i<count;i++){
  check(p+46<=end&&b.readUInt32LE(p)===0x02014b50,'ZIP_STRUCTURE');const size=b.readUInt32LE(p+24),length=b.readUInt16LE(p+28),at=b.readUInt32LE(p+42),crc=b.readUInt32LE(p+16);
- check(size<=LIMITS.json&&b.readUInt32LE(p+20)===size&&b.readUInt16LE(p+8)===0x800&&b.readUInt16LE(p+10)===0&&b.readUInt16LE(p+30)===0&&b.readUInt16LE(p+32)===0&&b.readUInt16LE(p+34)===0&&b.readUInt32LE(p+38)===0&&p+46+length<=end,'ZIP_STRUCTURE');
- const name=b.toString('utf8',p+46,p+46+length);filename(name);check(!Object.hasOwn(files,name)&&at===next&&at+30+length+size<=start,'ZIP_STRUCTURE');
+ check(size<=fileLimit&&b.readUInt32LE(p+20)===size&&b.readUInt16LE(p+8)===0x800&&b.readUInt16LE(p+10)===0&&b.readUInt16LE(p+30)===0&&b.readUInt16LE(p+32)===0&&b.readUInt16LE(p+34)===0&&b.readUInt32LE(p+38)===0&&p+46+length<=end,'ZIP_STRUCTURE');
+ const name=b.toString('utf8',p+46,p+46+length);filename(name,options);check(!Object.hasOwn(files,name)&&at===next&&at+30+length+size<=start,'ZIP_STRUCTURE');
  check(b.readUInt32LE(at)===0x04034b50&&b.subarray(at+4,at+28).equals(b.subarray(p+6,p+30))&&b.readUInt16LE(at+28)===0&&b.subarray(at+30,at+30+length).equals(Buffer.from(name)),'ZIP_STRUCTURE');
  const data=b.subarray(at+30+length,at+30+length+size);check(crc32(data)===crc,'ZIP_CRC');files[name]=Buffer.from(data);next=at+30+length+size;p+=46+length;
  }check(p===end&&next===start,'ZIP_STRUCTURE');return files;

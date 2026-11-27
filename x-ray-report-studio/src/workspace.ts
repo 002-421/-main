@@ -1,7 +1,7 @@
 import {rememberTemplateBase} from './template-local-conflicts.ts';
 import {createEditableField} from './editable-field-command.ts';
 import {selectionFontSize,setReportFontSize} from './document-typography.ts';
-import {templateUpdatesDialog,templateUpdatesSettings} from './template-updates.ts';
+import {templateUpdatesDialog,templateUpdatesSettings,templatePublicationSettings} from './template-updates.ts';
 import {templateAvailable,networkTemplate,networkTemplateSource,makeBuiltinTemplateDocument,revisionsForTemplate} from './catalog.ts';
 import { DoctorFormats, type DoctorFormat, TEMPLATE_FONT_SIZES, newProtocolFont } from './doctor-format.ts';
 import { choosePrintLayout, PrintLayoutError, type PrintPlan } from './print-layout.ts';
@@ -709,7 +709,7 @@ function settingsDialog(){const d=dialog('Врач и настройки',`<butt
 const catalogSection=document.createElement('details');catalogSection.className='settings-section';catalogSection.dataset.settingsSection='medical-templates';
 catalogSection.innerHTML='<summary>Медицинские шаблоны</summary><div class="settings-section-body"><p>Независимый каталог шаблонов, проверка обновлений и откат.</p><button class="btn" type="button" id="medical-template-settings">Управление шаблонами</button></div>';
 templateUpdatesSettings(d,renderTemplates);
-d.querySelector('.dialog-body')!.append(catalogSection);catalogSection.querySelector('button')!.onclick=()=>templateUpdatesDialog(dialog,renderTemplates);
+d.querySelector('.dialog-body')!.append(catalogSection);templatePublicationSettings(catalogSection.querySelector<HTMLElement>('.settings-section-body')!);catalogSection.querySelector('button')!.onclick=()=>templateUpdatesDialog(dialog,renderTemplates);
 const sections=[...d.querySelectorAll<HTMLDetailsElement>('[data-settings-section]')];
 const expandAll=d.querySelector<HTMLButtonElement>('#settings-expand-all')!;
 const paintSections=()=>{
