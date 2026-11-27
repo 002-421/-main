@@ -1,3 +1,4 @@
+import { clipboardText } from './clipboard-text.ts';
 import { initializeEditableHighlights } from './template-highlights.ts';
 import { normalizeDateInput } from './date-input.ts';
 import { reportHistoryKey } from './report-history.ts';
@@ -232,12 +233,12 @@ export const InlineFieldEditing = Extension.create({
           if (!replacesPromptOnFirstInput(range.mark) && (from !== range.from || to !== range.to)) return false;
           return replacePlaceholder(view, text, range);
         },
-        handlePaste(view, event) {
+        handlePaste(view, event, slice) {
           if(authoring)return false;
           const selection = view.state.selection;
           const zero = yellowZeroRange(view.state, selection.from);
           if (zero && selection.to <= zero.to) {
-            const pasted = event.clipboardData?.getData('text/plain');
+            const pasted = clipboardText(event,slice);
             if (pasted !== undefined) return replaceYellowZero(view, pasted.replace(/\r\n?/g, '\n'), zero);
           }
           const range = placeholderRange(view.state, selection.from, true);
@@ -247,7 +248,7 @@ export const InlineFieldEditing = Extension.create({
           // the general paste normalizer deliberately strips field identities.
           if (String(range.mark.attrs.id).startsWith('local.editable.')) {
             if (selection.empty && selection.from === range.to) return false;
-            const text = event.clipboardData?.getData('text/plain');
+            const text = clipboardText(event,slice);
             if (text === undefined) return false;
             const marks = (view.state.storedMarks ?? selection.$from.marks()).filter(m => !['templateField','templateHighlight','templateSize'].includes(m.type.name));
             const filled = range.mark.type.create({...range.mark.attrs,filled:true});
@@ -260,7 +261,7 @@ export const InlineFieldEditing = Extension.create({
             view.dispatch(tr.setMeta('paste',true).setMeta('uiEvent','paste').scrollIntoView());return true;
           }
           if (!replacesPromptOnFirstInput(range.mark) && (selection.from !== range.from || selection.to !== range.to)) return false;
-          const text = event.clipboardData?.getData('text/plain');
+          const text = clipboardText(event,slice);
           if (text === undefined) return false;
           return replacePlaceholder(view, text.replace(/\r\n?/g, '\n'), range);
         },

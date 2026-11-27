@@ -1,3 +1,4 @@
+import {clipboardText} from './clipboard-text.ts';
 import {Extension} from '@tiptap/core';
 import {Plugin} from '@tiptap/pm/state';
 import {DOMSerializer,Fragment,Slice} from '@tiptap/pm/model';
@@ -14,14 +15,12 @@ class XrsClipboardSerializer extends DOMSerializer {
 export const ExternalPaste=Extension.create({
  name:'externalPaste',priority:90,
  addProseMirrorPlugins(){const schema=this.editor?.schema;const baseSerializer=schema?DOMSerializer.fromSchema(schema):undefined;const clipboardSerializer=baseSerializer?new XrsClipboardSerializer(baseSerializer.nodes,baseSerializer.marks):undefined;return [new Plugin({props:{clipboardSerializer,handlePaste(view,event,slice){
-  const clipboardText=event.clipboardData?.getData('text/plain');
-  const text=(clipboardText||slice.content.textBetween(0,slice.content.size,'\n','\n')).replace(/\r\n?/g,'\n');if(!text)return slice.content.size>0;
+  const text=clipboardText(event,slice);if(!text)return slice.content.size>0;
   const {state}=view,{ $from }=state.selection;
   let target=$from.parent,local=state.storedMarks??$from.marks();
   // An empty destination inherits the preceding sibling paragraph. For mixed
   // inline formatting use its last non-whitespace text run, independent of MIME.
   if(!target.textContent&&$from.depth>0){const before=state.doc.resolve($from.before()).nodeBefore;if(before?.isTextblock){target=before;before.descendants(n=>{if(n.isText&&n.text?.trim())local=n.marks;});}}
-  if(!local.length&&target.textContent&&state.storedMarks===null){target.descendants(n=>{if(n.isText&&n.text?.trim()&&!local.length)local=n.marks;});}
   const character=local.find(m=>m.type.name==='textStyle')?.attrs;
   const style={...paragraphStyle(view.state,target,local),...(character?.fontFamily?{fontFamily:character.fontFamily}:{}),...(fontPoints(character?.fontSize)?{fontSizePt:fontPoints(character?.fontSize)!}:{})},{color,...attrs}=style,schema=view.state.schema;
   const mark=schema.marks.textStyle.create({fontFamily:style.fontFamily,fontSize:String(Number((style.fontSizePt*4/3).toFixed(5)))+'px',color});
