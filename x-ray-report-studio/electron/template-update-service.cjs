@@ -10,7 +10,8 @@ function createTemplateUpdateService({userData,appVersion,source,baseline,fetchI
  const trust=new TemplateTrustStore({directory:path.join(userData,'template-trust-v1'),anchor:source.root});
  const download=(url,size)=>fetchBytes(url,size,{allowedPrefixes:source.allowedPrefixes,fetchImpl});
  const store=new TemplateCatalogStore({directory:path.join(userData,'template-catalog-v1'),baseline:baseline.templates,trust:configured?source.root:null,channel:source.channel,appVersion,allowedImages:baseline.allowedImages,fetchBytes:download,historicalTrust:configured?(auth,role)=>trust.historical(auth,role):undefined});
- let initialization;
+ let initialization,operation=Promise.resolve();
+ const serial=run=>{const pending=operation.then(run,run);operation=pending.catch(()=>{});return pending;};
  const ready=()=>initialization??=(async()=>{if(configured)store.trust=await trust.load();})();
  const refresh=async()=>{await ready();p.check(configured,'TRUST_NOT_CONFIGURED');if(source.rootUpdatesUrl){const raw=await download(source.rootUpdatesUrl,p.LIMITS.json);store.trust=await trust.update(raw);}p.validateRoot(store.trusted());};
  const safe=async(operation,run)=>{const start=Date.now();try{const result=await run();log({event:'template-update',operation,result:'success',elapsedMs:Date.now()-start});return result;}catch(error){const code=error.name==='TemplateProtocolError'?error.code:['EACCES','EPERM','EBUSY','ENOSPC','ENOENT'].includes(error.code)?error.code:'TEMPLATE_OPERATION_FAILED';log({event:'template-update',operation,result:'failed',code,elapsedMs:Date.now()-start});throw Error(code);}};
@@ -22,9 +23,9 @@ function createTemplateUpdateService({userData,appVersion,source,baseline,fetchI
  return {
   revision:(id,version)=>safe('revision',async()=>{await ready();return readRevision(store,id,version);}),
   state:()=>safe('state',state),
-  check:()=>safe('check',async()=>{await refresh();return store.check(await download(source.manifestUrl,p.LIMITS.json));}),
-  install:(planId,confirmed)=>safe('install',async()=>{await ready();await store.install(planId,confirmed);return state();}),
-  rollback:confirmed=>safe('rollback',async()=>{await ready();await store.rollback(confirmed);return state();}),
+  check:()=>serial(()=>safe('check',async()=>{await refresh();return store.check(await download(source.manifestUrl,p.LIMITS.json));})),
+  install:(planId,confirmed)=>serial(()=>safe('install',async()=>{await ready();await store.install(planId,confirmed);return state();})),
+  rollback:confirmed=>serial(()=>safe('rollback',async()=>{await ready();await store.rollback(confirmed);return state();})),
   trust:()=>safe('trust',async()=>{await ready();return {root:configured?trust.root:null,roots:configured?trust.roots:[],appVersion,channel:source.channel};}),
  };
 }

@@ -14,11 +14,12 @@ function verifyChain(anchor,envelopes,{now=Date.now(),fresh=false}={}){
  p.validateRoot(root,now,fresh);return {root,roots};
 }
 class TemplateTrustStore{
- constructor({directory,anchor,now=()=>Date.now()}){this.directory=directory;this.anchor=anchor;this.now=now;this.envelopes=[];this.roots=anchor?[anchor]:[];this.root=anchor;}
+ constructor({directory,anchor,now=()=>Date.now()}){this.directory=directory;this.anchor=anchor;this.now=now;this.envelopes=[];this.roots=anchor?[anchor]:[];this.root=anchor;this.queue=Promise.resolve();}
  async load(){p.check(this.anchor,'TRUST_NOT_CONFIGURED');let envelopes=[];try{const saved=p.parse(await boundedRead(path.join(this.directory,'root-chain.json'),p.LIMITS.json));p.keys(saved,['schemaVersion','anchorSha256','envelopes']);p.check(saved.schemaVersion===1&&saved.anchorSha256===p.sha256(p.bytes(this.anchor)),'ROOT_ANCHOR');envelopes=saved.envelopes;}catch(error){if(error.code!=='ENOENT')throw error;}
   const checked=verifyChain(this.anchor,envelopes,{now:this.now()});Object.assign(this,checked,{envelopes});return this.root;
  }
- async update(raw){const data=p.parse(raw);p.keys(data,['schemaVersion','type','envelopes']);p.check(data.schemaVersion===1&&data.type==='xrs-template-root-chain','ROOT_CHAIN');
+ update(raw){const snapshot=Buffer.from(raw);const pending=this.queue.then(()=>this.updateSerialized(snapshot));this.queue=pending.catch(()=>{});return pending;}
+ async updateSerialized(raw){const data=p.parse(raw);p.keys(data,['schemaVersion','type','envelopes']);p.check(data.schemaVersion===1&&data.type==='xrs-template-root-chain','ROOT_CHAIN');
   const checked=verifyChain(this.anchor,data.envelopes,{now:this.now(),fresh:true});p.check(checked.root.version>=this.root.version,'ROOT_REPLAY');
   p.check(data.envelopes.length>=this.envelopes.length&&this.envelopes.every((old,i)=>p.canonical(old)===p.canonical(data.envelopes[i])),'ROOT_EQUIVOCATION');
   await fs.mkdir(this.directory,{recursive:true});await atomic(path.join(this.directory,'root-chain.json'),p.bytes({schemaVersion:1,anchorSha256:p.sha256(p.bytes(this.anchor)),envelopes:data.envelopes}));
