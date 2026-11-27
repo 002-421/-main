@@ -8582,6 +8582,8 @@ var require_simple_publisher = __commonJS({
         p2.check(archive.length === m.archive.size && p2.sha256(archive) === m.archive.sha256, "PACKAGE_HASH");
         const data = p2.parse(p2.unzip(archive, { catalog: true })["catalog.json"], p2.LIMITS.archive);
         p2.check(c.contentHash(data.templates) === request.contentSha256, "PUBLICATION_BINDING");
+        const latestRaw = await this.download("https://github.com/" + c.REPOSITORY + "/releases/latest/download/catalog-manifest.json", p2.LIMITS.json, { allowedPrefixes: ["https://github.com/" + c.REPOSITORY + "/releases/"] }), latest = c.manifest(latestRaw, { now: this.now() });
+        p2.check(p2.compare(latest.catalogVersion, m.catalogVersion) >= 0 && latest.sequence >= m.sequence && (latest.catalogVersion !== m.catalogVersion || p2.sha256(latestRaw) === p2.sha256(raw)), "LATEST_POINTER");
         return { status: "published", catalogVersion: m.catalogVersion, publicationId: request.id, publishedAt: m.publishedAt, manifestSha256: p2.sha256(raw), sha256: m.archive.sha256, changed: m.packages.filter((e) => e.archiveVersion === m.catalogVersion).length, url: `https://github.com/${c.REPOSITORY}/releases/tag/${tag}` };
       }
     };
