@@ -36,3 +36,4 @@ test('all indent choices preserve exact insertion attrs; empty paragraph inherit
   assert.deepEqual(s.doc.firstChild.toJSON(),before.content[0]);assert.deepEqual(s.doc.lastChild.toJSON(),before.content[2]);
  }
 });
+test('empty structured clipboard cannot fall through to rich metadata insertion',()=>{let s=state([para('TARGET')]);const before=s.doc.toJSON(),view={get state(){return s;},dispatch:tr=>s=s.apply(tr)},plugin=ExternalPaste.config.addProseMirrorPlugins.call(ExternalPaste)[0];const fragment=schema.nodes.paragraph.create({editableHighlight:{id:'foreign',pending:true}});const slice=new Slice(fragment.content.size?fragment.content:fragment.type.schema.node('doc',null,[fragment]).content,0,0);assert.equal(plugin.props.handlePaste(view,{clipboardData:{getData:()=>''}},slice),true);assert.deepEqual(s.doc.toJSON(),before);});

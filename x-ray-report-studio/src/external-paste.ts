@@ -15,7 +15,7 @@ export const ExternalPaste=Extension.create({
  name:'externalPaste',priority:90,
  addProseMirrorPlugins(){const schema=this.editor?.schema;const baseSerializer=schema?DOMSerializer.fromSchema(schema):undefined;const clipboardSerializer=baseSerializer?new XrsClipboardSerializer(baseSerializer.nodes,baseSerializer.marks):undefined;return [new Plugin({props:{clipboardSerializer,handlePaste(view,event,slice){
   const clipboardText=event.clipboardData?.getData('text/plain');
-  const text=(clipboardText||slice.content.textBetween(0,slice.content.size,'\n','\n')).replace(/\r\n?/g,'\n');if(!text)return false;
+  const text=(clipboardText||slice.content.textBetween(0,slice.content.size,'\n','\n')).replace(/\r\n?/g,'\n');if(!text)return slice.content.size>0;
   const {state}=view,{ $from }=state.selection;
   let target=$from.parent,local=state.storedMarks??$from.marks();
   // An empty destination inherits the preceding sibling paragraph. For mixed
