@@ -1,14 +1,14 @@
 import { chooseExport, assertNoPrintPreview } from './print-export-helpers.mjs';
 import assert from 'node:assert/strict';
 import {_electron} from 'playwright-core';
-import {cp,mkdir,mkdtemp,rename,rm,readFile} from 'node:fs/promises';
+import {cp,mkdir,mkdtemp,rename,rm,readFile,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {execFileSync} from 'node:child_process';
 
 const temp=await mkdtemp(path.join(os.tmpdir(),'xrs-ai-067-'));
 const runtime=path.join(temp,'Installed XRS');
-let app;
+let app,stage='launch-packaged';
 try{
  await cp(path.join(process.cwd(),'node_modules/electron/dist'),runtime,{recursive:true});
  const appRoot=path.join(runtime,'resources/app');await mkdir(appRoot,{recursive:true});
@@ -20,23 +20,28 @@ try{
  assert.equal(await app.evaluate(({app})=>app.isPackaged),true,'the scenario launches a packaged Electron app');
  assert.equal(await app.evaluate(({app})=>app.getVersion()),JSON.parse(await readFile('package.json','utf8')).version);
  await app.evaluate(({clipboard})=>clipboard.clear());
+ stage='synthetic-document';
  const description='На уровне L4/L5 определяется левосторонняя фораминальная экструзия диска размером 5 мм. На уровне L5/S1 определяется правосторонняя парамедианно-фораминальная экструзия. На уровне L3/L4 определяется протрузия диска. Ошибкка. Признаки  дстрофических изменений. Суставная щели нерезко сужена. Гиперинтенсвный очаг. Позвоночный канал на исследованных уровнях не сужен. Фасеты не смещены друг относительно друга. Гипофиз гипофиза гипофизу гипофизом. ( лишний пробел). Осмотрел Иванов Иван.';
  const conclusion='Ошибкка. Экструзии L1/2 и L5/S1. Протрузия L3/L4. Выраженный стеноз позвоночного канала.';
- await page.addInitScript(({description,conclusion})=>{const read=Storage.prototype.getItem;let once=false;Storage.prototype.getItem=function(key){const raw=read.call(this,key);if(once||key!=='mri-report-studio.workspace.v1'||!raw)return raw;once=true;const state=JSON.parse(raw),report=state.reports.find(x=>x.id===state.activeId);report.doc.content.find(x=>x.attrs?.id==='header').content.unshift({type:'paragraph',content:[{type:'text',text:'Ошибкка',marks:[{type:'bold'}]}]},{type:'paragraph',content:[{type:'text',text:'Ошибкка: '},{type:'text',text:'Ошибкка',marks:[{type:'templateField',attrs:{id:'synthetic.patient',hint:'ФИО',filled:true}}]}]});const filler='На серии МР-томограмм в стандартных проекциях визуализируются анатомические структуры. Их положение сохранено; контуры ровные, патологические очаги достоверно не определяются.';report.doc.content.find(x=>x.attrs?.id==='description').content=[...Array.from({length:30},()=>({type:'paragraph',content:[{type:'text',text:filler}]})),{type:'paragraph',content:[{type:'text',text:description}]}];report.doc.content.find(x=>x.attrs?.id==='conclusion').content=[{type:'paragraph',content:[{type:'text',text:conclusion}]}];report.doc.content.find(x=>x.attrs?.id==='signature').content=[{type:'paragraph',content:[{type:'text',text:'Рекомендации: Ошибкка. Наблюдение.'}]},{type:'paragraph',content:[{type:'text',text:'Врач-рентгенолог: Тестовый Врач  Дата: 16.11.2026'}]}];return JSON.stringify(state);};},{description,conclusion});
- await page.reload();
+ await page.evaluate(({description,conclusion})=>{const editor=document.querySelector('.report-content').editor,doc=editor.getJSON();doc.content.find(x=>x.attrs?.id==='header').content.unshift({type:'paragraph',content:[{type:'text',text:'Ошибкка',marks:[{type:'bold'}]}]},{type:'paragraph',content:[{type:'text',text:'Ошибкка: '},{type:'text',text:'Ошибкка',marks:[{type:'templateField',attrs:{id:'synthetic.patient',hint:'ФИО',filled:true}}]}]});const filler='На серии МР-томограмм в стандартных проекциях визуализируются анатомические структуры. Их положение сохранено; контуры ровные, патологические очаги достоверно не определяются.';doc.content.find(x=>x.attrs?.id==='description').content=[...Array.from({length:30},()=>({type:'paragraph',content:[{type:'text',text:filler}]})),{type:'paragraph',content:[{type:'text',text:description}]}];doc.content.find(x=>x.attrs?.id==='conclusion').content=[{type:'paragraph',content:[{type:'text',text:conclusion}]}];doc.content.find(x=>x.attrs?.id==='signature').content=[{type:'paragraph',content:[{type:'text',text:'Рекомендации: Ошибкка. Наблюдение.'}]},{type:'paragraph',content:[{type:'text',text:'Врач-рентгенолог: Тестовый Врач  Дата: 16.11.2026'}]}];editor.commands.setContent(doc);},{description,conclusion});
+ await page.waitForFunction(()=>document.querySelector('#save-state')?.textContent==='Сохранено на компьютере');
+ await page.waitForFunction(()=>document.querySelectorAll('[data-section-id="description"] p').length>=31);
  assert.ok(await page.locator('[data-section-id="description"] p').count()>=31,'the synthetic medical protocol spans many paragraphs');
- for(const category of ['spelling','punctuation','style','terminology','consistency','clinical']){const mark=page.locator(`.ai-review-${category}`).first();await mark.waitFor({timeout:30000});await mark.click({button:'right'});assert.equal(await page.locator('.ai-review-card').count(),1,`${category}: finding reaches the contextual menu in Electron`);await page.keyboard.press('Escape');}
+ for(const category of ['spelling','punctuation','style','terminology','consistency','clinical']){stage='category-'+category;const mark=page.locator(`.ai-review-${category}`).first();await mark.waitFor({timeout:30000});await mark.click({button:'right'});assert.equal(await page.locator('.ai-review-card').count(),1,`${category}: finding reaches the contextual menu in Electron`);await page.keyboard.press('Escape');}
  await page.waitForFunction(()=>[...document.querySelectorAll('.ai-review-spelling')].filter(n=>n.textContent==='Ошибкка').length===5,null,{timeout:30000});
  for(const mark of await page.locator('.ai-review-spelling').filter({hasText:/^Ошибкка$/}).all()){await mark.click({button:'right'});assert.equal(await page.locator('.ai-review-card').count(),1);await page.keyboard.press('Escape');}
  for(const term of ['гипофиз','гипофиза','гипофизу','гипофизом'])assert.equal(await page.locator('.ai-review-spelling,.ai-review-terminology').filter({hasText:new RegExp('^'+term+'$','iu')}).count(),0);
  console.log('PASS spelling, punctuation, style, terminology, consistency, clinical: analyzer → decoration → right-click menu in packaged Electron');
+ stage='multi-level-findings';
  const level=page.locator('.ai-review-consistency').filter({hasText:'L1/2'}).first();await level.waitFor({timeout:30000});
  await level.click();assert.equal(await page.locator('.ai-review-card').count(),0,'left click leaves editing unobstructed');
  await level.click({button:'right'});const menu=page.locator('.ai-review-card');await menu.waitFor();const text=await menu.innerText();assert.match(text,/L1-L2.*отсутствующая/su);assert.match(text,/L4-L5.*не отражённая/su);assert.equal(await menu.getByText('Заменить',{exact:true}).count(),0);
  await page.keyboard.press('Escape');assert.equal(await menu.count(),0);
+ stage='correction-undo-redo';
  const typo=page.locator('.ai-review-spelling').filter({hasText:'дстрофических'}).first();await typo.waitFor({timeout:30000});await typo.click({button:'right'});await page.getByRole('button',{name:'дистрофических',exact:true}).click();assert.match(await page.locator('.report-content').innerText(),/дистрофических/u);
  await page.keyboard.press('Control+z');assert.match(await page.locator('.report-content').innerText(),/дстрофических/u);
  await page.keyboard.press('Control+y');assert.match(await page.locator('.report-content').innerText(),/дистрофических/u);
+ stage='clipboard-privacy';
  await page.locator('#copy-for-ai').click();const preview=page.locator('#ai-copy-text');await preview.waitFor();const before=await preview.inputValue();assert.ok(before.includes('Экструзии L1/2'));assert.ok(before.includes('Иванов Иван'));assert.ok(!before.includes('Пациент:'));
  assert.equal(await page.locator('#ai-copy-confirm').count(),0);await page.locator('#ai-copy-commit').click();assert.equal(await app.evaluate(({clipboard})=>clipboard.readText()),'','unresolved personal data must never enter clipboard');
  await preview.fill(before.replace('Осмотрел Иванов Иван.',''));assert.equal(await page.locator('#ai-copy-confirm').count(),0);
@@ -47,11 +52,13 @@ try{
  await page.locator('#ai-copy-commit').click();
  const copied=await app.evaluate(({clipboard})=>clipboard.readText());assert.ok(copied.includes('Экструзии L1/2'));assert.ok(!copied.includes('Иванов')&&!copied.includes('Пациент:')&&!copied.includes('Тестовый Врач'));
  const formats=await app.evaluate(async({clipboard})=>(await clipboard.read()).flatMap(item=>item.types));assert.ok(formats.includes('text/plain'));assert.ok(!formats.some(x=>/html|image|json/i.test(x)),JSON.stringify(formats));
+ stage='windows-native-clipboard';
  if(process.platform==='win32'){const native=execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command','[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Clipboard -Raw)))'],{encoding:'utf8'}).trim();assert.equal(Buffer.from(native,'base64').toString('utf8'),copied,'an independent Windows application reads the same Unicode clipboard text');}
  if(process.platform==='win32'){const pasted=execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-File',path.resolve('tests/clipboard-notepad.ps1')],{encoding:'utf8',timeout:30000}).trim();assert.equal(Buffer.from(pasted,'base64').toString('utf8').replace(/\r\n/g,'\n'),copied.replace(/\r\n/g,'\n'),'real Windows Notepad receives the complete Unicode plain text');console.log('PASS paste into real Windows Notepad');}
  await page.locator('[data-section-id="description"] p').last().click();await page.keyboard.press('End');await page.keyboard.press('Enter');await page.keyboard.press('Control+v');
  assert.ok((await page.locator('.report-content').innerText()).replace(/\s+/gu,' ').includes(copied.replace(/\s+/gu,' ')),'system plain text pastes back into XRS');
  console.log('PASS clipboard: real system plain-text write, identifier rejection, editable preview, paste back into XRS');
+ stage='stamp-pdf';
  await page.locator('#settings').click();await page.locator('#settings-expand-all').click();await page.locator('#doctor-name').fill('Тестовый Врач');
  await page.locator('#doctor-stamp-file').setInputFiles({name:'stamp.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW+0AAAAASUVORK5CYII=','base64')});
  await page.locator('#stamp-preview img').waitFor();
@@ -73,8 +80,10 @@ try{
  await page.waitForFunction(()=>window.__stampPrint&&!document.querySelector('#editor > .export-only-editor'));
  assert.deepEqual(await page.evaluate(()=>window.__stampPrint),['-25px','-15px','120px','contain']);
  await assertNoPrintPreview(page);
- await page.addInitScript(()=>{const get=Storage.prototype.getItem;let once=false;Storage.prototype.getItem=function(key){const raw=get.call(this,key);if(once||key!=='mri-report-studio.workspace.v1'||!raw)return raw;once=true;const w=JSON.parse(raw),r=w.reports.find(x=>x.id===w.activeId);for(const [id,text] of [['description','Грыж межпозвонковых дисков не выявлено.'],['conclusion','Экструзия L5/S1.']])r.doc.content.find(n=>n.attrs?.id===id).content=[{type:'paragraph',content:[{type:'text',text}]}];return JSON.stringify(w);};});
- await page.reload();const contradiction=page.locator('.ai-review-clinical').first();await contradiction.waitFor({timeout:30000});await contradiction.click({button:'right'});assert.match(await page.locator('.ai-review-card').innerText(),/противореч|наличи/iu);assert.equal(await page.locator('.ai-review-card').getByRole('button',{name:'Заменить',exact:true}).count(),0);
+ stage='clinical-contradiction';
+ await page.evaluate(()=>{const editor=document.querySelector('.report-content').editor,doc=editor.getJSON();for(const [id,text]of [['description','Грыж межпозвонковых дисков не выявлено.'],['conclusion','Экструзия L5/S1.']])doc.content.find(n=>n.attrs?.id===id).content=[{type:'paragraph',content:[{type:'text',text}]}];editor.commands.setContent(doc);});
+ await page.waitForFunction(()=>document.querySelector('#save-state')?.textContent==='Сохранено на компьютере');const contradiction=page.locator('.ai-review-clinical').first();await contradiction.waitFor({timeout:30000});await contradiction.click({button:'right'});assert.match(await page.locator('.ai-review-card').innerText(),/противореч|наличи/iu);assert.equal(await page.locator('.ai-review-card').getByRole('button',{name:'Заменить',exact:true}).count(),0);
  assert.deepEqual(requests,[],'local review does not request any HTTP endpoint');
  assert.deepEqual(errors,[]);console.log('PASS real Electron: multi-level findings, menu, spelling correction and Undo/Redo, personal-data-gated plain-text clipboard.');
-}finally{if(app){try{await app.evaluate(({clipboard})=>clipboard.clear());}catch{}await app.close();}await rm(temp,{recursive:true,force:true,maxRetries:10,retryDelay:200});}
+ await mkdir('test-output/full-cycle',{recursive:true});await writeFile('test-output/full-cycle/ai-review.json',JSON.stringify({status:'PASS',packaged:true,categories:['spelling','punctuation','style','terminology','consistency','clinical'],externalRequests:requests.length,nativeNotepad:process.platform==='win32',syntheticOnly:true},null,2));
+}catch(error){console.error(`::error title=AI Review packaged regression::stage=${stage}; name=${error.name??'Error'}; code=${/^[A-Z0-9_]+$/.test(error.code??'')?error.code:'unavailable'}`);throw error;}finally{if(app){try{await app.evaluate(({clipboard})=>clipboard.clear());}catch{}await app.close();}await rm(temp,{recursive:true,force:true,maxRetries:10,retryDelay:200});}
