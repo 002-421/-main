@@ -54,6 +54,18 @@ jobs:
         run: node tests/ai-067-electron.mjs
       - name: Two independent Windows desktop authorizations with real safeStorage, no CLI
         run: node tests/github-auth-electron.mjs
+      - name: Build and verify exact final Windows installation package
+        shell: pwsh
+        run: |
+          python scripts/package_setup.py --candidate-output test-output/release-087
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify_setup_package.py --zip test-output/release-087/X-ray_Report_Studio_Windows_Setup.zip --source-electron electron --version 0.4.87
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hash = (Get-FileHash -Algorithm SHA256 test-output/release-087/X-ray_Report_Studio_Windows_Setup.zip).Hash.ToLowerInvariant()
+          Write-Output "::notice title=Final Windows ZIP SHA-256::$hash"
+          git diff --exit-code -- downloads/latest.json electron/update-channel.cjs
+      - name: Published 0.4.86 to exact 0.4.87 official updater acceptance
+        run: node tests/release-087-updater-electron.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -62,4 +74,5 @@ jobs:
             x-ray-report-studio/test-output/full-cycle/
             x-ray-report-studio/test-output/template-publishing/
             x-ray-report-studio/test-output/paste-fields/
+            x-ray-report-studio/test-output/release-087/*.json
           if-no-files-found: ignore
