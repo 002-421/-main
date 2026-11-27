@@ -8414,7 +8414,8 @@ var require_simple_publisher = __commonJS({
         return this.gh.api(method, "/repos/" + c.REPOSITORY + route, body);
       }
       async authorize() {
-        verifyLogin(await this.gh.status(), this);
+        if (this.gh.authorize) await this.gh.authorize();
+        else verifyLogin(await this.gh.status(), this);
         const user = await this.gh.api("GET", "/user");
         p2.check(user.id === c.OWNER_ID && user.login === "002-421" && user.type === "User", "PUBLISHER_IDENTITY");
         const repo = await this.api("GET", "");

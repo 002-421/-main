@@ -1,18 +1,18 @@
 import type {Editor} from '@tiptap/core';
 import type {EditorState} from '@tiptap/pm/state';
 import type {Node as PMNode, Mark} from '@tiptap/pm/model';
-export const FIRST_LINE_INDENTS=[0,72/2.54,1.25*72/2.54,1.5*72/2.54] as const;
+export const FIRST_LINE_INDENTS=[0,.5*72/2.54,.625*72/2.54,.75*72/2.54,72/2.54,1.25*72/2.54] as const;
 export function fontPoints(value:unknown):number|undefined {
  const match=/^(\d+(?:\.\d+)?)(px|pt)?$/.exec(String(value??''));if(!match)return;
  const points=Number(match[1])*(match[2]==='px'?.75:1);return points>0&&points<=200?Math.round(points*1000)/1000:undefined;
 }
 const valid=(value:unknown,fallback:number)=>typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1000?value:fallback;
-export function paragraphStyle(state:EditorState){
- const here=state.selection.$from.parent,root=state.doc.attrs;
+export function paragraphStyle(state:EditorState,here:PMNode=state.selection.$from.parent,marks:readonly Mark[]|null=null){
+ const targetMarks=marks??state.storedMarks??state.selection.$from.marks(),root=state.doc.attrs;
  let sample:PMNode|undefined;state.doc.descendants(node=>{if(!sample&&node.type.name==='reportSection'&&node.attrs.id==='description'){node.descendants(n=>{if(!sample&&n.isTextblock)sample=n;});return false;}});
  const a=here.isTextblock?here.attrs:sample?.attrs??{},base=sample?.attrs??{};
- const stored=state.storedMarks?.find(m=>m.type.name==='textStyle')?.attrs;
- const current=(state.storedMarks??state.selection.$from.marks()).find(m=>m.type.name==='textStyle')?.attrs;
+ const stored=targetMarks.find(m=>m.type.name==='textStyle')?.attrs;
+ const current=targetMarks.find(m=>m.type.name==='textStyle')?.attrs;
  return {fontFamily:stored?.fontFamily??a.fontFamily??root.fontFamily??base.fontFamily??'Arial',fontSizePt:fontPoints(stored?.fontSize)??valid(a.fontSizePt,valid(root.fontSizePt,valid(base.fontSizePt,11))),textAlign:a.textAlign??base.textAlign??'justify',firstLineIndentPt:valid(a.firstLineIndentPt,valid(root.firstLineIndentPt,valid(base.firstLineIndentPt,0))),lineHeight:valid(a.lineHeight,valid(root.lineHeight,valid(base.lineHeight,1.05))),spaceBeforePt:valid(a.spaceBeforePt,valid(base.spaceBeforePt,0)),spaceAfterPt:valid(a.spaceAfterPt,valid(root.spaceAfterPt,valid(base.spaceAfterPt,0))),leftIndentPt:valid(a.leftIndentPt,0),rightIndentPt:valid(a.rightIndentPt,0),color:current?.color??'#000000'};
 }
 function sizeAt(state:EditorState,node:PMNode,pos:number,marks:readonly Mark[]=node.marks){

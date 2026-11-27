@@ -19,7 +19,7 @@ export const fillToolbar = menu('fill', 'Цвет заливки', [...MANUAL_FI
 
 export const paragraphToolbar = [
   menu('align', 'Выравнивание', alignments),
-  menu('indent', 'Отступ первой строки', FIRST_LINE_INDENTS.map((points,index)=>[String(points),['Без отступа','1,0 см','1,25 см','1,5 см'][index]]), '', '_А'),
+  menu('indent', 'Отступ первой строки', FIRST_LINE_INDENTS.map((points,index)=>[String(points),['Без отступа','0,5 см','Стандартный (≈ 0,625 см)','0,75 см','1,0 см','1,25 см'][index]]), '', '_А'),
   menu('rule', 'Толщина линии', ruleChoices, '<button id="insert-line" type="button" aria-label="Линия">― Линия</button>'),
   menu('list', 'Список', lists),
   '<button id="table-tools" title="Вставить или изменить таблицу" aria-label="Вставить или изменить таблицу"><svg viewBox="0 0 18 18" width="18" height="18" fill="none" stroke="currentColor" aria-hidden="true"><rect x="1.5" y="1.5" width="15" height="15"/><path d="M6.5 1.5v15m5-15v15M1.5 6.5h15m-15 5h15"/></svg></button>',
