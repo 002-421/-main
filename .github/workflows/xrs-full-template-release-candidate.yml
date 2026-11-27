@@ -1,0 +1,76 @@
+name: XRS full template publishing release candidate
+on:
+  push:
+    branches: [codex/xrs-template-publishing-full-086]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-full-cycle:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: x-ray-report-studio
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: x-ray-report-studio/package-lock.json
+      - run: npm ci
+      - run: npm run desktop:install
+      - run: npm run build
+      - name: Full automated suite including real Windows file locks
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force test-output/full-cycle | Out-Null
+          npm test 2>&1 | Tee-Object test-output/full-cycle/windows-unit.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publishing UI, real versioned stdio, signatures, two instances and local conflicts
+        run: node tests/template-publishing-electron.mjs
+      - name: Signed catalog, archived versions, fields, persistence and rollback in two Electron instances
+        run: node tests/template-updates-electron.mjs
+      - name: Local PIN, Draft, working local templates and cold restart
+        run: node tests/template-admin-electron.mjs
+      - name: Actual internal clipboard, editable fields, DOCX and Chromium PDF
+        run: node tests/paste-fields-electron.mjs
+      - name: External clipboard fixtures, 12 to 11 pt and first-line indent
+        run: node tests/paste-typography-electron.mjs
+      - name: All eight Spine templates, independent dimensions and forty native fields
+        run: npm run test:spine-review-v8
+      - name: Undo, Redo and persisted views
+        run: npm run test:history-browser
+      - name: Browser formatting and real DOCX/PDF export
+        run: |
+          node node_modules/playwright-core/cli.js install chromium
+          node tests/editor-format-browser.mjs
+          node tests/editable-highlight-export-browser.mjs
+      - name: Offline AI Review regression in Electron
+        run: node tests/ai-067-electron.mjs
+      - name: Build and verify the unpublished Windows Setup ZIP
+        shell: pwsh
+        run: |
+          python scripts/package_setup.py --candidate-output test-output/rc-086
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify_setup_package.py --zip test-output/rc-086/X-ray_Report_Studio_Windows_Setup.zip --source-electron electron --version 0.4.86
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hash = (Get-FileHash -Algorithm SHA256 test-output/rc-086/X-ray_Report_Studio_Windows_Setup.zip).Hash.ToLowerInvariant()
+          Write-Output "::notice title=Windows RC ZIP SHA-256::$hash"
+          "$hash  X-ray_Report_Studio_Windows_Setup.zip" | Set-Content test-output/rc-086/SHA256SUMS.txt
+          git diff --exit-code -- downloads/latest.json electron/update-channel.cjs
+      - name: Actual published 0.4.85 to exact RC 0.4.86 upgrade, checksum refusal, settings and cold EXE
+        run: node tests/release-086-updater-electron.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: XRS-0.4.86-full-cycle-RC
+          path: |
+            x-ray-report-studio/test-output/rc-086/
+            x-ray-report-studio/test-output/full-cycle/
+            x-ray-report-studio/test-output/template-publishing/
+            x-ray-report-studio/test-output/template-updates/
+            x-ray-report-studio/test-output/template-admin/
+            x-ray-report-studio/test-output/paste-fields/
+          if-no-files-found: error
