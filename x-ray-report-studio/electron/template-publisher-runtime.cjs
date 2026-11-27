@@ -526,12 +526,12 @@ var require_simple_catalog = __commonJS({
       return p2.zip({ "catalog.json": p2.bytes({ schemaVersion: 1, type: "xrs-https-catalog-data", catalogVersion: p2.version(catalogVersion), templates: [...templates].sort((a, b) => a.id.localeCompare(b.id, "en")) }) }, { catalog: true });
     }
     function entry(row) {
-      p2.keys(row, ["templateId", "templateVersion", "action", "url", "sha256", "size", "summary", "templateSha256", "archiveVersion"]);
+      p2.keys(row, ["templateId", "templateVersion", "action", "url", "sha256", "size", "summary", "templateSha256", "templateSize", "archiveVersion"]);
       p2.string(row.templateId, 120);
       p2.version(row.templateVersion);
       p2.version(row.archiveVersion);
       p2.string(row.summary, 2e3);
-      p2.check(["add", "update", "remove"].includes(row.action) && row.url === archiveUrl(row.archiveVersion) && HASH.test(row.sha256) && HASH.test(row.templateSha256) && Number.isSafeInteger(row.size) && row.size > 0 && row.size <= p2.LIMITS.archive, "CATALOG_ENTRY");
+      p2.check(["add", "update", "remove"].includes(row.action) && row.url === archiveUrl(row.archiveVersion) && HASH.test(row.sha256) && HASH.test(row.templateSha256) && Number.isSafeInteger(row.templateSize) && row.templateSize > 0 && row.templateSize <= p2.LIMITS.json && Number.isSafeInteger(row.size) && row.size > 0 && row.size <= p2.LIMITS.archive, "CATALOG_ENTRY");
       return row;
     }
     function manifest(raw, { appVersion = "0.4.86", channel = "stable", now = Date.now(), expiry = true } = {}) {
@@ -552,7 +552,7 @@ var require_simple_catalog = __commonJS({
       p2.check(Array.isArray(m.packages) && m.packages.length > 0 && m.packages.length <= 500 && Array.isArray(m.revisions) && m.revisions.length <= 5e3, "CATALOG_COUNT");
       const ids = /* @__PURE__ */ new Set(), revisions = /* @__PURE__ */ new Map();
       for (const row of m.revisions) {
-        p2.keys(row, ["templateId", "templateVersion", "action", "url", "sha256", "size", "summary", "templateSha256", "archiveVersion", "status", "publishedAt", "approvedBy"]);
+        p2.keys(row, ["templateId", "templateVersion", "action", "url", "sha256", "size", "summary", "templateSha256", "templateSize", "archiveVersion", "status", "publishedAt", "approvedBy"]);
         const { status, publishedAt, approvedBy, ...data } = row;
         entry(data);
         p2.check(["Active", "Archived", "Revoked"].includes(status) && typeof publishedAt === "string" && Number.isFinite(Date.parse(publishedAt)) && approvedBy === "github:002-421", "REVISION");
@@ -575,6 +575,14 @@ var require_simple_catalog = __commonJS({
     function packageReader({ allowedImages = [], appVersion = "0.4.86" } = {}) {
       const cache = /* @__PURE__ */ new Map();
       return (raw, row) => {
+        if (raw[0] === 123) {
+          p2.check(raw.length === row.templateSize && p2.sha256(raw) === row.templateSha256, "PACKAGE_HASH");
+          const t = p2.parse(raw);
+          p2.validateTemplate(t, { allowedImages });
+          p2.check(t.id === row.templateId && t.templateVersion === row.templateVersion && Boolean(t.retired) === (row.action === "remove"), "PACKAGE_BINDING");
+          p2.check(p2.compare(appVersion, t.minimumXrsVersion) >= 0, "XRS_VERSION_REQUIRED");
+          return t;
+        }
         p2.check(raw.length === row.size && p2.sha256(raw) === row.sha256, "PACKAGE_HASH");
         let data = cache.get(row.sha256);
         if (!data) {
@@ -591,7 +599,7 @@ var require_simple_catalog = __commonJS({
           if (cache.size > 3) cache.delete(cache.keys().next().value);
         }
         const template = data.byId.get(row.templateId);
-        p2.check(data.catalogVersion === row.archiveVersion && template && template.templateVersion === row.templateVersion && p2.sha256(p2.bytes(template)) === row.templateSha256 && Boolean(template.retired) === (row.action === "remove"), "PACKAGE_BINDING");
+        p2.check(data.catalogVersion === row.archiveVersion && template && template.templateVersion === row.templateVersion && p2.sha256(p2.bytes(template)) === row.templateSha256 && p2.bytes(template).length === row.templateSize && Boolean(template.retired) === (row.action === "remove"), "PACKAGE_BINDING");
         return structuredClone(template);
       };
     }
@@ -8434,7 +8442,7 @@ var require_simple_publisher = __commonJS({
         p2.check(data.catalogVersion === manifest.catalogVersion && c.contentHash(data.templates) === manifest.contentSha256 && data.templates.length === manifest.packages.length, "CATALOG_BINDING");
         for (const row of data.templates) {
           const entry = manifest.packages.find((x) => x.templateId === row.id);
-          p2.check(entry && entry.templateVersion === row.templateVersion && entry.templateSha256 === p2.sha256(p2.bytes(row)), "CATALOG_BINDING");
+          p2.check(entry && entry.templateVersion === row.templateVersion && entry.templateSha256 === p2.sha256(p2.bytes(row)) && entry.templateSize === p2.bytes(row).length && Boolean(row.retired) === (entry.action === "remove"), "CATALOG_BINDING");
         }
         return { manifest, raw, templates: data.templates };
       }
@@ -8468,7 +8476,7 @@ var require_simple_publisher = __commonJS({
           const t = row.template, old = before.get(t.id);
           p2.check(old, "UNKNOWN_TEMPLATE");
           p2.validateTemplate(t, { allowedImages: baseline.allowedImages });
-          if (p2.canonical(t) === p2.canonical(old)) continue;
+          if (p2.canonical({ ...t, templateVersion: old.templateVersion }) === p2.canonical(old)) continue;
           p2.check(row.baseVersion === old.templateVersion && row.baseSha256 === p2.sha256(p2.bytes(old)), "BASE_CONFLICT");
           p2.continuity(old, t);
           p2.check(p2.compare(t.templateVersion, old.templateVersion) > 0, "VERSION_NOT_INCREASED");
@@ -8519,7 +8527,7 @@ var require_simple_publisher = __commonJS({
           let entry = old;
           if (!old || old.templateSha256 !== p2.sha256(p2.bytes(t))) {
             for (const [key, row] of revisions) if (row.templateId === t.id && row.status === "Active") revisions.set(key, { ...row, status: "Archived" });
-            entry = { templateId: t.id, templateVersion: t.templateVersion, action: t.retired ? "remove" : "update", ...archiveMeta, templateSha256: p2.sha256(p2.bytes(t)), archiveVersion: request.catalogVersion, summary: request.summaries[t.id] ?? "\u041F\u0435\u0440\u0432\u043E\u043D\u0430\u0447\u0430\u043B\u044C\u043D\u044B\u0439 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043D\u043D\u044B\u0439 \u043A\u0430\u0442\u0430\u043B\u043E\u0433" };
+            entry = { templateId: t.id, templateVersion: t.templateVersion, action: t.retired ? "remove" : "update", ...archiveMeta, templateSha256: p2.sha256(p2.bytes(t)), templateSize: p2.bytes(t).length, archiveVersion: request.catalogVersion, summary: request.summaries[t.id] ?? "\u041F\u0435\u0440\u0432\u043E\u043D\u0430\u0447\u0430\u043B\u044C\u043D\u044B\u0439 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043D\u043D\u044B\u0439 \u043A\u0430\u0442\u0430\u043B\u043E\u0433" };
             revisions.set(t.id + "@" + t.templateVersion, { ...entry, status: t.retired ? "Revoked" : "Active", publishedAt: request.createdAt, approvedBy: "github:002-421" });
           }
           packages.push(entry);
@@ -8545,7 +8553,7 @@ var require_simple_publisher = __commonJS({
         }
         p2.check(reservation.object?.type === "tag", "VERSION_CONFLICT");
         const reserved = await this.api("GET", "/git/tags/" + reservation.object.sha);
-        p2.check(reserved.message === metadata, "VERSION_CONFLICT");
+        p2.check(reserved.tag === tag && typeof reserved.message === "string" && reserved.message.trimEnd() === metadata, "VERSION_CONFLICT");
         if (!release) release = await this.api("POST", "/releases", { tag_name: tag, name: "XRS templates " + request.catalogVersion, body: `Approved XRS template data. Publication ${request.id}.`, draft: true, prerelease: false, make_latest: "false" });
         p2.check(release.draft && Number.isSafeInteger(release.id), "RELEASE_STATE");
         const files = /* @__PURE__ */ new Map([["catalog.xrszip", archive], ["catalog-manifest.json", raw]]), temp = await fs.mkdtemp(path.join(os.tmpdir(), "xrs-catalog-upload-"));
@@ -8581,7 +8589,11 @@ var require_simple_publisher = __commonJS({
         const archive = await this.download(m.archive.url, m.archive.size, { allowedPrefixes: [c.PREFIX] });
         p2.check(archive.length === m.archive.size && p2.sha256(archive) === m.archive.sha256, "PACKAGE_HASH");
         const data = p2.parse(p2.unzip(archive, { catalog: true })["catalog.json"], p2.LIMITS.archive);
-        p2.check(c.contentHash(data.templates) === request.contentSha256, "PUBLICATION_BINDING");
+        p2.check(c.contentHash(data.templates) === request.contentSha256 && m.packages.length === request.templates.length, "PUBLICATION_BINDING");
+        for (const template of request.templates) {
+          const entry = m.packages.find((e) => e.templateId === template.id);
+          p2.check(entry && entry.templateVersion === template.templateVersion && entry.templateSha256 === p2.sha256(p2.bytes(template)) && entry.templateSize === p2.bytes(template).length && Boolean(template.retired) === (entry.action === "remove"), "PUBLICATION_BINDING");
+        }
         const latestRaw = await this.download("https://github.com/" + c.REPOSITORY + "/releases/latest/download/catalog-manifest.json", p2.LIMITS.json, { allowedPrefixes: ["https://github.com/" + c.REPOSITORY + "/releases/"] }), latest = c.manifest(latestRaw, { now: this.now() });
         p2.check(p2.compare(latest.catalogVersion, m.catalogVersion) >= 0 && latest.sequence >= m.sequence && (latest.catalogVersion !== m.catalogVersion || p2.sha256(latestRaw) === p2.sha256(raw)), "LATEST_POINTER");
         return { status: "published", catalogVersion: m.catalogVersion, publicationId: request.id, publishedAt: m.publishedAt, manifestSha256: p2.sha256(raw), sha256: m.archive.sha256, changed: m.packages.filter((e) => e.archiveVersion === m.catalogVersion).length, url: `https://github.com/${c.REPOSITORY}/releases/tag/${tag}` };
