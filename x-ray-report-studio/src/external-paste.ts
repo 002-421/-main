@@ -18,9 +18,14 @@ export const ExternalPaste=Extension.create({
   const text=clipboardText(event,slice);if(!text)return slice.content.size>0;
   const {state}=view,{ $from }=state.selection;
   let target=$from.parent,local=state.storedMarks??$from.marks();
-  // An empty destination inherits the preceding sibling paragraph. For mixed
+  // An empty destination inherits the preceding paragraph across container boundaries. For mixed
   // inline formatting use its last non-whitespace text run, independent of MIME.
-  if(!target.textContent&&$from.depth>0){const before=state.doc.resolve($from.before()).nodeBefore;if(before?.isTextblock){target=before;before.descendants(n=>{if(n.isText&&n.text?.trim())local=n.marks;});}}
+  if(!target.textContent){
+   for(let depth=$from.depth;depth>0;depth--){const before=state.doc.resolve($from.before(depth)).nodeBefore;let preceding=before?.isTextblock?before:null;
+    before?.descendants(n=>{if(n.isTextblock){preceding=n;return false;}});
+    if(preceding){target=preceding;local=[];target.descendants(n=>{if(n.isText&&n.text?.trim())local=n.marks;});break;}
+   }
+  }
   const character=local.find(m=>m.type.name==='textStyle')?.attrs;
   const style={...paragraphStyle(view.state,target,local),...(character?.fontFamily?{fontFamily:character.fontFamily}:{}),...(fontPoints(character?.fontSize)?{fontSizePt:fontPoints(character?.fontSize)!}:{})},{color,...attrs}=style,schema=view.state.schema;
   const mark=schema.marks.textStyle.create({fontFamily:style.fontFamily,fontSize:String(Number((style.fontSizePt*4/3).toFixed(5)))+'px',color});

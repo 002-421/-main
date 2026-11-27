@@ -37,3 +37,9 @@ test('HTML-only clipboard in an existing numeric destination uses parsed text wi
  const foreign=schema.nodeFromJSON({type:'paragraph',content:[{type:'text',text:'9,25',marks:[{type:'bold'}]}]});
  assert.equal(plugin.props.handlePaste(v,{clipboardData:{getData:()=>''}},new Slice(foreign.content,0,0)),true);assert.equal(v.state.doc.textContent,'9,25');assert.equal(fieldRows(v)[0].filled,true);assert.ok(v.state.doc.firstChild.firstChild.marks.some(m=>m.type.name==='italic'));assert.ok(!v.state.doc.firstChild.firstChild.marks.some(m=>m.type.name==='bold'));
 });
+
+test('an empty first paragraph in a section inherits the preceding visible paragraph across section wrappers',()=>{
+ const v=view([{type:'reportSection',attrs:{id:'description'},content:[p('ABOVE',[{type:'italic'}])]},{type:'reportSection',attrs:{id:'conclusion'},content:[{type:'paragraph'}]}],11);
+ const plugin=ExternalPaste.config.addProseMirrorPlugins.call(ExternalPaste)[0];plugin.props.handlePaste(v,{clipboardData:{getData:t=>t==='text/plain'?'PASTED':''}},Slice.empty);
+ const paragraph=v.state.doc.lastChild.firstChild;assert.equal(paragraph.attrs.firstLineIndentPt,28.34646);assert.ok(paragraph.firstChild.marks.some(m=>m.type.name==='italic'));
+});
