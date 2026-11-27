@@ -20,7 +20,11 @@ const state=()=>page.evaluate(()=>{
   const m=n.marks.find(m=>m.type.name==='templateSize');if(m)sizes.push({pos:p,text:n.text,...m.attrs});
  });return {sizes,paragraphs};
 });
-const cursor=pos=>page.evaluate(pos=>{const e=document.querySelector('.report-content').editor;e.chain().focus().setTextSelection(pos).run();},pos);
+const cursor=async pos=>{
+ await page.locator('.report-content').focus();
+ await page.evaluate(pos=>{const e=document.querySelector('.report-content').editor;e.commands.setTextSelection(pos);e.view.focus();},pos);
+ await page.waitForFunction(pos=>{const e=document.querySelector('.report-content').editor;return e.view.hasFocus()&&e.state.selection.from===pos;},pos);
+};
 try{
  page=await app.firstWindow();await page.locator('.report-content').waitFor();
  page.on('pageerror',e=>{errors.push(e.message);console.error('RENDERER',e.stack);});
