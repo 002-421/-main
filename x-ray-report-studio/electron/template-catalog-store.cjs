@@ -14,10 +14,11 @@ async function atomic(file,data){
 }
 function checkState(s){p.keys(s,['schemaVersion','active','previous','known','sequence','manifestSha256','catalogVersion','lastSuccess','history']);p.check(s.schemaVersion===1&&(s.active===null||isHash(s.active))&&Array.isArray(s.previous)&&s.previous.length<=50&&s.previous.every(v=>v===null||isHash(v))&&Array.isArray(s.known)&&s.known.length<=500&&s.known.every(isHash)&&Number.isSafeInteger(s.sequence)&&s.sequence>=0&&(s.manifestSha256===null||isHash(s.manifestSha256))&&Array.isArray(s.history)&&s.history.length<=100,'LOCAL_STATE');p.version(s.catalogVersion);return s;}
 class TemplateCatalogStore{
- constructor({directory,baseline,trust,channel='stable',appVersion,fetchBytes,allowedImages=[],now=()=>Date.now(),fault=async()=>{}}){
- this.directory=directory;this.baseline=new Map(baseline.map(t=>[t.id,structuredClone(t)]));this.trust=trust;this.channel=channel;this.appVersion=appVersion;this.fetchBytes=fetchBytes;this.allowedImages=allowedImages;this.now=now;this.fault=fault;this.plans=new Map();
+ constructor({directory,baseline,trust,channel='stable',appVersion,fetchBytes,allowedImages=[],now=()=>Date.now(),fault=async()=>{},historicalTrust}){
+ this.directory=directory;this.baseline=new Map(baseline.map(t=>[t.id,structuredClone(t)]));this.trust=trust;this.channel=channel;this.appVersion=appVersion;this.fetchBytes=fetchBytes;this.allowedImages=allowedImages;this.now=now;this.fault=fault;this.plans=new Map();this.historicalTrust=historicalTrust;
  }
  get(file){return path.join(this.directory,file);}
+ readPackage(raw,entry){p.check(raw.length===entry.size&&p.sha256(raw)===entry.sha256,'PACKAGE_HASH');const root=this.historicalTrust?this.historicalTrust(p.parse(p.unzip(raw)['package.json']),this.channel):this.trusted();return p.readPackage(raw,entry,root,{appVersion:this.appVersion,allowedImages:this.allowedImages,channel:this.channel});}
  async lock(action){
  await fs.mkdir(this.directory,{recursive:true});const locks=this.get('locks');await fs.mkdir(locks,{recursive:true});
  const name=String(process.pid)+'.'+crypto.randomUUID()+'.json',file=path.join(locks,name);
@@ -33,8 +34,8 @@ class TemplateCatalogStore{
  trusted(){p.check(this.trust,'TRUST_NOT_CONFIGURED');p.validateRoot(this.trust,this.now(),false);return this.trust;}
  async generation(id){
  if(id===null)return {version:'builtin',templates:[]};p.check(isHash(id),'LOCAL_PATH');const dir=this.get('generations/'+id),raw=await boundedRead(path.join(dir,'manifest.json'),p.LIMITS.json);p.check(p.sha256(raw)===id,'LOCAL_HASH');
- const auth=p.parse(raw),root=this.trusted();const m=p.verify(auth,root,this.channel);p.validateManifest(m,{channel:this.channel,appVersion:this.appVersion,now:this.now(),expiry:false});p.check(root.roles[this.channel].keyIds.includes(m.publisher.keyId)&&auth.signatures.some(s=>s.keyId===m.publisher.keyId),'PUBLISHER');
- const templates=[];for(const entry of m.packages){const data=await boundedRead(this.get('packages/'+entry.sha256+'.xrszip'),p.LIMITS.archive);templates.push(p.readPackage(data,entry,root,{appVersion:this.appVersion,allowedImages:this.allowedImages,channel:this.channel}));}
+ const auth=p.parse(raw),root=this.historicalTrust?this.historicalTrust(auth,this.channel):this.trusted();const m=p.verify(auth,root,this.channel);p.validateManifest(m,{channel:this.channel,appVersion:this.appVersion,now:this.now(),expiry:false});p.check(root.roles[this.channel].keyIds.includes(m.publisher.keyId)&&auth.signatures.some(s=>s.keyId===m.publisher.keyId),'PUBLISHER');
+ const templates=[];for(const entry of m.packages){const data=await boundedRead(this.get('packages/'+entry.sha256+'.xrszip'),p.LIMITS.archive);templates.push(this.readPackage(data,entry));}
  return {version:m.catalogVersion,templates,manifest:m};
  }
  async load(){
@@ -67,18 +68,18 @@ class TemplateCatalogStore{
  let usage=await this.diskUsage();let needed=plan.raw.length+64000;for(const entry of plan.manifest.packages){try{await fs.access(this.get('packages/'+entry.sha256+'.xrszip'));}catch(error){if(error.code!=='ENOENT')throw error;needed+=entry.size;}}p.check(usage+needed<=MAX_STORE,'STORAGE_QUOTA');
  const archives=(plan.manifest.revisions??[]).filter(r=>r.status==='Archived'&&!plan.manifest.packages.some(e=>e.sha256===r.sha256));for(const entry of archives){try{await fs.access(this.get('packages/'+entry.sha256+'.xrszip'));}catch(e){if(e.code!=='ENOENT')throw e;needed+=entry.size;}}p.check(usage+needed<=MAX_STORE,'STORAGE_QUOTA');
  for(const entry of [...plan.manifest.packages,...archives]){let raw;const target=this.get('packages/'+entry.sha256+'.xrszip');try{raw=await boundedRead(target,p.LIMITS.archive);}catch(e){if(e.code!=='ENOENT')throw e;raw=await this.fetchBytes(entry.url,entry.size);}
- const t=p.readPackage(raw,entry,root,{appVersion:this.appVersion,allowedImages:this.allowedImages,channel:this.channel});
+ const t=this.readPackage(raw,entry);
  const before=previous.get(t.id);if(before){p.continuity(before,t);const cmp=p.compare(t.templateVersion,before.templateVersion);if(cmp===0)p.check(p.sha256(p.bytes(t))===p.sha256(p.bytes(before)),'VERSION_EQUIVOCATION');else if(cmp<0&&plan.manifest.packages.some(e=>e.sha256===entry.sha256)){const base=this.baseline.get(t.id);p.check(base&&p.compare(base.templateVersion,t.templateVersion)>0,'TEMPLATE_DOWNGRADE');}}
  else p.check(entry.action==='add'||plan.manifest.revisions?.some(r=>r.templateId===t.id&&r.action==='add'),'UNKNOWN_TEMPLATE');if(plan.manifest.packages.some(e=>e.sha256===entry.sha256))candidate.push(t);await atomic(target,raw);await this.fault('package-verified');}
  for(const previousTemplate of active.templates)p.check(candidate.some(t=>t.id===previousTemplate.id),'MISSING_CATALOG_ENTRY');
  this.effective(candidate,{installing:true});const id=p.sha256(plan.raw),dir=this.get('generations/'+id);await fs.mkdir(dir,{recursive:true});await atomic(path.join(dir,'manifest.json'),plan.raw);await this.generation(id);await this.fault('generation-verified');
  p.check(old.known.includes(id)||old.known.length<500,'STORAGE_QUOTA');
- const next={...old,active:id,known:[...new Set([...old.known,id])],previous:[old.active,...old.previous].filter((v,i,a)=>v!==id&&a.indexOf(v)===i).slice(0,50),sequence:Math.max(old.sequence,plan.manifest.sequence),manifestSha256:id,catalogVersion:plan.manifest.catalogVersion,lastSuccess:new Date(this.now()).toISOString(),history:[{at:new Date(this.now()).toISOString(),operation:'install',version:plan.manifest.catalogVersion},...old.history].slice(0,100)};
+ const next={...old,active:id,known:[...new Set([...old.known,id])],previous:[old.active,...old.previous].filter((v,i,a)=>v!==id&&a.indexOf(v)===i).slice(0,50),sequence:Math.max(old.sequence,plan.manifest.sequence),manifestSha256:id,catalogVersion:plan.manifest.catalogVersion,lastSuccess:new Date(this.now()).toISOString(),history:[{at:new Date(this.now()).toISOString(),operation:'install',version:plan.manifest.catalogVersion,sha256:id,channel:this.channel,changes:plan.manifest.packages.filter(entry=>!previous.has(entry.templateId)||previous.get(entry.templateId).templateVersion!==entry.templateVersion).length},...old.history].slice(0,100)};
  await atomic(this.get('state-before.json'),p.bytes(old));await this.fault('before-activation');await atomic(this.get('state.json'),p.bytes(next));await this.fault('after-activation');
  try{await this.load();}catch(e){await atomic(this.get('state.json'),p.bytes(old));throw e;}
  this.plans.clear();return this.load();
  });}
- async rollback(confirmed){p.check(confirmed===true,'CONFIRMATION_REQUIRED');return this.lock(async()=>{const old=await this.state();p.check(old.previous.length>0,'NO_PREVIOUS_CATALOG');const [active,...rest]=old.previous;await this.generation(active);const next={...old,active,previous:rest,history:[{at:new Date(this.now()).toISOString(),operation:'rollback',version:(await this.generation(active)).version},...old.history].slice(0,100)};
+ async rollback(confirmed){p.check(confirmed===true,'CONFIRMATION_REQUIRED');return this.lock(async()=>{const old=await this.state();p.check(old.previous.length>0,'NO_PREVIOUS_CATALOG');const [active,...rest]=old.previous;await this.generation(active);const next={...old,active,previous:rest,history:[{at:new Date(this.now()).toISOString(),operation:'rollback',version:(await this.generation(active)).version,sha256:active,channel:this.channel},...old.history].slice(0,100)};
  await atomic(this.get('state-before.json'),p.bytes(old));await atomic(this.get('state.json'),p.bytes(next));await this.load();this.plans.clear();return this.load();});}
  async diskUsage(){let n=0;const walk=async directory=>{for(const file of await fs.readdir(directory,{withFileTypes:true})){const target=path.join(directory,file.name);p.check(!file.isSymbolicLink(),'LOCAL_SYMLINK');if(file.isDirectory())await walk(target);else if(file.isFile())n+=(await fs.stat(target)).size;}};await walk(this.directory);return n;}
 }

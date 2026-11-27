@@ -54,7 +54,8 @@ function rotateRoot(previous,nextEnvelope,now=Date.now()){
 function date(value){check(typeof value==='string'&&Number.isFinite(Date.parse(value))&&new Date(value).toISOString()===value,'DATE');}
 function httpsUrl(value){let url;try{url=new URL(value);}catch{fail('URL');}check(url.protocol==='https:'&&!url.username&&!url.password&&!url.hash,'URL');return url;}
 function validateManifest(manifest,{channel,appVersion,now=Date.now(),expiry=true}={}){
- const names=['schemaVersion','type','catalogId','catalogVersion','sequence','channel','minimumXrsVersion','publishedAt','expiresAt','publisher','packages'];if(manifest.schemaVersion===2)names.push('revisions');keys(manifest,names);
+ const names=['schemaVersion','type','catalogId','catalogVersion','sequence','channel','minimumXrsVersion','publishedAt','expiresAt','publisher','packages'];if(manifest.schemaVersion===2)names.push('revisions');if(manifest.publication!==undefined)names.push('publication');keys(manifest,names);
+ if(manifest.publication!==undefined){const x=manifest.publication;keys(x,['id','requestSha256','previousVersion','previousManifestSha256','workflowSha','workflowRunId']);check(typeof x.id==='string'&&/^[a-f0-9-]{36}$/.test(x.id)&&HASH.test(x.requestSha256)&&/^[a-f0-9]{40}$/.test(x.workflowSha)&&/^\d+$/.test(x.workflowRunId),'PUBLICATION_BINDING');version(x.previousVersion);check(x.previousManifestSha256===null||HASH.test(x.previousManifestSha256),'PUBLICATION_BINDING');}
  check([1,2].includes(manifest.schemaVersion)&&manifest.type==='xrs-template-catalog','SCHEMA');check(ID.test(manifest.catalogId),'ID');version(manifest.catalogVersion);
  check(Number.isSafeInteger(manifest.sequence)&&manifest.sequence>0,'SEQUENCE');check(['stable','test'].includes(manifest.channel)&&(!channel||manifest.channel===channel),'CHANNEL');
  version(manifest.minimumXrsVersion);if(appVersion)check(compare(appVersion,manifest.minimumXrsVersion)>=0,'XRS_VERSION_REQUIRED');

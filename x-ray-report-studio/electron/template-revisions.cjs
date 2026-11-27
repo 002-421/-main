@@ -10,6 +10,6 @@ async function revisionIndex(store){
  return [...rows.values()].sort((a,b)=>a.templateId.localeCompare(b.templateId)||p.compare(b.templateVersion,a.templateVersion));
 }
 async function readRevision(store,id,version){p.string(id,120);p.version(version);const row=(await revisionIndex(store)).find(r=>r.templateId===id&&r.templateVersion===version);p.check(row,'REVISION_NOT_FOUND');p.check(row.status!=='Revoked','REVISION_REVOKED');p.check(row.available,'REVISION_NOT_CACHED');if(row.builtin)return {metadata:row,builtin:true};
- const raw=await boundedRead(store.get('packages/'+row.sha256+'.xrszip'),p.LIMITS.archive),template=p.readPackage(raw,row,store.trusted(),{appVersion:store.appVersion,allowedImages:store.allowedImages,channel:store.channel});return {metadata:row,template,builtin:false};
+ const raw=await boundedRead(store.get('packages/'+row.sha256+'.xrszip'),p.LIMITS.archive),template=store.readPackage(raw,row);return {metadata:row,template,builtin:false};
 }
 module.exports={revisionIndex,readRevision};

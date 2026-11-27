@@ -68,7 +68,7 @@ export function applyTemplateCatalog(input:CatalogTemplate[],latestActive:Catalo
  }
  if(!next.some(t=>!t.retired))throw Error('В каталоге нет доступных шаблонов.');
  reportTemplates.splice(0,reportTemplates.length,...next);areas.splice(0,areas.length,...nextAreas);
- networkTemplates.clear();networkRecords.clear();for(const [id,doc]of docs)networkTemplates.set(id,doc);for(const [id,row]of prepared)networkRecords.set(id,structuredClone(row));for(const row of latestActive)if(!row.retired&&reportTemplates.some(t=>t.id===row.id&&!t.retired)){networkRecords.set(row.id,structuredClone(row));networkTemplates.set(row.id,structuredClone(row.doc));const info=reportTemplates.find(t=>t.id===row.id)!;info.templateVersion=row.templateVersion;}
+ networkTemplates.clear();networkRecords.clear();for(const [id,doc]of docs)networkTemplates.set(id,doc);for(const [id,row]of prepared)networkRecords.set(id,structuredClone(row));for(const row of latestActive)if(!row.retired&&reportTemplates.some(t=>t.id===row.id&&!t.retired)){networkRecords.set(row.id,structuredClone(row));}
 }
 export const networkTemplate=(id:string)=>networkTemplates.has(id);
 export const templateAvailable=(id:string)=>Boolean(reportTemplates.find(t=>t.id===id&&!t.retired));

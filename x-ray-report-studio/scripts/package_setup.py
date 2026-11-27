@@ -47,6 +47,11 @@ def collect_licenses():
     notices.append(f"\n{'=' * 60}\nBundled DejaVu Sans and Carlito fonts\n"
                    f"{font_notice.read_text(encoding='utf-8')}\n")
     notices.append('\n' + (ROOT / 'src/assets/morphology/LICENSE.txt').read_text(encoding='utf-8') + '\n')
+    publisher_notice = ROOT / 'public/template-publisher-LICENSE.txt'
+    if publisher_notice.is_file():
+        notices.append('\nBundled template publisher dependencies\n' + publisher_notice.read_text(encoding='utf-8') + '\n')
+    elif (ROOT / 'electron/template-publisher-runtime.cjs').exists():
+        raise RuntimeError('Bundled template publisher dependency licenses are missing.')
     return ''.join(notices)
 
 
