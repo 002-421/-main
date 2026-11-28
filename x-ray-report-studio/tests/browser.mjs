@@ -1,3 +1,4 @@
+import {chooseTheme} from './helpers/owner-runtime.mjs';
 import { assertNoPrintPreview } from './print-export-helpers.mjs';
 import assert from 'node:assert/strict';
 import { _electron, chromium } from 'playwright-core';
@@ -167,13 +168,13 @@ try{
  assert.equal(await page.locator('#rollback-update,#open-update-backups').count(),0,'extra updater controls are absent');
  await page.locator('.dialog [data-close]').first().click();
 
- await page.locator('#toggle-theme').click();
+ await chooseTheme(page,'dark');
  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
- assert.equal(await page.locator('#toggle-theme').getAttribute('aria-pressed'),'true');
+ assert.equal(await page.locator('#toggle-theme').count(),0);
  assert.equal(await page.locator('#modality-select').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(34, 46, 59)');
  assert.equal(await page.locator('#modality-select option').first().evaluate(el=>getComputedStyle(el).color),'rgb(228, 234, 242)');
  assert.equal(await page.locator('.paper').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)');
- await page.locator('#toggle-theme').click();
+ await chooseTheme(page,'light');
  assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
  console.log('PASS: visible theme toggle changes and restores dark mode while keeping the report paper white.');
 

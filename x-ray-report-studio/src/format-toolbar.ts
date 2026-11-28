@@ -154,6 +154,9 @@ export function bindFormatToolbar(editor: Editor, toolbar: HTMLElement) {
       update();
     };
   }
+  const restorePreferences=()=>{fill=manualFillColor(localStorage.getItem(fillKey))??MANUAL_FILL_COLORS[0][0];close();update();};
+  document.addEventListener('xrs-settings-restored',restorePreferences);
+  editor.on('destroy',()=>document.removeEventListener('xrs-settings-restored',restorePreferences));
   editor.on('transaction', ({transaction}) => {
     if (transaction.docChanged || transaction.selectionSet || transaction.storedMarksSet) update();
   });

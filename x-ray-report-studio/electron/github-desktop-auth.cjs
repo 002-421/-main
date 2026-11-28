@@ -5,6 +5,7 @@ const fail=code=>{throw Object.assign(Error(code),{code});};
 async function jsonResponse(fetchImpl,url,options={}){
  let r;try{r=await fetchImpl(url,{...options,redirect:'error',signal:AbortSignal.timeout(60000)});}catch{fail('GITHUB_UNAVAILABLE');}
  if(!r.ok)throw Object.assign(Error('GitHub request failed'),{code:r.status===401?'GITHUB_UNAUTHORIZED':r.status===403?'GITHUB_FORBIDDEN':r.status===404?'SOURCE_NOT_FOUND':r.status===422?'VERSION_CONFLICT':r.status===409?'GITHUB_CONFLICT':r.status===429?'GITHUB_RATE_LIMIT':r.status>=500?'GITHUB_SERVER_ERROR':'GITHUB_UNAVAILABLE',httpStatus:r.status,requestId:r.headers.get('x-github-request-id')?.replace(/[^A-Za-z0-9:-]/g,'').slice(0,100),oauthScopes:r.headers.get('x-oauth-scopes')?.split(',').map(s=>s.trim()).filter(s=>/^[a-z_:]+$/.test(s)).slice(0,30)});
+ if(r.status===204){await r.body?.cancel();return null;}
  const chunks=[];let size=0;for await(const chunk of r.body){size+=chunk.length;if(size>16*1024*1024)fail('GITHUB_RESPONSE_INVALID');chunks.push(Buffer.from(chunk));}
  try{const value=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(value&&typeof value==='object')Object.defineProperty(value,'$transport',{value:{scopes:(r.headers.get('x-oauth-scopes')??'').split(',').map(s=>s.trim()).filter(s=>/^[a-z_:]+$/.test(s)).slice(0,30)},enumerable:false});return value;}catch{fail('GITHUB_RESPONSE_INVALID');}
 }
@@ -14,7 +15,8 @@ function createDesktopAuth({directory,clientId,safeStorage,openExternal,fetchImp
  const request=(url,body)=>jsonResponse(fetchImpl,url,{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify(body)});
  async function token(){secure();try{const stat=await fs.lstat(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>16384)fail('GITHUB_LOGIN_REQUIRED');const value=safeStorage.decryptString(await fs.readFile(file));if(!value||value.length>8192)fail('GITHUB_LOGIN_REQUIRED');return value;}catch{fail('GITHUB_LOGIN_REQUIRED');}}
  async function api(method,route,body){
-  if(!['GET','POST','PATCH'].includes(method)||!/^\/(?:user$|repos\/002-421\/XRS-Templates(?:\/|$))/.test(route)||/[#\\]|\.\./.test(route))fail('GITHUB_ENDPOINT');
+  if(!['GET','POST','PATCH','DELETE'].includes(method)||!/^\/(?:user$|repos\/002-421\/XRS-Templates(?:\/|$))/.test(route)||/[#\\]|\.\./.test(route))fail('GITHUB_ENDPOINT');
+  if(method==='DELETE'&&!/^\/repos\/002-421\/XRS-Templates\/releases\/assets\/\d+$/.test(route))fail('GITHUB_ENDPOINT');
   if(method==='PATCH'&&!/^\/repos\/002-421\/XRS-Templates\/releases\/\d+$/.test(route))fail('GITHUB_ENDPOINT');
   return jsonResponse(fetchImpl,'https://api.github.com'+route,{method,headers:{Accept:'application/vnd.github+json',Authorization:'Bearer '+await token(),'X-GitHub-Api-Version':'2022-11-28',...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
  }

@@ -32,7 +32,7 @@ jobs:
         run: node tests/template-publishing-electron.mjs
       - name: Legacy catalog compatibility, archived versions, fields and rollback in two Electron instances
         run: node tests/template-updates-electron.mjs
-      - name: Local PIN 4 to 6 digits, Draft, local templates and cold restart
+      - name: PIN-free OAuth-authorized MOCK admin, Draft, local templates and cold restart
         run: node tests/template-admin-electron.mjs
       - name: Actual internal clipboard, editable fields, DOCX and Chromium PDF
         run: node tests/paste-fields-electron.mjs
@@ -56,6 +56,8 @@ jobs:
         run: node tests/github-auth-electron.mjs
       - name: Unified yellow lifecycle, dark-mode DOCX, safe reset and recovery
         run: node tests/recovery-highlight-electron.mjs
+      - name: Light Dark AMOLED, range 75 to 200 percent, long document and export invariance
+        run: node tests/ui-preferences-electron.mjs
       - name: Build and verify exact final Windows installation package
         shell: pwsh
         run: |
@@ -80,4 +82,5 @@ jobs:
             x-ray-report-studio/test-output/editable-highlights/
             x-ray-report-studio/test-output/release-088/*.json
             x-ray-report-studio/test-output/recovery-088/
+            x-ray-report-studio/test-output/ui-preferences/
           if-no-files-found: ignore

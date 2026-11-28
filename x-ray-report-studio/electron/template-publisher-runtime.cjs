@@ -640,7 +640,8 @@ var require_github_direct = __commonJS({
         }
       };
       return { status: () => run(["auth", "status", "--hostname", "github.com", "--active", "--json", "hosts"]), api: (method, route, body) => {
-        p2.check(["GET", "POST", "PATCH"].includes(method) && /^\/(?:user$|repos\/002-421\/XRS-Templates(?:\/|$))/.test(route) && !route.includes("..") && !route.includes("#"), "GITHUB_ENDPOINT");
+        p2.check(["GET", "POST", "PATCH", "DELETE"].includes(method) && /^\/(?:user$|repos\/002-421\/XRS-Templates(?:\/|$))/.test(route) && !route.includes("..") && !route.includes("#"), "GITHUB_ENDPOINT");
+        if (method === "DELETE") p2.check(/^\/repos\/002-421\/XRS-Templates\/releases\/assets\/\d+$/.test(route), "GITHUB_ENDPOINT");
         if (method === "PATCH") p2.check(/^\/repos\/002-421\/XRS-Templates\/releases\/\d+$/.test(route), "GITHUB_ENDPOINT");
         return run(["api", "--hostname", "github.com", "--method", method, route, ...body === void 0 ? [] : ["--input", "-"]], body === void 0 ? void 0 : JSON.stringify(body));
       }, upload: (tag, file) => {
@@ -8395,6 +8396,33 @@ var require_validate2 = __commonJS({
   }
 });
 
+// scripts/lib/catalog-artifacts.cjs
+var require_catalog_artifacts = __commonJS({
+  "scripts/lib/catalog-artifacts.cjs"(exports2, module2) {
+    "use strict";
+    var p2 = require_template_protocol();
+    var c = require_simple_catalog();
+    function buildArtifacts(request, current, { allowedImages = [], now = Date.now() } = {}) {
+      const archive = c.makeArchive(request.templates, request.catalogVersion, { allowedImages }), archiveMeta = { url: c.archiveUrl(request.catalogVersion), size: archive.length, sha256: p2.sha256(archive) }, packages = [], revisions = new Map((current?.manifest.revisions ?? []).map((r) => [r.templateId + "@" + r.templateVersion, r]));
+      for (const t of request.templates) {
+        const old = current?.manifest.packages.find((r) => r.templateId === t.id);
+        let entry = old;
+        if (!old || old.templateSha256 !== p2.sha256(p2.bytes(t))) {
+          for (const [key, row] of revisions) if (row.templateId === t.id && row.status === "Active") revisions.set(key, { ...row, status: "Archived" });
+          entry = { templateId: t.id, templateVersion: t.templateVersion, action: t.retired ? "remove" : "update", ...archiveMeta, templateSha256: p2.sha256(p2.bytes(t)), templateSize: p2.bytes(t).length, archiveVersion: request.catalogVersion, summary: request.summaries[t.id] ?? "\u041F\u0435\u0440\u0432\u043E\u043D\u0430\u0447\u0430\u043B\u044C\u043D\u044B\u0439 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043D\u043D\u044B\u0439 \u043A\u0430\u0442\u0430\u043B\u043E\u0433" };
+          revisions.set(t.id + "@" + t.templateVersion, { ...entry, status: t.retired ? "Revoked" : "Active", publishedAt: request.createdAt, approvedBy: "github:002-421" });
+        }
+        packages.push(entry);
+      }
+      const manifest = { schemaVersion: 3, type: "xrs-https-template-catalog", catalogId: "xrs-medical-templates", catalogVersion: request.catalogVersion, sequence: request.sequence, channel: "stable", minimumXrsVersion: request.templates.reduce((v, t) => p2.compare(v, t.minimumXrsVersion) >= 0 ? v : t.minimumXrsVersion, "0.4.86"), publishedAt: request.createdAt, publisher: { login: "002-421", id: c.OWNER_ID, repository: c.REPOSITORY }, publicationId: request.id, previousVersion: request.previousVersion, previousManifestSha256: request.previousManifestSha256, contentSha256: request.contentSha256, archive: archiveMeta, packages, revisions: [...revisions.values()] };
+      const raw = p2.bytes(manifest);
+      c.manifest(raw, { now });
+      return { archive, raw, manifest };
+    }
+    module2.exports = { buildArtifacts };
+  }
+});
+
 // scripts/lib/simple-publisher.cjs
 var require_simple_publisher = __commonJS({
   "scripts/lib/simple-publisher.cjs"(exports2, module2) {
@@ -8503,7 +8531,7 @@ var require_simple_publisher = __commonJS({
         p2.check(published.length <= 1, "RELEASE_AMBIGUOUS");
         if (published.length) return published[0];
         const own = matches.filter((r) => r.body === `Approved XRS template data. Publication ${publicationId}.`).sort((a, b) => a.id - b.id);
-        p2.check(!matches.length || own.length, "DRAFT_OWNER_CONFLICT");
+        p2.check(!matches.length || own.length || matches.every((r) => r.draft && Array.isArray(r.assets) && r.assets.length === 0), "DRAFT_OWNER_CONFLICT");
         return own[0] ?? null;
       }
       async publish(request) {
@@ -8551,20 +8579,7 @@ var require_simple_publisher = __commonJS({
           p2.continuity(old, t);
           if (p2.canonical(old) !== p2.canonical(t)) p2.check(p2.compare(t.templateVersion, old.templateVersion) > 0, "VERSION_NOT_INCREASED");
         }
-        const archive = c.makeArchive(request.templates, request.catalogVersion, { allowedImages: baseline.allowedImages }), archiveMeta = { url: c.archiveUrl(request.catalogVersion), size: archive.length, sha256: p2.sha256(archive) }, packages = [], revisions = new Map((current?.manifest.revisions ?? []).map((r) => [r.templateId + "@" + r.templateVersion, r]));
-        for (const t of request.templates) {
-          const old = current?.manifest.packages.find((r) => r.templateId === t.id);
-          let entry = old;
-          if (!old || old.templateSha256 !== p2.sha256(p2.bytes(t))) {
-            for (const [key, row] of revisions) if (row.templateId === t.id && row.status === "Active") revisions.set(key, { ...row, status: "Archived" });
-            entry = { templateId: t.id, templateVersion: t.templateVersion, action: t.retired ? "remove" : "update", ...archiveMeta, templateSha256: p2.sha256(p2.bytes(t)), templateSize: p2.bytes(t).length, archiveVersion: request.catalogVersion, summary: request.summaries[t.id] ?? "\u041F\u0435\u0440\u0432\u043E\u043D\u0430\u0447\u0430\u043B\u044C\u043D\u044B\u0439 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043D\u043D\u044B\u0439 \u043A\u0430\u0442\u0430\u043B\u043E\u0433" };
-            revisions.set(t.id + "@" + t.templateVersion, { ...entry, status: t.retired ? "Revoked" : "Active", publishedAt: request.createdAt, approvedBy: "github:002-421" });
-          }
-          packages.push(entry);
-        }
-        const manifest = { schemaVersion: 3, type: "xrs-https-template-catalog", catalogId: "xrs-medical-templates", catalogVersion: request.catalogVersion, sequence: request.sequence, channel: "stable", minimumXrsVersion: request.templates.reduce((v, t) => p2.compare(v, t.minimumXrsVersion) >= 0 ? v : t.minimumXrsVersion, "0.4.86"), publishedAt: request.createdAt, publisher: { login: "002-421", id: c.OWNER_ID, repository: c.REPOSITORY }, publicationId: request.id, previousVersion: request.previousVersion, previousManifestSha256: request.previousManifestSha256, contentSha256: request.contentSha256, archive: archiveMeta, packages, revisions: [...revisions.values()] };
-        const raw = p2.bytes(manifest);
-        c.manifest(raw, { now: this.now() });
+        const { archive, raw } = require_catalog_artifacts().buildArtifacts(request, current, { allowedImages: baseline.allowedImages, now: this.now() });
         const metadata = p2.canonical({ type: "xrs-catalog-reservation", publicationId: request.id, requestSha256: requestHash });
         let reservation;
         try {
@@ -8590,7 +8605,12 @@ var require_simple_publisher = __commonJS({
         const files = /* @__PURE__ */ new Map([["catalog.xrszip", archive], ["catalog-manifest.json", raw]]), temp = await fs.mkdtemp(path.join(os.tmpdir(), "xrs-catalog-upload-"));
         try {
           for (const [name, bytes] of files) {
-            const asset = release.assets?.find((a) => a.name === name);
+            let asset = release.assets?.find((a) => a.name === name);
+            if (asset?.state === "starter" && asset.size === 0 && Number.isSafeInteger(asset.id)) {
+              stage("upload");
+              await this.api("DELETE", "/releases/assets/" + asset.id);
+              asset = null;
+            }
             if (asset) {
               p2.check(asset.digest === "sha256:" + p2.sha256(bytes) && asset.size === bytes.length, "ASSET_CONFLICT");
               continue;

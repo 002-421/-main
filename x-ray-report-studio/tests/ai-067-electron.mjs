@@ -1,3 +1,4 @@
+import {chooseTheme} from './helpers/owner-runtime.mjs';
 import { chooseExport, assertNoPrintPreview } from './print-export-helpers.mjs';
 import assert from 'node:assert/strict';
 import {_electron} from 'playwright-core';
@@ -27,7 +28,7 @@ try{
  await page.waitForFunction(()=>document.querySelector('#save-state')?.textContent==='Сохранено на компьютере');
  await page.waitForFunction(()=>document.querySelectorAll('[data-section-id="description"] p').length>=31);
  assert.ok(await page.locator('[data-section-id="description"] p').count()>=31,'the synthetic medical protocol spans many paragraphs');
- for(const category of ['spelling','punctuation','style','terminology','consistency','clinical']){stage='category-'+category;const mark=page.locator(`.ai-review-${category}`).first();await mark.waitFor({timeout:30000});await mark.click({button:'right'});assert.equal(await page.locator('.ai-review-card').count(),1,`${category}: finding reaches the contextual menu in Electron`);await page.keyboard.press('Escape');}
+ for(const theme of ['light','dark','amoled']){await chooseTheme(page,theme);for(const category of ['spelling','punctuation','style','terminology','consistency','clinical']){stage=theme+'-category-'+category;const mark=page.locator(`.ai-review-${category}`).first();await mark.waitFor({timeout:30000});await mark.click({button:'right'});assert.equal(await page.locator('.ai-review-card').count(),1,`${category}: finding reaches the contextual menu in Electron`);await page.keyboard.press('Escape');}}
  await page.waitForFunction(()=>[...document.querySelectorAll('.ai-review-spelling')].filter(n=>n.textContent==='Ошибкка').length===5,null,{timeout:30000});
  for(const mark of await page.locator('.ai-review-spelling').filter({hasText:/^Ошибкка$/}).all()){await mark.click({button:'right'});assert.equal(await page.locator('.ai-review-card').count(),1);await page.keyboard.press('Escape');}
  for(const term of ['гипофиз','гипофиза','гипофизу','гипофизом'])assert.equal(await page.locator('.ai-review-spelling,.ai-review-terminology').filter({hasText:new RegExp('^'+term+'$','iu')}).count(),0);
