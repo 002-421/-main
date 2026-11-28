@@ -1,5 +1,6 @@
 export function compactToolbar(root:HTMLElement){
  const ribbon=root.querySelector<HTMLElement>('.ribbon')!,header=root.querySelector<HTMLElement>('.topbar')!,tools=root.querySelector<HTMLElement>('.document-tools')!;
+ const indent=ribbon.querySelector('[data-format-toggle="indent"]')?.closest('.format-menu');if(indent)ribbon.prepend(indent);
  const menu=(title:string)=>{const details=document.createElement('details');details.className='compact-menu';const summary=document.createElement('summary');summary.textContent=title;const panel=document.createElement('div');panel.className='compact-menu-items';details.append(summary,panel);ribbon.append(details);return {details,panel};};
  const copy=menu('Копировать ▼');for(const [id,title]of [['copy-report','Копировать полностью'],['copy-for-ai','Копировать для ИИ']]){const node=root.querySelector<HTMLButtonElement>('#'+id)!;node.textContent=title;copy.panel.append(node);}
  const insert=menu('Вставка');for(const id of ['new-report','insert-size'])insert.panel.append(root.querySelector('#'+id)!);
