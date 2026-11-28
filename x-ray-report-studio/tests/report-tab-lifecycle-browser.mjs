@@ -65,7 +65,7 @@ try {
   assert.equal(await count(), 5, 'five open reports are supported');
   const openingStarted=Date.now();
   for(const capacity of [13,20,30,50]){
-    while(await count()<capacity)await page.locator('#new-report').click();
+    while(await count()<capacity)await page.locator('#add-report-tab').click();
     assert.equal(await count(),capacity);
   }
   console.log(`Opened from 5 to 50 tabs in ${Date.now()-openingStarted} ms including browser interactions and persistence.`);

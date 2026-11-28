@@ -255,7 +255,7 @@ try {
   }, storageKeys);
   phase = 'create synthetic documents, template, settings, and dictionary';
   await fillSyntheticPatient('XRS_SYNTHETIC_PATIENT_ALPHA');
-  await page.locator('#new-report').click();
+  await page.locator('#add-report-tab').click();
   await page.locator('.report-tab').nth(1).waitFor();
   await fillSyntheticPatient('XRS_SYNTHETIC_PATIENT_BETA');
 

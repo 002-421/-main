@@ -4,7 +4,7 @@ const launch=async()=>{app=await _electron.launch({... (process.env.ELECTRON_PAT
 try{
  await launch();
  for(let i=0;i<15;i++)await app.evaluate(({BrowserWindow},i)=>{const w=BrowserWindow.getAllWindows()[0];w.minimize();w.restore();w.setSize(1100+(i%3)*100,800+(i%2)*80);},i);
- for(let i=0;i<3;i++){await page.locator('#new-report').click();if(await page.locator('#confirm-new').count())await page.locator('#confirm-new').click();}
+ for(let i=0;i<3;i++){await page.locator('#add-report-tab').click();if(await page.locator('#confirm-new').count())await page.locator('#confirm-new').click();}
  for(let i=0;i<18;i++){const tabs=page.locator('[data-report-select]');await tabs.nth(i%await tabs.count()).click();const p=page.locator('[data-section-id="description"] p').first();await p.click();await page.keyboard.press('End');await page.keyboard.insertText(` синтетический-${i}`);}
  await page.waitForFunction(()=>document.querySelector('#save-state')?.textContent==='Сохранено на компьютере');
  const before=await page.evaluate(()=>localStorage.getItem('mri-report-studio.workspace.v1'));

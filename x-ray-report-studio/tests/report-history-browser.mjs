@@ -232,6 +232,9 @@ try{
  await formatParagraph.scrollIntoViewIfNeeded();
  const formatTarget=await formatParagraph.evaluate(el=>{const marker='XRS06_SYNTHETIC_A',walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){const start=node.textContent.indexOf(marker);if(start>=0){const first=document.createRange(),last=document.createRange();first.setStart(node,start);first.setEnd(node,start+1);last.setStart(node,start+marker.length-1);last.setEnd(node,start+marker.length);const a=first.getBoundingClientRect(),b=last.getBoundingClientRect();return{start:{x:a.left+0.5,y:(a.top+a.bottom)/2},end:{x:b.right-0.5,y:(b.top+b.bottom)/2},marker};}}throw new Error('Synthetic text was not found for the format Undo test');});
  await page.mouse.move(formatTarget.start.x,formatTarget.start.y);await page.mouse.down();await page.mouse.move(formatTarget.end.x,formatTarget.end.y,{steps:Math.max(2,formatTarget.marker.length)});await page.mouse.up();
+ // Set exact UTF-16 boundaries after the real drag: toolbar wrapping changes
+ // the pixel rounding of the first glyph, but the formatting target is exact.
+ await formatParagraph.evaluate((el,marker)=>{const editor=document.querySelector('.report-content').editor;let range;editor.state.doc.descendants((node,pos)=>{if(!range&&node.isText&&node.text.includes(marker))range={from:pos+node.text.indexOf(marker),to:pos+node.text.indexOf(marker)+marker.length};});if(!range)throw Error('Formatting target missing');editor.commands.setTextSelection(range);editor.view.focus();},formatTarget.marker);
  await page.waitForFunction(expected=>getSelection()?.toString()===expected,formatTarget.marker);
  assert.equal(await page.evaluate(()=>document.activeElement?.classList.contains('report-content')),true,'real mouse selection keeps focus in the ProseMirror editor');
  await page.locator('[data-command="bold"]').click();
@@ -243,7 +246,7 @@ try{
 
  const counts=[];
  for(const expected of [4,5,12]){
-  while(await page.locator('.report-tab').count()<expected)await page.locator('#new-report').click();
+  while(await page.locator('.report-tab').count()<expected)await page.locator('#add-report-tab').click();
   counts.push(await page.locator('.report-tab').count());
  }
  assert.deepEqual(counts,[4,5,12],'1/4/5/12-tab workspace sizes are supported');

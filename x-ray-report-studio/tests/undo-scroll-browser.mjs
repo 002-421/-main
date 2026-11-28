@@ -82,7 +82,7 @@ try{
  // Switch tabs, make a new edit in the restored report, and verify that its
  // local history still behaves without carrying another tab's history.
  const firstId=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
- await page.locator('#new-report').click();
+ await page.locator('#add-report-tab').click();
  const secondId=await page.locator('.report-tab.active [data-report-select]').getAttribute('data-report-select');
  assert.notEqual(secondId,firstId);
  await page.locator(`[data-report-select="${firstId}"]`).click();

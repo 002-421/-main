@@ -14,7 +14,7 @@ try{
  page.on('pageerror',error=>errors.push(error.message));
  await page.addInitScript(()=>{const add=EventTarget.prototype.addEventListener;EventTarget.prototype.addEventListener=function(type,listener,options){if(this===window&&type==='beforeunload')return;return add.call(this,type,listener,options);};});
  await page.goto(origin);await page.locator('.report-content').waitFor();
- await page.locator('#new-report').click();await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');
+ await page.locator('#add-report-tab').click();await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');
  const workspaceKey='mri-report-studio.workspace.v1',templateKey='mri-alliance.templates.v4';
  const baseline=await page.evaluate(key=>{const workspace=JSON.parse(localStorage.getItem(key));return {templateId:workspace.reports[0].templateId,doc:workspace.reports[0].doc};},workspaceKey);
  for(const size of [1,5,12]){
@@ -59,12 +59,12 @@ try{
  await page.evaluate(({key,raw})=>localStorage.setItem(key,raw),{key:workspaceKey,raw:malformed});
  await page.reload();await page.locator('.report-content').waitFor();
  assert.ok((await page.evaluate(key=>Object.keys(localStorage).filter(item=>item.startsWith(`${key}.recovery.`)).map(item=>localStorage.getItem(item)),workspaceKey)).includes(malformed),'malformed JSON is backed up verbatim');
- await page.locator('#new-report').click();await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');
+ await page.locator('#add-report-tab').click();await page.waitForFunction(()=>document.querySelector('#save-state').textContent==='Сохранено на компьютере');
 
  const blockedRaw=JSON.stringify({activeId:'broken',reports:[{id:'broken',templateId:'head-gm',doc:{type:'invalid'},dirty:true}]});
  await page.evaluate(({key,raw})=>localStorage.setItem(key,raw),{key:workspaceKey,raw:blockedRaw});
  await page.addInitScript(()=>{if(sessionStorage.getItem('xrs-fail-backup'))return;sessionStorage.setItem('xrs-fail-backup','1');const original=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(String(key).startsWith('mri-report-studio.workspace.v1.recovery.'))throw new DOMException('Quota exceeded','QuotaExceededError');return original.call(this,key,value);};});
- await page.reload();await page.locator('.report-content').waitFor();await page.locator('#new-report').click();await page.waitForTimeout(700);
+ await page.reload();await page.locator('.report-content').waitFor();await page.locator('#add-report-tab').click();await page.waitForTimeout(700);
  assert.equal(await page.evaluate(key=>localStorage.getItem(key),workspaceKey),blockedRaw,'backup failure prevents overwriting the damaged workspace');
  await page.reload();await page.locator('.report-content').waitFor();
  assert.ok((await page.evaluate(key=>Object.keys(localStorage).filter(item=>item.startsWith(`${key}.recovery.`)).map(item=>localStorage.getItem(item)),workspaceKey)).includes(blockedRaw),'recovery retries after backup storage becomes writable');

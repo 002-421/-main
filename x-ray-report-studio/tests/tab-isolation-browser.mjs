@@ -39,7 +39,7 @@ try {
   }
  }
  await fill(nameA);await check('A immediately before creating B',a,nameA,nameB);
- await page.locator('#new-report').click();const b=await active();assert.notEqual(a,b);
+ await page.locator('#add-report-tab').click();const b=await active();assert.notEqual(a,b);
  assert.ok(!(await page.locator('.report-content').innerText()).includes(nameA));
  await fill(nameB);await check('B created',b,nameB,nameA);
  for(const [id,own,foreign] of [[a,nameA,nameB],[b,nameB,nameA],[a,nameA,nameB],[b,nameB,nameA]]){
