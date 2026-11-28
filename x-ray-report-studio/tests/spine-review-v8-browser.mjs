@@ -66,13 +66,17 @@ try{
   await page.keyboard.press('Control+v');
   current=await state();assert.equal(current.sizes.find(s=>s.id===last.id).text,'9,25');
   assert.equal(current.sizes.find(s=>s.id===last.id).filled,true);
-  // Manual fill changes formatting only; removing it cannot mark a size filled.
+  // In 0.4.88 the yellow toggle uses the same service lifecycle: explicit
+  // removal completes only this size, and reapplication rearms the same ID.
   const remaining=current.sizes.filter(s=>s.id.startsWith(synthetic.attrs.editableHighlight.id))[0];
   await page.evaluate(({pos,text})=>{const e=document.querySelector('.report-content').editor;e.chain().focus().setTextSelection({from:pos,to:pos+text.length}).run();},remaining);
   const pendingBefore=JSON.stringify((await state()).sizes);
-  await page.locator('#fill-text').click();assert.equal(await page.locator('#fill-text').getAttribute('data-fill-state'),'current');
+  assert.equal(await page.locator('#fill-text').getAttribute('data-fill-state'),'current');
   await page.locator('#fill-text').click();assert.equal(await page.locator('#fill-text').getAttribute('data-fill-state'),'none');
-  assert.equal(JSON.stringify((await state()).sizes),pendingBefore,`${id}: manual toggle independent from measurements`);
+  const cleared=(await state()).sizes;assert.equal(cleared.find(s=>s.id===remaining.id).filled,true);
+  assert.deepEqual(cleared.filter(s=>s.id!==remaining.id),JSON.parse(pendingBefore).filter(s=>s.id!==remaining.id),`${id}: fill-off preserves neighboring sizes`);
+  await page.locator('#fill-text').click();assert.equal(await page.locator('#fill-text').getAttribute('data-fill-state'),'current');
+  assert.equal(JSON.stringify((await state()).sizes),pendingBefore,`${id}: reapplying yellow retains the same size ID and independent state`);
   // Exercise the HTML parser and a real Electron clipboard, not only a PM Slice.
   const copiedHtml=await page.evaluate(paragraph=>{
     const e=document.querySelector('.report-content').editor,copy=structuredClone(paragraph),old=copy.attrs.editableHighlight.id;

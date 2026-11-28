@@ -77,6 +77,7 @@ jobs:
             x-ray-report-studio/test-output/template-publishing/
             x-ray-report-studio/test-output/paste-fields/
             x-ray-report-studio/test-output/template-admin/
+            x-ray-report-studio/test-output/editable-highlights/
             x-ray-report-studio/test-output/release-088/*.json
             x-ray-report-studio/test-output/recovery-088/
           if-no-files-found: ignore

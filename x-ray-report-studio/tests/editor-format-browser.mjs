@@ -225,12 +225,12 @@ try {
 
   const fillButton=page.locator('#fill-text');
   const fillState=()=>fillButton.getAttribute('data-fill-state');
-  const yellow=body.locator('[data-manual-fill="#ffff00"]');
+  const yellow=body.locator('[data-template-field][data-filled="false"],[data-template-highlight]');
   const blue=body.locator('[data-manual-fill="#bcebff"]');
   await select(1,1,1,6);
   assert.equal(await fillState(),'none');
   await fillButton.click();
-  assert.equal(await yellow.count(),1);
+  assert.equal(await yellow.count(),1,'0.4.88 yellow uses the existing functional field marks');
   assert.equal(await fillState(),'current');
   await fillButton.click();
   assert.equal(await yellow.count(),0,'second click removes yellow without undo');
