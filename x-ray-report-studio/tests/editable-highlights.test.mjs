@@ -70,9 +70,9 @@ test('first/middle/last measurement replacement and paste do not append zeros or
   assert.match(v.state.doc.textContent,/см/);
  }
 });
-test('ordinary literal 0,0 and manual yellow never become measurement fields in saved reports',()=>{
+test('ordinary literal stays literal; previously manual yellow gains typed independent lifecycle',()=>{
  const raw={type:'doc',content:[paragraph('0,0 и реальное значение',[{type:'textStyle',attrs:{backgroundColor:'#ffff00'}}])]};
- assert.equal(editableHighlightStructure(resetInlineTemplate(raw)).sizes.length,0);
+ assert.equal(editableHighlightStructure(resetInlineTemplate(raw)).sizes.length,1);
  assert.equal(editableHighlightStructure(prepareInlineDocument({type:'doc',content:[paragraph('0,0')]})).sizes.length,0);
  const v=viewFor();assert.equal(input(v,v.state.doc.content.size-10,'7'),false);
 });

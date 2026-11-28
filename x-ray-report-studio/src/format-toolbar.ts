@@ -1,3 +1,4 @@
+import {markSelectionYellow,clearSelectionYellow} from './yellow-lifecycle.ts';
 import {FIRST_LINE_INDENTS, selectionIndent, setFirstLineIndent} from './document-typography.ts';
 import type { Editor } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
@@ -44,14 +45,13 @@ export function bindFormatToolbar(editor: Editor, toolbar: HTMLElement) {
   function applyFill(value: string | null) {
     const {from, to} = editor.state.selection;
     if (from === to) return;
-    const chain = editor.chain().focus();
-    if (value) chain.setBackgroundColor(value).run();
-    else chain.unsetBackgroundColor().run();
+    if (value==='#ffff00')markSelectionYellow(editor);
+    else clearSelectionYellow(editor,value);
   }
   function selectionFill() {
     const {selection, storedMarks, doc} = editor.state;
     const background = (marks: typeof selection.$from.parent.marks) =>
-      manualFillColor(marks.find(mark => mark.type.name === 'textStyle')?.attrs.backgroundColor) ?? String(marks.find(mark => mark.type.name === 'textStyle')?.attrs.backgroundColor ?? '').toLowerCase();
+      marks.some(m=>m.type.name==='templateHighlight'||['templateField','templateSize'].includes(m.type.name)&&m.attrs.filled===false)?'#ffff00':manualFillColor(marks.find(mark => mark.type.name === 'textStyle')?.attrs.backgroundColor) ?? String(marks.find(mark => mark.type.name === 'textStyle')?.attrs.backgroundColor ?? '').toLowerCase();
     const colors = new Set<string>();
     if (selection.empty) colors.add(background(storedMarks ?? selection.$from.marks()));
     else for (const range of selection.ranges) {
@@ -133,8 +133,8 @@ export function bindFormatToolbar(editor: Editor, toolbar: HTMLElement) {
         insertReportLine(editor, thickness);
       }
       if (format === 'list') {
-        const chain = editor.chain().focus();
-        if (value === 'off') chain.liftListItem('listItem').run();
+        const chain=editor.chain().focus();
+            if (value === 'off') chain.liftListItem('listItem').run();
         else if (value === 'ordered') {
           if (!editor.isActive('orderedList')) chain.toggleOrderedList().run();
         } else {

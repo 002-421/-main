@@ -12,7 +12,7 @@ async function fetchBytes(input,limit,{allowedPrefixes,fetchImpl=fetch,timeoutMs
  const githubAsset=original.hostname==='github.com'&&['release-assets.githubusercontent.com','objects.githubusercontent.com'].includes(next.hostname);
  p.check((next.origin===original.origin&&allowedPrefixes.some(prefix=>next.href.startsWith(prefix)))||githubAsset,'REDIRECT_NOT_TRUSTED');url=next;continue;
  }
- if(!response.ok){await response.body?.cancel();p.fail(response.status===404?'SOURCE_NOT_FOUND':'NETWORK_STATUS');}const size=Number(response.headers.get('content-length'));p.check(!size||Number.isSafeInteger(size)&&size>=0&&size<=limit,'NETWORK_SIZE');
+ if(!response.ok){await response.body?.cancel();p.fail(response.status===404?'SOURCE_NOT_FOUND':response.status===429||response.status===403&&response.headers.get('x-ratelimit-remaining')==='0'?'NETWORK_RATE_LIMIT':[401,403].includes(response.status)?'NETWORK_AUTH':response.status>=500?'NETWORK_SERVER':'NETWORK_STATUS');}const size=Number(response.headers.get('content-length'));p.check(!size||Number.isSafeInteger(size)&&size>=0&&size<=limit,'NETWORK_SIZE');
  let total=0;const chunks=[];p.check(response.body,'NETWORK_BODY');for await(const chunk of response.body){total+=chunk.length;if(total>limit){controller.abort();p.fail('NETWORK_SIZE');}chunks.push(Buffer.from(chunk));}return Buffer.concat(chunks);
  }p.fail('TOO_MANY_REDIRECTS');
  }catch(e){if(e.name==='TemplateProtocolError')throw e;p.fail(controller.signal.aborted?'NETWORK_TIMEOUT':'NETWORK_UNAVAILABLE');}finally{clearTimeout(timer);}

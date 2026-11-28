@@ -205,3 +205,14 @@ html[data-theme="dark"] .ai-review-panel,html[data-theme="dark"] .ai-review-card
 .template-version-label{display:flex;align-items:center;gap:6px;font-size:11px;padding:0 8px 8px}.template-version-label select{width:100%;padding:4px;font-size:11px}.template-version-row{border-bottom:1px solid var(--border)}
 
 .template-admin-dialog{width:min(1100px,96vw);max-width:96vw}.template-admin-editor{border:1px solid var(--border);max-height:50vh;overflow:auto;margin:12px 0}.template-admin-editor .report-content{min-height:200px;padding:20px!important}.template-admin-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto}.template-admin-dialog label{display:block;margin:8px 0}.template-admin-dialog textarea{width:100%}#template-admin-tools{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+
+/* The administrative document is a light print page in both UI themes. */
+.template-admin-editor,.template-admin-dialog #template-admin-before{background:#fff;color:#172c40;color-scheme:light;}
+.template-admin-editor .report-content{background:#fff!important;color:#172c40;box-shadow:none;}
+.template-admin-editor [data-template-field],.template-admin-editor [data-template-size],.template-admin-editor [data-template-highlight]{color:#172c40;}
+[data-theme=dark] .template-admin-dialog input,[data-theme=dark] .template-admin-dialog select,[data-theme=dark] .template-admin-dialog textarea{background:#1b2c3c;color:#e6eef3;border-color:var(--border);}
+.template-admin-dialog :focus-visible{outline:2px solid var(--mint);outline-offset:2px;}
+.template-admin-dialog ::-webkit-scrollbar-thumb{background:#7b8996;border:2px solid transparent;border-radius:6px;background-clip:padding-box;}
+.template-admin-dialog button:disabled{opacity:.5;cursor:not-allowed;}
+
+.template-admin-dialog #template-admin-before,.template-admin-dialog #template-admin-diff{background:#fff!important;color:#172c40!important;padding:12px;border:1px solid var(--border);}

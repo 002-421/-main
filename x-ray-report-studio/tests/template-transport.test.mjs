@@ -14,3 +14,7 @@ test('network failure and not-found are distinct safe codes, never response body
  await assert.rejects(()=>fetchBytes(prefix+'private',10,{allowedPrefixes:[prefix],fetchImpl:async()=>{throw Error('secret response body')}}),e=>e.code==='NETWORK_UNAVAILABLE'&&!e.message.includes('secret'));
  await assert.rejects(()=>fetchBytes(prefix+'missing',10,{allowedPrefixes:[prefix],fetchImpl:async()=>new Response(null,{status:404})}),e=>e.code==='SOURCE_NOT_FOUND');
 });
+
+test('HTTP authentication, rate limits, server errors and other statuses remain distinct without response data',async()=>{
+ for(const [status,headers,code] of [[401,{},'NETWORK_AUTH'],[403,{},'NETWORK_AUTH'],[403,{'x-ratelimit-remaining':'0'},'NETWORK_RATE_LIMIT'],[429,{},'NETWORK_RATE_LIMIT'],[500,{},'NETWORK_SERVER'],[503,{},'NETWORK_SERVER'],[422,{},'NETWORK_STATUS']])await assert.rejects(()=>fetchBytes(prefix+'catalog',100,{allowedPrefixes:[prefix],fetchImpl:async()=>new Response('PRIVATE',{status,headers})}),e=>e.code===code&&!e.message.includes('PRIVATE'));
+});

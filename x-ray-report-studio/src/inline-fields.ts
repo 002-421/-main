@@ -1,3 +1,4 @@
+import {migrateManualYellow} from './yellow-lifecycle.ts';
 import { clipboardText } from './clipboard-text.ts';
 import { initializeEditableHighlights } from './template-highlights.ts';
 import { normalizeDateInput } from './date-input.ts';
@@ -28,7 +29,7 @@ export function prepareInlineDocument(input: RichNode, trackOriginal = true): Ri
     if (trackOriginal && ['paragraph', 'heading'].includes(node.type) && node.attrs?.templateOriginal == null) node.attrs = { ...node.attrs, templateOriginal: visibleText(node) };
     return node;
   }
-  return walk(doc);
+  return migrateManualYellow(walk(doc));
 }
 
 export function initializeTemplateTracking(doc: RichNode): RichNode {
@@ -269,7 +270,7 @@ export const InlineFieldEditing = Extension.create({
       // Input methods and formatted paste can bypass handleTextInput. A changed
       // prompt is still marked as filled, in the same undo event as the input.
       appendTransaction(transactions, oldState, state) {
-        if(authoring)return null;
+
         if (!transactions.some(t => t.docChanged) || transactions.some(t => t.getMeta('inline-field-fix'))) return null;
         // History already includes every normalization step. Reapplying field
         // cleanup during replay can drop a highlight that Undo just restored.
@@ -281,16 +282,9 @@ export const InlineFieldEditing = Extension.create({
         let tr: Transaction | undefined;
         // Only content edits complete paragraph prompts; selections and formatting do not.
         const edited = new Set<string>();
-        if (!replacesWholeDocument) oldState.doc.descendants((node,pos) => {
-          if (!node.isTextblock) return;
-          const prompt = node.attrs.editableHighlight, ids=new Set<string>();
-          if(prompt && !prompt.edited)ids.add(prompt.id);
-          node.descendants(child=>{for(const mark of child.marks)if(mark.type.name==='templateHighlight')ids.add(mark.attrs.id);});
-          if(!ids.size)return;
-          const from = mapping.map(pos+1,-1), to = mapping.map(pos+node.nodeSize-1,1);
-          if (to-from !== node.content.size || state.doc.textBetween(Math.max(0,from),Math.min(state.doc.content.size,to)) !== node.textContent)
-            for(const id of ids)edited.add(id);
-        });
+        const nextParagraphs=new Map<string,string>();state.doc.descendants(node=>{if(node.isTextblock&&node.attrs.editableHighlight)nextParagraphs.set(node.attrs.editableHighlight.id,node.textContent);});
+        if(!replacesWholeDocument)oldState.doc.descendants(node=>{const prompt=node.attrs.editableHighlight;if(node.isTextblock&&prompt&&!prompt.edited&&nextParagraphs.has(prompt.id)&&nextParagraphs.get(prompt.id)!==node.textContent)edited.add(prompt.id);});
+        if(!replacesWholeDocument){const collect=(doc:import('@tiptap/pm/model').Node)=>{const values=new Map<string,string>();doc.descendants(n=>{if(n.isText)for(const m of n.marks)if(m.type.name==='templateHighlight')values.set(m.attrs.id,(values.get(m.attrs.id)??'')+n.text);});return values;};const old=collect(oldState.doc),next=collect(state.doc);for(const [id,text]of old)if(next.has(id)&&next.get(id)!==text)edited.add(id);}
         if (edited.size) state.doc.descendants((node,pos) => {
           const prompt = node.attrs.editableHighlight;
           if (prompt && edited.has(prompt.id)) {
@@ -320,12 +314,13 @@ export const InlineFieldEditing = Extension.create({
           const group = groups.get(mark.attrs.id) ?? { text: '', nodes: [] };
           group.text += node.text; group.nodes.push({ pos, size: node.nodeSize, mark }); groups.set(mark.attrs.id, group);
         });
-        for (const group of groups.values()) if (group.text !== group.nodes[0].mark.attrs.hint) {
+        const oldFields=new Map<string,string>();oldState.doc.descendants(n=>{if(n.isText){const m=n.marks.find(m=>m.type.name==='templateField');if(m)oldFields.set(m.attrs.id,(oldFields.get(m.attrs.id)??'')+n.text);}});
+        for (const [id,group] of groups) if (!replacesWholeDocument&&oldFields.has(id)&&oldFields.get(id)!==group.text) {
           tr ??= state.tr;
           for (const n of group.nodes) tr.removeMark(n.pos, n.pos + n.size, n.mark).addMark(n.pos, n.pos + n.size, n.mark.type.create({ ...n.mark.attrs, filled: true }));
         }
         const dateEdits: Array<{pos:number;size:number;text:string;marks:readonly PMMark[]}> = [];
-        state.doc.descendants((node,pos)=>{if(!node.isText)return;const normalized=normalizeDateInput(node.text??'');if(normalized!==node.text)dateEdits.push({pos,size:node.nodeSize,text:normalized,marks:node.marks});});
+        if(!replacesWholeDocument)state.doc.descendants((node,pos)=>{if(!node.isText)return;const normalized=normalizeDateInput(node.text??'');if(normalized!==node.text)dateEdits.push({pos,size:node.nodeSize,text:normalized,marks:node.marks});});
         for(const edit of dateEdits.reverse()){tr??=state.tr;tr.replaceWith(edit.pos,edit.pos+edit.size,state.schema.text(edit.text,tr.doc.resolve(edit.pos).nodeAfter?.marks??edit.marks));}
         return tr?.setMeta('inline-field-fix', true);
       },

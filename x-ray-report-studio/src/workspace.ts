@@ -1,3 +1,4 @@
+import {attachRecovery,recoverReset} from './reset-recovery.ts';
 import {rememberTemplateBase} from './template-local-conflicts.ts';
 import {createEditableField} from './editable-field-command.ts';
 import {selectionFontSize,setReportFontSize} from './document-typography.ts';
@@ -28,7 +29,6 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { setAiReviewDecorations } from './ai-review-decorations';
 import type { ReviewDecorationRange } from './ai-review-decorations';
 import { structurePreparedBuiltin } from './ai-review-structure';
-import { planManualMigration, createMigrationBackup, readMigrationBackup, migrationBackupKeys, type ManualBoundaries } from './ai-review-migration';
 import DOMPurify from 'dompurify';
 import { makeEditor } from './editor';
 import { setParagraphLineHeight } from './editor-format';
@@ -77,9 +77,10 @@ type StoredReportHistoryRecord = {fingerprint:string;history:StoredReportHistory
 type Settings = {doctorStampOwners?:Record<string,string>;doctor:string;doctors:string[];logo:string;doctorStamps:Record<string,string>;doctorStampSizes:Record<string,{width:number;height:number}>;doctorStampHeights:Record<string,number>;doctorStampPositions:Record<string,{x:number;y:number}>;theme:'light'|'dark';zoom:number;historyDepth:ReportHistoryDepth};
 const read = <T>(key:string,fallback:T):T => { try { return JSON.parse(localStorage.getItem(key) ?? 'null') ?? fallback; } catch { return fallback; } };
 function documentFingerprint(doc:RichNode):string { const value=JSON.stringify(doc);let hash=0x811c9dc5;for(let i=0;i<value.length;i++){hash^=value.charCodeAt(i);hash=Math.imul(hash,0x01000193);}return `${(hash>>>0).toString(16)}:${value.length}`; }
+await recoverReset();
 const storedSettings=read<Partial<Settings>&{liveProof?:boolean}>(KEYS.settings,{});
 const {liveProof:_legacyLiveProof,...currentSettings}=storedSettings;
-let settings:Settings = {...{doctor:'',doctors:[],logo:'',doctorStamps:{},doctorStampSizes:{},doctorStampHeights:{},doctorStampPositions:{},theme:'light',zoom:100,historyDepth:500 as ReportHistoryDepth},...currentSettings};
+let settings:Settings = {...{doctor:'',doctors:[],logo:'',doctorStamps:{},doctorStampSizes:{},doctorStampHeights:{},doctorStampPositions:{},theme:'dark',zoom:100,historyDepth:500 as ReportHistoryDepth},...currentSettings};
 delete (settings as Settings & {autoUpdate?:unknown;lastAutoUpdateCheckAt?:unknown}).autoUpdate;
 delete (settings as Settings & {autoUpdate?:unknown;lastAutoUpdateCheckAt?:unknown}).lastAutoUpdateCheckAt;
 if(!REPORT_HISTORY_DEPTHS.includes(settings.historyDepth))settings.historyDepth=500;
@@ -96,7 +97,7 @@ if (!settings.doctorStampHeights || typeof settings.doctorStampHeights !== 'obje
 settings.doctorStampHeights=Object.fromEntries(Object.entries(settings.doctorStampHeights).filter(([name,height])=>settings.doctorStamps[name]&&Number.isFinite(height)&&Number(height)>=40&&Number(height)<=500).slice(0,30));
 if (!settings.doctorStampPositions || typeof settings.doctorStampPositions !== 'object' || Array.isArray(settings.doctorStampPositions)) settings.doctorStampPositions={};
 settings.doctorStampPositions=Object.fromEntries(Object.entries(settings.doctorStampPositions).filter(([name,pos])=>settings.doctorStamps[name]&&pos&&Number.isFinite(pos.x)&&Number.isFinite(pos.y)&&Math.abs(pos.x)<=300&&Math.abs(pos.y)<=200).slice(0,30));
-if (settings.theme !== 'dark' && settings.theme !== 'light') settings.theme = 'light';
+if (settings.theme !== 'dark' && settings.theme !== 'light') settings.theme = 'dark';
 if (!Number.isInteger(settings.zoom) || settings.zoom < 75 || settings.zoom > 150 || settings.zoom % 5 !== 0) settings.zoom = 100;
 let doctorFormats:DoctorFormats|undefined;
 let doctorFormatError='';
@@ -221,7 +222,7 @@ $('#app').innerHTML=`<div class="shell">
   <nav id="report-tabs" class="report-tabs" aria-label="Открытые заключения"></nav>
   <div class="ribbon" role="toolbar" aria-label="Форматирование описания"><div class="tool-group"><button data-command="undo" title="Отменить (Ctrl+Z)">↶</button><button data-command="redo" title="Повторить (Ctrl+Y)">↷</button></div><div class="tool-group"><select id="font-family" aria-label="Шрифт"><option>DejaVu Sans</option><option selected>Arial</option><option>Times New Roman</option><option>Calibri</option></select><select id="font-size" aria-label="Размер шрифта">${[8,9,10,10.5,11,11.5,12,12.5,13,13.5,14,14.5,15,16,18,21,24].map(s=>`<option value="${s}" ${s===12?'selected':''}>${s}</option>`).join('')}</select></div><div class="tool-group"><button data-command="bold" title="Полужирный"><b>Ж</b></button><button data-command="italic" title="Курсив"><i>К</i></button><button data-command="underline" title="Подчёркнутый"><u>Ч</u></button><button data-command="strike" title="Зачёркнутый"><s>А</s></button><input type="color" id="text-color" title="Цвет текста" value="#172c40">${fillToolbar}</div><div class="tool-group">${paragraphToolbar}</div><div class="tool-group"><label class="line-height-control" for="line-height">Интервал <select id="line-height" aria-label="Межстрочный интервал"><option value="1">1</option><option value="1.05">1,05</option><option value="1.15">1,15</option><option value="1.2">1,2</option><option value="1.5">1,5</option><option value="2">2</option></select></label><button id="insert-size" title="Размер (фронтальный/сагиттальный/вертикальный)">＋ Размер</button></div></div>
   <div id="template-banner" class="template-banner hidden"><div><strong>Редактирование шаблона</strong><small>Правки будут применяться к новым описаниям. Текущий документ сохранён.</small></div><div><button id="create-editable-field" class="btn" title="Выделите весь абзац, текстовый фрагмент или отдельный размер 0,0">Редактируемое поле</button><button id="reset-template" class="btn">Исходный шаблон</button><button id="cancel-template" class="btn">Отмена</button><button id="save-template" class="btn primary">Сохранить шаблон</button></div></div>
-  <div class="document-tools"><div><button id="review-unchanged" class="chip" aria-pressed="false" title="Показать поля и фрагменты, оставшиеся как в шаблоне">Подсветить неизменённое</button><button id="sticky-note-open" class="chip" title="Открыть заметку">Заметка</button><button id="calculator" class="chip" title="Открыть калькулятор" aria-haspopup="dialog">Калькулятор</button><div class="ai-review-tools"><button id="ai-review-tools-toggle" class="chip" type="button" aria-expanded="false" aria-controls="ai-review-tools-menu">AI Review</button><div id="ai-review-tools-menu" class="ai-review-tools-menu" hidden></div></div></div><div><label class="zoom-control" title="Масштаб редактора"><span>Масштаб</span><input id="zoom" type="range" min="75" max="150" step="5" value="100" aria-label="Масштаб редактора"><output id="zoom-value">100%</output></label></div></div>
+  <div class="document-tools"><div><button id="review-unchanged" class="chip" aria-pressed="false" title="Показать поля и фрагменты, оставшиеся как в шаблоне">Подсветить неизменённое</button><button id="sticky-note-open" class="chip" title="Открыть заметку">Заметка</button><button id="calculator" class="chip" title="Открыть калькулятор" aria-haspopup="dialog">Калькулятор</button></div><div><label class="zoom-control" title="Масштаб редактора"><span>Масштаб</span><input id="zoom" type="range" min="75" max="150" step="5" value="100" aria-label="Масштаб редактора"><output id="zoom-value">100%</output></label></div></div>
   <div class="canvas" id="canvas"><div class="page-meta"><span id="template-name"></span><span>A4 · оформление исходного шаблона</span></div><article class="paper"><div id="editor"></div></article></div>
   <footer class="statusbar"><span id="status-left">Данные сохраняются на этом компьютере</span><span id="word-count"></span></footer>
  </main></div><input type="file" id="report-file" accept=".docx,.json,.mri.json" hidden><input type="file" id="template-file" accept=".docx" hidden><input type="file" id="doctor-stamp-file" accept="image/png,image/jpeg,.jpg,.jpeg" hidden>`;
@@ -436,69 +437,7 @@ function dialog(title:string,body:string,footer='') {closeDialog();const overlay
 function closeDialog(){$('.dialog-overlay')?.remove();}
 // Experimental local prototype. Existing user documents are never migrated automatically.
 {
-  const status=document.createElement('small');status.id='ai-review-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');document.querySelector('.statusbar')?.append(status);
-  const toolsMenu=$('#ai-review-tools-menu'),toolsToggle=$('#ai-review-tools-toggle') as HTMLButtonElement;
-  const setToolsOpen=(open:boolean)=>{toolsMenu.hidden=!open;toolsToggle.setAttribute('aria-expanded',String(open));};
-  toolsToggle.onclick=()=>setToolsOpen(toolsMenu.hidden);
-  document.addEventListener('pointerdown',event=>{if(!toolsMenu.hidden&&!toolsMenu.parentElement?.contains(event.target as Node))setToolsOpen(false);});
-  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!toolsMenu.hidden){setToolsOpen(false);toolsToggle.focus();}});
-  const migrateButton=document.createElement('button');migrateButton.className='btn small';migrateButton.id='ai-migrate-open';migrateButton.textContent='Уточнить границы';migrateButton.hidden=true;toolsMenu.append(migrateButton);
-  const savedMigrationMatches=(tabId:string,doc:RichNode)=>{try{const stored=JSON.parse(localStorage.getItem(KEYS.workspace)??'null');return stored?.activeId===tabId&&JSON.stringify(stored.reports?.find((r:OpenReport)=>r.id===tabId)?.doc)===JSON.stringify(doc);}catch{return false;}};
-  const showMigration=()=>{
-    if(templateMode){toast('Завершите редактирование шаблона.',true);return;}
-    const tabId=activeReportId,templateId=activeTemplateId,original=json(),nodes=original.content??[];
-    let already=false;try{already=planManualMigration(original).status==='already-structured';}catch{/* A flat or partially structured document still needs review. */}
-    const partial=nodes.some(n=>n.type==='reportSection')&&!already;
-    const options='<option value="">Выберите первый абзац блока</option>'+nodes.map((node,index)=>`<option value="${index}">${index+1}: ${esc(plain(node).replace(/\s+/g,' ').slice(0,95))}</option>`).join('');
-    const markup=already?'<p>Документ уже содержит структурные границы. Повторная миграция не требуется.</p>':partial?'<p>Документ частично размечен или содержит текст вне секций. Исправьте границы вручную в копии документа.</p>':`<p>Назначьте первый абзац описания, заключения и блока подписи. Проверьте полный текст каждого блока перед применением.</p><label>Начало описания<select id="migration-description">${options}</select></label><label>Начало заключения<select id="migration-conclusion">${options}</select></label><label>Начало рекомендаций и подписи<select id="migration-signature">${options}</select></label><div id="migration-preview"></div><label><input id="migration-confirm" type="checkbox"> Я проверил(а) границы всех четырёх блоков</label>`;
-    const d=dialog('Границы AI Review',markup+'<div id="migration-backups"></div>',`<button class="btn" data-close>Закрыть</button>${already||partial?'':'<button class="btn primary" id="migration-apply" disabled>Создать копию и применить</button>'}`);
-    const preview=d.querySelector<HTMLElement>('#migration-preview');
-    const apply=d.querySelector<HTMLButtonElement>('#migration-apply');
-    const selected=():ManualBoundaries|null=>{
-      const values=['description','conclusion','signature'].map(id=>(d.querySelector<HTMLSelectElement>(`#migration-${id}`)?.value??''));
-      return values.some(v=>v==='')?null:{description:Number(values[0]),conclusion:Number(values[1]),signature:Number(values[2])};
-    };
-    const update=()=>{
-      if(!preview||!apply)return;
-      preview.replaceChildren();apply.disabled=true;
-      const limits=selected();if(!limits)return;
-      try{
-        const plan=planManualMigration(original,limits);
-        for(const section of plan.document.content??[]){const heading=document.createElement('strong');heading.textContent=String(section.attrs?.title??'');const body=document.createElement('pre');body.textContent=plain(section);body.style.whiteSpace='pre-wrap';body.style.maxHeight='180px';body.style.overflow='auto';preview.append(heading,body);}
-        apply.disabled=!(d.querySelector<HTMLInputElement>('#migration-confirm')?.checked);
-      }catch{preview.textContent='Границы пересекаются или оставляют пустой блок.';}
-    };
-    d.querySelectorAll<HTMLSelectElement>('select').forEach(el=>el.onchange=update);
-    const confirm=d.querySelector<HTMLInputElement>('#migration-confirm');if(confirm)confirm.onchange=update;
-    if(apply)apply.onclick=async()=>{
-      const limits=selected();if(!limits||!confirm?.checked||activeReportId!==tabId||JSON.stringify(json())!==JSON.stringify(original)){toast('Документ или выбор границ изменился. Повторите проверку.',true);return;}
-      apply.disabled=true;let backupKey='';const previousDirty=changedSinceOpen;
-      try{
-        const plan=planManualMigration(original,limits);
-        editor.schema.nodeFromJSON(plan.document).check();
-        backupKey=await createMigrationBackup(localStorage,tabId,templateId,original);
-        if(activeReportId!==tabId||JSON.stringify(json())!==JSON.stringify(original))throw new Error('Документ изменился после резервного копирования');
-        restoreMigrationExactly(plan.document);
-        const migrated=json();
-        if(JSON.stringify(migrated.content?.slice(0,4).flatMap(n=>n.content??[]))!==JSON.stringify(original.content))throw new Error('Миграция изменила узлы документа');
-        changedSinceOpen=true;
-        if(!saveLocal()||!savedMigrationMatches(tabId,migrated))throw new Error('Результат миграции не сохранился');
-        closeDialog();renderReportTabs();toast('Границы сохранены. Исходный документ доступен в резервных копиях.');
-      }catch{
-        try{const backup=backupKey?await readMigrationBackup(localStorage,backupKey,tabId):null;restoreMigrationExactly(backup?.doc??original);changedSinceOpen=previousDirty;saveLocal();}catch{restoreMigrationExactly(original);changedSinceOpen=previousDirty;saveLocal();}
-        toast('Миграция отменена. Проверьте доступность хранилища и резервной копии.',true);
-        apply.disabled=false;
-      }
-    };
-    const backups=d.querySelector<HTMLElement>('#migration-backups')!;
-    const available=migrationBackupKeys(localStorage);
-    if(available.length){const restoreButton=document.createElement('button');restoreButton.className='btn';restoreButton.textContent='Восстановить оригинал из последней копии';backups.append(restoreButton);restoreButton.onclick=async()=>{
-      if(activeReportId!==tabId||!window.confirm('Восстановить исходный документ? Текущая версия также будет сохранена в отдельной резервной копии.'))return;
-      const current=json();let source:RichNode;
-      try{const candidates=await Promise.all(available.map(key=>readMigrationBackup(localStorage,key,tabId).then(record=>({key,record})).catch(()=>null)));const found=candidates.reverse().find(x=>x?.record.templateId===templateId);if(!found)throw new Error('Нет проверенной копии');source=found.record.doc;editor.schema.nodeFromJSON(source).check();await createMigrationBackup(localStorage,tabId,templateId,current);restoreMigrationExactly(source);changedSinceOpen=true;if(!saveLocal()||!savedMigrationMatches(tabId,json()))throw new Error('Не удалось сохранить восстановление');closeDialog();toast('Исходный документ восстановлен.');}catch{restoreMigrationExactly(current);saveLocal();toast('Восстановление не выполнено. Проверьте резервные копии.',true);}
-    };}
-  };
-  migrateButton.onclick=()=>{setToolsOpen(false);showMigration();};
+  const status=document.createElement('small');status.id='ai-review-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');
   const tracks=new TrackChangesEngine();
   const rejectedReviewKeys=new Map<string,Set<string>>();
   const reviewRejectionKey=(item:import('./ai-review.ts').Suggestion,blocks:import('./ai-review.ts').ReviewBlocks)=>{
@@ -513,20 +452,7 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
   let cardPositionHandler:(()=>void)|undefined;
   let cardResizeObserver:ResizeObserver|undefined;
   const closeCard=()=>{if(cardPositionHandler){window.removeEventListener('resize',cardPositionHandler);window.removeEventListener('scroll',cardPositionHandler,true);}cardResizeObserver?.disconnect();cardPositionHandler=undefined;cardResizeObserver=undefined;card?.remove();card=undefined;};
-  const findingsPanel=document.createElement('details');findingsPanel.className='ai-review-panel';findingsPanel.hidden=true;
-  const findingsSummary=document.createElement('summary');findingsSummary.textContent='Замечания AI Review';
-  const findingsList=document.createElement('div');findingsList.className='ai-review-findings-list';findingsPanel.append(findingsSummary,findingsList);
-  const renderFindingPanel=()=>{
-    findingsPanel.hidden=!findings.length||reviewedReport!==activeReportId;
-    findingsList.replaceChildren();
-    for(const item of findings){
-      const button=document.createElement('button');button.type='button';button.className='ai-review-finding';button.dataset.reviewFinding=item.id;
-      const category=reviewCategories.find(([id])=>id===categoryGroup(item.category))?.[1]??item.category;
-      const label=document.createElement('strong');label.textContent=category;
-      const excerpt=document.createElement('span');excerpt.textContent=item.original||item.explanation.split(' Связанный фрагмент:')[0];
-      button.append(label,excerpt);findingsList.append(button);
-    }
-  };
+  const renderFindingPanel=()=>{};
   const renderDecorations=()=>{
     if(!reviewedBlocks||reviewedReport!==activeReportId){setAiReviewDecorations(editor,[]);renderFindingPanel();return;}
     const ranges:ReviewDecorationRange[]=[];
@@ -615,36 +541,33 @@ function closeDialog(){$('.dialog-overlay')?.remove();}
   };
   const editorRoot=editor.view.dom;
   editorRoot.addEventListener('contextmenu',event=>{const span=(event.target as HTMLElement).closest<HTMLElement>('[data-ai-review-ids]');if(!span)return;event.preventDefault();clearProofPopup();openCard(span,{x:event.clientX,y:event.clientY});});
-  findingsPanel.addEventListener('click',event=>{const button=(event.target as HTMLElement).closest<HTMLButtonElement>('[data-review-finding]');if(!button)return;const target=[...editorRoot.querySelectorAll<HTMLElement>('[data-ai-review-ids]')].find(span=>span.dataset.aiReviewIds?.split(',').includes(button.dataset.reviewFinding??''));if(!target)return;setToolsOpen(false);clearProofPopup();target.scrollIntoView({block:'center',behavior:'smooth'});requestAnimationFrame(()=>openCard(target));});
   document.addEventListener('pointerdown',event=>{if(card&&!card.contains(event.target as Node))closeCard();},true);
   document.addEventListener('keydown',event=>{if(card&&(event.key.length===1||event.key==='Backspace'||event.key==='Delete')&&editorRoot.contains(event.target as Node)&&!event.altKey&&!event.ctrlKey&&!event.metaKey)closeCard();},true);
   document.addEventListener('keydown',event=>{const e=event as KeyboardEvent,target=e.target as HTMLElement;if(e.key==='Escape'&&card&&(editorRoot.contains(document.activeElement)||card.contains(target))){e.preventDefault();closeCard();}},true);
   const enabledCategories=new Set<import('./ai-review.ts').ReviewCategory>(read('xrs.ai-review.categories.v1',reviewCategories.map(([id])=>id)));
-  const settings=document.createElement('details');settings.className='ai-review-category-settings';const settingsTitle=document.createElement('summary');settingsTitle.textContent='Категории проверки';settings.append(settingsTitle);
-  for(const [id,title] of reviewCategories){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=enabledCategories.has(id);input.dataset.aiCategory=id;input.onchange=()=>{if(input.checked)enabledCategories.add(id);else enabledCategories.delete(id);localStorage.setItem('xrs.ai-review.categories.v1',JSON.stringify([...enabledCategories]));scheduleReview();};label.append(input,document.createTextNode(title));settings.append(label);}toolsMenu.append(findingsPanel,settings);
   let reviewTimer=0, reviewGeneration=0;
   let reviewAbort:AbortController|undefined;
   const runReview=async()=>{
     clearTimeout(reviewTimer);reviewAbort?.abort();const abort=new AbortController();reviewAbort=abort;
     const generation=++reviewGeneration,reportId=activeReportId,checkedDocument=editor.state.doc;
-    status.textContent='Проверка…';status.setAttribute('aria-busy','true');migrateButton.hidden=true;
+    status.textContent='Проверка…';status.setAttribute('aria-busy','true');
     try{
       const result=await new ReviewEngine(new LocalAIProvider(undefined,()=>personalWords)).review(checkedDocument.toJSON() as RichNode,enabledCategories,abort.signal);
       if(abort.signal.aborted||generation!==reviewGeneration||reportId!==activeReportId||checkedDocument!==editor.state.doc)return;
       tracks.set(reportId,result.suggestions);const rejected=rejectedReviewKeys.get(reportId)??new Set<string>();
       findings=result.suggestions.filter(item=>!rejected.has(reviewRejectionKey(item,result.blocks))&&!(['spelling','terminology'].includes(item.category)&&personalWords.includes(item.original.toLocaleLowerCase('ru-RU'))));reviewedBlocks=result.blocks;reviewedReport=reportId;reviewedDoc=checkedDocument;
-      renderDecorations();status.textContent=result.boundaryWarning?'Необходимо уточнить границы описания и заключения. Откройте AI Review в верхней панели.':findings.length?`Замечаний: ${findings.length}`:'Замечаний не найдено';migrateButton.hidden=!result.boundaryWarning;
-    }catch(error){if(!abort.signal.aborted){const boundaries=/границ|структур|формат документа|пустой разрешённый блок/i.test((error as Error)?.message??'');status.textContent=boundaries?'Необходимо уточнить границы описания и заключения. Откройте AI Review в верхней панели.':'Проверка недоступна.';migrateButton.hidden=!boundaries;}}
+      renderDecorations();status.textContent=result.boundaryWarning?'':findings.length?`Замечаний: ${findings.length}`:'Замечаний не найдено';
+    }catch(error){if(!abort.signal.aborted){const boundaries=/границ|структур|формат документа|пустой разрешённый блок/i.test((error as Error)?.message??'');status.textContent=boundaries?'':'Проверка недоступна.';}}
     finally{if(generation===reviewGeneration)status.removeAttribute('aria-busy');}
   };
   const scheduleReview=()=>{
     reviewAbort?.abort();reviewGeneration++;clearTimeout(reviewTimer);findings=[];reviewedBlocks=undefined;reviewedDoc=undefined;closeCard();setAiReviewDecorations(editor,[]);
-    status.textContent='';migrateButton.hidden=true;reviewTimer=window.setTimeout(()=>void runReview(),650);
+    status.textContent='';reviewTimer=window.setTimeout(()=>void runReview(),650);
   };
   editor.on('update',scheduleReview);
   // setContent on tab changes can suppress update events; docChanged also catches it.
   editor.on('transaction',({transaction})=>{if(transaction.docChanged)scheduleReview();});
-  document.addEventListener('xrs-dictionary-changed',scheduleReview);
+  document.addEventListener('xrs-dictionary-changed',scheduleReview);document.addEventListener('xrs-settings-restored',()=>{enabledCategories.clear();for(const id of read<ReviewCategory[]>('xrs.ai-review.categories.v1',reviewCategories.map(([id])=>id)))enabledCategories.add(id);scheduleReview();});
   scheduleReview();
 
 }
@@ -710,6 +633,7 @@ const catalogSection=document.createElement('details');catalogSection.className=
 catalogSection.innerHTML='<summary>Медицинские шаблоны</summary><div class="settings-section-body"><p>Независимый каталог шаблонов, проверка обновлений и откат.</p><button class="btn" type="button" id="medical-template-settings">Управление шаблонами</button></div>';
 templateUpdatesSettings(d,renderTemplates);
 d.querySelector('.dialog-body')!.append(catalogSection);templatePublicationSettings(catalogSection.querySelector<HTMLElement>('.settings-section-body')!);catalogSection.querySelector('button')!.onclick=()=>templateUpdatesDialog(dialog,renderTemplates);
+attachRecovery(d,()=>templateMode?'Открыт несохранённый шаблон. При сбросе его редакций текущая правка будет отменена; рабочий протокол сохранится.':changedSinceOpen,keys=>{if(templateMode&&keys.includes(KEYS.templates))finishTemplate(false);overrides=read(KEYS.templates,{});settings={...settings,...read<Partial<Settings>>(KEYS.settings,{})};doctorFormats=new DoctorFormats(localStorage,settings.doctors,settings.doctor);setDefaultReportHistoryDepth(settings.historyDepth);applyTheme();($('#zoom') as HTMLInputElement).value=String(settings.zoom);applyZoom(false);renderTemplates();document.dispatchEvent(new Event('xrs-settings-restored'));settingsDialog();const recovery=document.querySelector<HTMLDetailsElement>('[data-settings-section=recovery]');if(recovery)recovery.open=true;toast('Операция завершена. Доступно восстановление из резервной копии.');});
 const sections=[...d.querySelectorAll<HTMLDetailsElement>('[data-settings-section]')];
 const expandAll=d.querySelector<HTMLButtonElement>('#settings-expand-all')!;
 const paintSections=()=>{

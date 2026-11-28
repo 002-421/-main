@@ -1,0 +1,3 @@
+'use strict';
+function safeError(e){return {errorType:/^[A-Za-z]{1,40}$/.test(e?.errorType??e?.name??'')?(e.errorType??e.name):'Error',code:/^[A-Z][A-Z0-9_]{0,99}$/.test(e?.code??'')?e.code:'ADMIN_OPERATION_FAILED',phase:/^[a-z-]{1,40}$/.test(e?.phase??'')?e.phase:'admin',httpStatus:Number.isInteger(e?.httpStatus)&&e.httpStatus>=100&&e.httpStatus<=599?e.httpStatus:null,requestId:typeof e?.requestId==='string'&&/^[A-Za-z0-9:-]{1,100}$/.test(e.requestId)?e.requestId:null,operationId:typeof e?.operationId==='string'&&/^[a-f0-9-]{36}$/.test(e.operationId)?e.operationId:null};}
+module.exports={safeError};

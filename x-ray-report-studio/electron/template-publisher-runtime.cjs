@@ -678,7 +678,7 @@ var require_template_transport = __commonJS({
           }
           if (!response.ok) {
             await response.body?.cancel();
-            p2.fail(response.status === 404 ? "SOURCE_NOT_FOUND" : "NETWORK_STATUS");
+            p2.fail(response.status === 404 ? "SOURCE_NOT_FOUND" : response.status === 429 || response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0" ? "NETWORK_RATE_LIMIT" : [401, 403].includes(response.status) ? "NETWORK_AUTH" : response.status >= 500 ? "NETWORK_SERVER" : "NETWORK_STATUS");
           }
           const size = Number(response.headers.get("content-length"));
           p2.check(!size || Number.isSafeInteger(size) && size >= 0 && size <= limit, "NETWORK_SIZE");
@@ -8407,8 +8407,9 @@ var require_simple_publisher = __commonJS({
     var { createGitHub, verifyLogin } = require_github_direct();
     var { fetchBytes } = require_template_transport();
     var SimplePublisher2 = class {
-      constructor({ gh = createGitHub(), platform = process.platform, env = process.env, download = fetchBytes, loadSources = () => require_validate2().loadSources(), privacy = (row) => require_validate2().checkPrivacy(row), now = () => Date.now() } = {}) {
-        Object.assign(this, { gh, platform, env, download, loadSources, privacy, now });
+      constructor({ gh = createGitHub(), platform = process.platform, env = process.env, download = fetchBytes, loadSources = () => require_validate2().loadSources(), privacy = (row) => require_validate2().checkPrivacy(row), now = () => Date.now(), onProgress = () => {
+      } } = {}) {
+        Object.assign(this, { gh, platform, env, download, loadSources, privacy, now, onProgress });
       }
       api(method, route, body) {
         return this.gh.api(method, "/repos/" + c.REPOSITORY + route, body);
@@ -8491,7 +8492,37 @@ var require_simple_publisher = __commonJS({
         if (current) version[2]++;
         return { status: "prepared", request: { schemaVersion: 1, type: "xrs-https-publication-request", id, createdAt: new Date(this.now()).toISOString(), catalogVersion: version.join("."), sequence: (current?.manifest.sequence ?? 0) + 1, previousVersion: current?.manifest.catalogVersion ?? "0.0.0", previousManifestSha256: current ? p2.sha256(current.raw) : null, contentSha256, templates, summaries: Object.fromEntries(summaries) } };
       }
+      async findRelease(tag, publicationId) {
+        const matches = [];
+        for (let page = 1; page <= 20; page++) {
+          const rows = await this.api("GET", `/releases?per_page=100&page=${page}`);
+          for (const row of rows) if (row.tag_name === tag) matches.push(row);
+          if (rows.length < 100) break;
+        }
+        const published = matches.filter((r) => !r.draft);
+        p2.check(published.length <= 1, "RELEASE_AMBIGUOUS");
+        if (published.length) return published[0];
+        const own = matches.filter((r) => r.body === `Approved XRS template data. Publication ${publicationId}.`).sort((a, b) => a.id - b.id);
+        p2.check(!matches.length || own.length, "DRAFT_OWNER_CONFLICT");
+        return own[0] ?? null;
+      }
       async publish(request) {
+        let phase = "validation";
+        try {
+          return await this.publishInner(request, (value) => {
+            phase = value;
+            try {
+              this.onProgress({ phase: value, operationId: request.id });
+            } catch {
+            }
+          });
+        } catch (error) {
+          error.phase = phase;
+          error.operationId = request?.id;
+          throw error;
+        }
+      }
+      async publishInner(request, stage) {
         await this.authorize();
         p2.keys(request, ["schemaVersion", "type", "id", "createdAt", "catalogVersion", "sequence", "previousVersion", "previousManifestSha256", "contentSha256", "templates", "summaries"]);
         p2.check(request.schemaVersion === 1 && request.type === "xrs-https-publication-request" && c.UUID.test(request.id), "PUBLICATION_REQUEST");
@@ -8503,13 +8534,11 @@ var require_simple_publisher = __commonJS({
         for (const t of request.templates) this.privacy(t);
         p2.check(c.contentHash(request.templates) === request.contentSha256, "REQUEST_HASH");
         const tag = c.tag(request.catalogVersion), requestHash = p2.sha256(p2.bytes(request));
-        let release;
-        try {
-          release = await this.api("GET", "/releases/tags/" + tag);
-        } catch (e) {
-          if (e.httpStatus !== 404) throw e;
+        let release = await this.findRelease(tag, request.id);
+        if (release && !release.draft) {
+          stage("availability");
+          return this.verify(request);
         }
-        if (release && !release.draft) return this.verify(request);
         const current = await this.current();
         p2.check((current?.manifest.catalogVersion ?? "0.0.0") === request.previousVersion && (current ? p2.sha256(current.raw) : null) === request.previousManifestSha256, "CATALOG_BASE_CONFLICT");
         const expected = request.previousVersion === "0.0.0" ? "1.0.0" : request.previousVersion.replace(/\d+$/, (n) => String(Number(n) + 1));
@@ -8555,6 +8584,7 @@ var require_simple_publisher = __commonJS({
         p2.check(reservation.object?.type === "tag", "VERSION_CONFLICT");
         const reserved = await this.api("GET", "/git/tags/" + reservation.object.sha);
         p2.check(reserved.tag === tag && typeof reserved.message === "string" && reserved.message.trimEnd() === metadata, "VERSION_CONFLICT");
+        stage("release");
         if (!release) release = await this.api("POST", "/releases", { tag_name: tag, name: "XRS templates " + request.catalogVersion, body: `Approved XRS template data. Publication ${request.id}.`, draft: true, prerelease: false, make_latest: "false" });
         p2.check(release.draft && Number.isSafeInteger(release.id), "RELEASE_STATE");
         const files = /* @__PURE__ */ new Map([["catalog.xrszip", archive], ["catalog-manifest.json", raw]]), temp = await fs.mkdtemp(path.join(os.tmpdir(), "xrs-catalog-upload-"));
@@ -8567,18 +8597,22 @@ var require_simple_publisher = __commonJS({
             }
             const file = path.join(temp, name);
             await fs.writeFile(file, bytes, { mode: 384 });
-            await this.gh.upload(tag, file);
+            stage("upload");
+            await this.gh.upload(tag, file, release);
           }
-          release = await this.api("GET", "/releases/tags/" + tag);
+          stage("integrity");
+          release = await this.api("GET", "/releases/" + release.id);
           p2.check(release.draft && release.assets.length === 2, "RELEASE_ASSETS");
           for (const [name, bytes] of files) {
             const asset = release.assets.find((a) => a.name === name);
             p2.check(asset?.digest === "sha256:" + p2.sha256(bytes) && asset.size === bytes.length, "ASSET_CONFLICT");
           }
+          stage("activation");
           await this.api("PATCH", "/releases/" + release.id, { draft: false, make_latest: "true" });
         } finally {
           await fs.rm(temp, { recursive: true, force: true });
         }
+        stage("availability");
         return this.verify(request);
       }
       async verify(request) {
@@ -8643,7 +8677,7 @@ async function handleEnvelope(envelope, publisher = new SimplePublisher()) {
     }
     return { protocolVersion: 2, operationId: envelope.operationId, status: result.status === "published" ? "PUBLISHED" : result.status === "up-to-date" ? "UP_TO_DATE" : result.status === "prepared" ? "PREPARED" : "VALIDATED", error: null, result };
   } catch (error) {
-    return { protocolVersion: 2, operationId: envelope?.operationId ?? null, status: "FAILED", error: /^[A-Z0-9_]{1,100}$/.test(error.code ?? "") ? error.code : "PUBLICATION_FAILED", result: null };
+    return { protocolVersion: 2, operationId: envelope?.operationId ?? null, status: "FAILED", error: /^[A-Z0-9_]{1,100}$/.test(error.code ?? "") ? error.code : "PUBLICATION_FAILED", result: null, diagnostic: { errorType: /^[A-Za-z]{1,40}$/.test(error.name ?? "") ? error.name : "Error", phase: /^[a-z-]{1,40}$/.test(error.phase ?? "") ? error.phase : null, httpStatus: Number.isInteger(error.httpStatus) ? error.httpStatus : null, requestId: typeof error.requestId === "string" && /^[A-Za-z0-9:-]{1,100}$/.test(error.requestId) ? error.requestId : null, operationId: /^[a-f0-9-]{36}$/.test(error.operationId ?? "") ? error.operationId : null } };
   }
 }
 if (require.main === module) (async () => {
