@@ -50,7 +50,7 @@ try {
   const paragraphs = body.locator('p');
   await paragraphs.first().filter({hasText: 'Синтетическая строка А.'}).waitFor();
   const storage = () => page.evaluate(key => JSON.parse(localStorage.getItem(key)).reports.find(r => r.id === 'format-test').doc, key);
-  const select = (first, last = first, a = 4, b = a) => paragraphs.evaluateAll(async (ps, {first, last, a, b}) => {
+  const select = async(first, last = first, a = 4, b = a) => {const expected=await paragraphs.evaluateAll(async (ps, {first, last, a, b}) => {
     ps[0].closest('[contenteditable]').focus();
     const point = (el, offset) => {
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -60,9 +60,8 @@ try {
       }
       throw new Error('Selection extends beyond the paragraph');
     };
-    getSelection().setBaseAndExtent(...point(ps[first],a), ...point(ps[last],b));
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  }, {first, last, a, b});
+    const anchor=point(ps[first],a),head=point(ps[last],b),editor=ps[0].closest('[contenteditable]').editor;getSelection().setBaseAndExtent(...anchor,...head);return {from:Math.min(editor.view.posAtDOM(...anchor),editor.view.posAtDOM(...head)),to:Math.max(editor.view.posAtDOM(...anchor),editor.view.posAtDOM(...head))};
+  }, {first, last, a, b});await page.waitForFunction(({from,to})=>{const selection=document.querySelector('#editor .report-content').editor.state.selection;return selection.from===from&&selection.to===to;},expected);};
   await select(2);
   await page.waitForFunction(key => JSON.parse(localStorage.getItem(key)).reports[0].doc.content[2].attrs.templateOriginal, key);
   const saved = await storage();

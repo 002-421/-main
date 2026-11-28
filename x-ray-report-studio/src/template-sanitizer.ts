@@ -1,6 +1,8 @@
 import type { RichNode } from './model.ts';
 
 const PERSONAL_FIELD = /(?:^|\.)(?:patient|birthdate|number|doctor|reportdate)$/i;
+const PHYSICIAN_FIELD = 'HEAD.BASE.2.FIELD.0043';
+const isPersonalField = (id:string,includeSharedPhysician=false) => PERSONAL_FIELD.test(id) || includeSharedPhysician&&id === PHYSICIAN_FIELD;
 const placeholder = (kind: 'person' | 'date' | 'number', marks: RichNode['marks'] = []) => {
   const value = kind === 'person' ? 'Ф.И.О.' : kind === 'date' ? 'дд.мм.гггг' : 'номер исследования';
   const next = structuredClone(marks ?? []);
@@ -36,20 +38,20 @@ function replaceIdentityLine(node: RichNode, kind: 'person' | 'date' | 'number')
 }
 
 /** Remove personal identity values only from template-package exports. */
-export function sanitizeTemplateForExport(input: RichNode): RichNode {
+export function sanitizeTemplateForExport(input: RichNode, includeSharedPhysician=false): RichNode {
   const doc = structuredClone(input);
   const visit = (node: RichNode) => {
     if (node.type === 'reportField') {
       const id = String(node.attrs?.id ?? '');
-      if (PERSONAL_FIELD.test(id)) {
-        node.attrs = { ...node.attrs, value: '', hint: /birthdate|reportdate/i.test(id) ? 'дд.мм.гггг' : /number/i.test(id) ? 'номер исследования' : 'Ф.И.О.' };
+      if (isPersonalField(id,includeSharedPhysician)) {
+        node.attrs = { ...node.attrs, value: '', hint: id===PHYSICIAN_FIELD?'Ф.И.О. врача':/birthdate|reportdate/i.test(id) ? 'дд.мм.гггг' : /number/i.test(id) ? 'номер исследования' : 'Ф.И.О.' };
       }
     }
     if (node.type === 'text') {
-      const mark = node.marks?.find(item => item.type === 'templateField' && PERSONAL_FIELD.test(String(item.attrs?.id ?? '')));
+      const mark = node.marks?.find(item => item.type === 'templateField' && isPersonalField(String(item.attrs?.id ?? ''),includeSharedPhysician));
       if (mark) {
         const id = String(mark.attrs?.id ?? '');
-        node.text = /birthdate|reportdate/i.test(id) ? 'дд.мм.гггг' : /number/i.test(id) ? 'номер исследования' : 'Ф.И.О.';
+        node.text = id===PHYSICIAN_FIELD?'Ф.И.О. врача':/birthdate|reportdate/i.test(id) ? 'дд.мм.гггг' : /number/i.test(id) ? 'номер исследования' : 'Ф.И.О.';
         mark.attrs = { ...mark.attrs, hint:node.text, original:node.text, filled: false };
         node.marks = [...(node.marks ?? []).filter(item => item.type !== 'highlight'), { type: 'highlight', attrs: { color: '#ffff00' } }];
       }

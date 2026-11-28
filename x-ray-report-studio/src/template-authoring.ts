@@ -6,7 +6,7 @@ import {structurePreparedBuiltin} from './ai-review-structure.ts';import {initia
 import {makeBuiltinTemplateDocument,makeTemplateDocument,networkTemplate,networkTemplateSource,reportTemplates,areas} from './catalog.ts';import {checkedTemplateDocxParts,inspectTemplateDocx,sha256Doc} from './template-docx.ts';import {importOwnDocx,recoverDocx} from './docx.ts';
 import type {CatalogTemplate} from './template-update-types.ts';
 export function finalizeTemplate(input:RichNode):RichNode{
- const templateId=input.attrs?.templateId;let doc=sanitizeTemplateForExport(input);
+ const templateId=input.attrs?.templateId;let doc=sanitizeTemplateForExport(input,true);
  // Privacy redaction can introduce legacy yellow on identity lines. Normalize
  // that new markup at the template boundary, retaining existing prompt IDs.
  if(doc.attrs)delete doc.attrs.editableHighlightsVersion;doc=initializeEditableHighlights(doc);
@@ -34,6 +34,18 @@ export function editableSource(id:string):CatalogTemplate{
  const t=reportTemplates.find(t=>t.id===id);if(!t)throw Error('Шаблон не найден.');
  let doc=networkTemplate(id)?makeTemplateDocument(id):structurePreparedBuiltin(id,justifyDescription(initializeReportFooter(resetInlineTemplate(makeBuiltinTemplateDocument(id)),'дд.мм.гггг')));
  doc=sanitizeTemplateForExport(doc);if(doc.attrs)delete doc.attrs.editableHighlightsVersion;doc=initializeEditableHighlights(doc);const rebase=(n:RichNode)=>{if(n.attrs?.templateOriginal!=null)n.attrs.templateOriginal=textOf(n);n.content?.forEach(rebase);};rebase(doc);validateTemplate(doc);return {id:t.id,title:t.title,areaId:t.areaId,areaTitle:areas.find(a=>a.id===t.areaId)?.title??t.areaId,modality:id.startsWith('ct-')?'CT':'MRI',templateVersion:t.templateVersion,minimumXrsVersion:'0.4.84',doc};
+}
+/** Reattach the ordinary report editor's locally saved revision to the trusted
+ * template section contract. Local report documents are intentionally flat;
+ * only an unchanged block structure can be mapped without guessing clinical
+ * section boundaries. */
+export function adoptLocalTemplateRevision(source:CatalogTemplate,local:RichNode):RichNode{
+ const sections=source.doc.content??[];if(sections.length!==4||sections.some((n,i)=>n.type!=='reportSection'||n.attrs?.id!==['header','description','conclusion','signature'][i]))throw Error('Структура исходного шаблона не поддерживается.');
+ const expected=sections.map(section=>section.content??[]),sourceBlocks=expected.flat();
+ const localBlocks=(local.content??[]).filter(n=>!(n.type==='paragraph'&&!(n.content??[]).some(c=>c.type!=='text'||c.text?.trim())));
+ if(sourceBlocks.length!==localBlocks.length||sourceBlocks.some((n,i)=>n.type!==localBlocks[i]?.type))throw Error('Локальная редакция изменила структуру блоков. Сопоставьте разделы в административном редакторе.');
+ let offset=0;const content=sections.map((section,i)=>{const count=expected[i].length;const nodes=localBlocks.slice(offset,offset+count);offset+=count;return {...structuredClone(section),content:nodes};});
+ return {...structuredClone(source.doc),attrs:{...source.doc.attrs,...local.attrs},content};
 }
 export function mapWordSections(doc:RichNode,choices:string[]):RichNode{
  const ids=['header','description','conclusion','signature'];if(!doc.content||choices.length!==doc.content.length||choices.some(id=>!ids.includes(id)))throw Error('Явно укажите раздел каждого блока Word.');
