@@ -19,6 +19,7 @@ const { summarizeFrame } = require('./startup-diagnostics.cjs');
 const TEST_KIT_MARKER = path.join(process.resourcesPath, 'app', 'xrs-test-mode.json');
 let TEST_KIT_ROOT = '';
 let INVALID_TEST_KIT_LAUNCH = false;
+let profileMigrationError='';
 if (app.isPackaged && fsSync.existsSync(TEST_KIT_MARKER)) {
   try {
     const marker = JSON.parse(fsSync.readFileSync(TEST_KIT_MARKER, 'utf8'));
@@ -42,8 +43,9 @@ if (TEST_KIT_ROOT) {
   app.setPath('appData', path.join(TEST_KIT_ROOT, 'AppData'));
   if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(TEST_KIT_ROOT, 'Profile'));
 } else if (!INVALID_TEST_KIT_LAUNCH) {
-  if (!app.commandLine.hasSwitch('user-data-dir'))
-    app.setPath('userData', require('./profile-migration.cjs').migrateProfile(app.getPath('appData')).directory);
+  if (!app.commandLine.hasSwitch('user-data-dir')) {
+    const migration=require('./profile-migration.cjs').migrateProfile(app.getPath('appData'));profileMigrationError=migration.error??'';app.setPath('userData',migration.directory);
+  }
 }
 if (TEST_KIT_ROOT) app.setPath('sessionData', path.join(app.getPath('userData'), 'Session Data'));
 app.setName('X-ray Report Studio');
@@ -389,6 +391,7 @@ async function getUpdateManifest() {
 
 app.whenReady().then(async () => {
   if (!ownsSingleInstanceLock) return;
+  if(profileMigrationError)await dialog.showMessageBox({type:'warning',message:'Безопасный перенос данных в каталог XRS не завершён.',detail:'Открыт прежний профиль. Документы и резервная копия сохранены. Перенос требует проверки; не удаляйте прежнюю папку.'});
   if (INVALID_TEST_KIT_LAUNCH) {
     dialog.showErrorBox('XRS-05 test kit', 'Запустите эту тестовую копию через Run-Test-App.cmd. Профиль и рабочий ярлык не были открыты.');
     app.quit();

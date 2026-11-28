@@ -8,5 +8,5 @@ export function compactToolbar(root:HTMLElement){
  header.querySelector('#save-state')!.classList.add('compact-save-state');more.panel.append(header.querySelector('.document-heading')!);header.remove();tools.remove();
  const groups=[...ribbon.querySelectorAll<HTMLElement>(':scope > .tool-group')];const candidates=[secondary,...groups.slice().reverse()];const homes=new Map(candidates.map(el=>{const marker=document.createComment('toolbar-home');el.before(marker);return [el,marker] as const;}));
  let resizing=false;const fit=()=>{if(resizing)return;resizing=true;for(const [node,marker]of homes)marker.after(node);for(const node of candidates){if(ribbon.scrollWidth<=ribbon.clientWidth)break;more.panel.append(node);}resizing=false;};new ResizeObserver(fit).observe(ribbon);requestAnimationFrame(fit);
- ribbon.addEventListener('click',event=>{if((event.target as HTMLElement).closest('button'))for(const el of ribbon.querySelectorAll<HTMLDetailsElement>('.compact-menu'))el.open=false;});
+ ribbon.addEventListener('click',event=>{const button=(event.target as HTMLElement).closest('button');if(button&&!button.hasAttribute('aria-expanded')&&!button.hasAttribute('data-format-toggle'))for(const el of ribbon.querySelectorAll<HTMLDetailsElement>('.compact-menu'))el.open=false;});
 }
