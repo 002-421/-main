@@ -1,4 +1,5 @@
 import type {Editor} from '@tiptap/core';
+import {TextSelection} from '@tiptap/pm/state';
 import type {RichNode} from './model.ts';import {validateTemplate} from './model.ts';
 import {initializeEditableHighlights,editableHighlightStructure,textOf} from './template-highlights.ts';
 import {sanitizeTemplateForExport} from './template-sanitizer.ts';import {resetInlineTemplate} from './inline-fields.ts';
@@ -62,6 +63,13 @@ export function assignNativeField(editor:Editor,field:{id:string;hint:string}){
 }
 export function markEditableParagraph(editor:Editor){const tr=editor.state.tr,{from,to}=tr.selection;tr.doc.nodesBetween(from,to,(n,pos)=>{if(!n.isTextblock||from<to&&pos+1>=to)return;const id=n.attrs.editableHighlight?.id??'editable.manual.'+crypto.randomUUID();tr.setNodeMarkup(pos,undefined,{...n.attrs,editableHighlight:{id,original:n.textContent,edited:false}});n.descendants((child,offset)=>{if(child.isText&&!child.marks.some(m=>m.type.name==='templateField')){for(const mark of child.marks)if(mark.type.name==='highlight'&&/^(#ffff00|yellow)$/i.test(mark.attrs.color))tr.removeMark(pos+1+offset,pos+1+offset+child.nodeSize,mark);tr.addMark(pos+1+offset,pos+1+offset+child.nodeSize,editor.schema.marks.templateHighlight.create({id}));}});return false;});editor.view.dispatch(tr);}
 export function markMeasurement(editor:Editor,existingId?:string){const {from,to}=editor.state.selection,text=editor.state.doc.textBetween(from,to);if(!/^0,0+$/.test(text)||editor.state.selection.$from.parent!==editor.state.selection.$to.parent)throw Error('Выделите ровно один заполнитель 0,0 в одном абзаце.');const id=existingId||'measurement.manual.'+crypto.randomUUID();let duplicate=false;editor.state.doc.descendants((n,p)=>{if(n.isText&&n.marks.some(m=>m.type.name==='templateSize'&&m.attrs.id===id)&&(p>=to||p+n.nodeSize<=from))duplicate=true;});if(duplicate)throw Error('Этот ID размера уже назначен.');const tr=editor.state.tr;editor.state.doc.nodesBetween(from,to,(n,pos)=>{for(const m of n.marks)if(m.type.name==='highlight'&&/^(#ffff00|yellow)$/i.test(m.attrs.color))tr.removeMark(Math.max(pos,from),Math.min(pos+n.nodeSize,to),m);});tr.addMark(from,to,editor.schema.marks.templateSize.create({id,original:text,filled:false}));editor.view.dispatch(tr);}
+/** Insert a fresh independent measurement, or mark an explicitly selected 0,0. */
+export function insertEditableMeasurement(editor:Editor){
+ const {from,to}=editor.state.selection,text=editor.state.doc.textBetween(from,to);
+ if(from!==to){markMeasurement(editor);return;}
+ const id='measurement.manual.'+crypto.randomUUID(),mark=editor.schema.marks.templateSize.create({id,original:'0,0',filled:false});
+ const tr=editor.state.tr.insertText('0,0',from,to);tr.addMark(from,from+3,mark);tr.setSelection(TextSelection.near(tr.doc.resolve(from+3)));editor.view.dispatch(tr.scrollIntoView());
+}
 export function fieldAudit(before:RichNode,after:RichNode){const a=editableHighlightStructure(before),b=editableHighlightStructure(after);return {before:a,after:b,missingFields:a.fields.filter(f=>!b.fields.some(n=>n.id===f.id)),missingMeasurements:a.sizes.filter(f=>!b.sizes.some(n=>n.id===f.id))};}
 
 export async function templateDataSha(value:unknown){const text=JSON.stringify(value,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,v[k]])):v);return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(b=>b.toString(16).padStart(2,'0')).join('');}

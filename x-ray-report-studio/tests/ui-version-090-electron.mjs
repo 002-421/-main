@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {_electron} from 'playwright-core';
+import {installToolbarDriver} from './helpers/toolbar-driver.mjs';
+
+const profile=await mkdtemp(path.join(os.tmpdir(),'xrs-090-ui-'));
+const options={executablePath:process.env.ELECTRON_PATH||path.resolve('node_modules/electron/dist',process.platform==='win32'?'electron.exe':'electron'),cwd:process.cwd(),args:['.',`--user-data-dir=${profile}`,'--no-sandbox','--ozone-platform=headless','--disable-gpu']};
+let app,page;
+async function launch(){app=await _electron.launch(options);page=await app.firstWindow();installToolbarDriver(page);await page.locator('#editor .report-content').waitFor();}
+const snap=()=>page.locator('#editor .report-content').evaluate(el=>el.editor.getJSON());
+try{
+ await launch();
+ assert.equal(await page.locator('details.compact-menu').count(),1);
+ for(const text of ['Вставка','Инструменты','Ещё'])assert.equal(await page.getByText(text,{exact:true}).count(),0);
+ for(const selector of ['#review-unchanged','#sticky-note-open','#calculator','#open-report','#save-menu-toggle','#zoom'])assert.equal(await page.locator(selector).isVisible(),true,selector);
+ assert.equal(await page.locator('[data-format-toggle="indent"]').count(),1);assert.equal(await page.locator('[data-format-toggle="indent"]').innerText(),'_А');
+ assert.equal(await page.locator('.page-meta').isVisible(),false);assert.equal(await page.locator('.document-heading').isVisible(),false);assert.equal(await page.locator('#new-report').isVisible(),false);
+ for(const [width,maxRows] of [[2200,1],[1500,2],[740,3]]){await page.setViewportSize({width,height:900});await page.waitForTimeout(100);const layout=await page.locator('.ribbon').evaluate(el=>{const nodes=[...el.children].filter(node=>getComputedStyle(node).position!=='absolute'&&getComputedStyle(node).display!=='none'),tops=nodes.map(node=>Math.round(node.getBoundingClientRect().top));return{rows:new Set(tops).size,overflow:el.scrollWidth-el.clientWidth,widths:nodes.map(node=>[node.className,Math.round(node.getBoundingClientRect().width)])};});assert.ok(layout.rows<=maxRows,`${width}: ${layout.rows} toolbar rows ${JSON.stringify(layout.widths)}`);assert.ok(layout.overflow<=1,`${width}: no horizontal clipping`);}
+
+ await page.setViewportSize({width:1400,height:900});await page.locator('[data-tab="templates"]').click();await page.locator('#area-select').selectOption('head');await page.locator('[data-template="head-gm"]').click();await page.locator('#edit-template').click();await page.locator('#editor .report-content').evaluate(el=>{const e=el.editor;let pos;e.state.doc.descendants((node,at)=>{if(pos===undefined&&node.isText){const offset=node.text.indexOf(';');if(offset>=0)pos=at+offset;}});if(pos===undefined)throw Error('Synthetic punctuation target missing');e.commands.setTextSelection({from:pos,to:pos+1});e.commands.insertContent('.');});await page.locator('#save-template').click();
+ const versions=page.locator('[data-revision-template="head-gm"]');assert.deepEqual(await versions.locator('option').allTextContents(),['Актуальная версия 0.0.1','Моя версия']);assert.equal(await versions.inputValue(),'personal');assert.equal(await page.locator('[data-delete-personal-template="head-gm"]').getAttribute('title'),'Удалить');
+ const personalBytes=await page.evaluate(()=>localStorage.getItem('mri-alliance.templates.v4'));assert.ok(personalBytes?.includes('.'));
+ await versions.selectOption('current');await page.locator('[data-template="head-gm"]').click();assert.equal((await snap()).attrs.templateSource.status,'Active');await app.close();await launch();await page.locator('[data-tab="templates"]').click();await page.locator('#area-select').selectOption('head');assert.equal(await page.locator('[data-revision-template="head-gm"]').inputValue(),'current','manual current selection survives restart');
+ await page.locator('[data-revision-template="head-gm"]').selectOption('personal');await page.locator('[data-template="head-gm"]').click();assert.equal((await snap()).attrs.templateSource.status,'Personal');const openPersonal=JSON.stringify(await snap());await page.locator('[data-delete-personal-template="head-gm"]').click();await page.getByText('Точно удалить вашу версию?',{exact:true}).waitFor();await page.getByRole('button',{name:'Удалить',exact:true}).click();assert.equal(JSON.stringify(await snap()),openPersonal,'deletion does not rewrite an already open protocol');assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mri-alliance.templates.v4')||'{}')['head-gm']),undefined);assert.deepEqual(await page.locator('[data-revision-template="head-gm"] option').allTextContents(),['Актуальная версия 0.0.1']);assert.equal(await page.locator('[data-revision-template="head-gm"]').inputValue(),'current');
+
+ await page.locator('#settings').click();await page.locator('[data-settings-section="medical-templates"] summary').click();await page.locator('#medical-template-settings').click();await page.locator('#template-admin-editor .report-content').waitFor();for(const selector of ['#template-admin-paragraph','#template-admin-mark-size']){assert.equal(await page.locator(selector).isVisible(),true);assert.match(await page.locator(selector).evaluate(el=>getComputedStyle(el).backgroundColor),/rgb\((?:217, 185, 0|255, 216, 61)\)/);}assert.equal(await page.getByText('Исходная редакция',{exact:true}).count(),0);assert.equal(await page.getByText('Локальные черновики',{exact:true}).count(),0);assert.equal(await page.locator('#template-admin-before').isVisible(),false);assert.equal(await page.locator('#template-admin-tools').isVisible(),false);
+ console.log('PASS: XRS 0.4.90 responsive direct toolbar, exact Copy menu, hidden duplicate metadata, Paragraph/0,0 authoring controls, persistent Current/My selector and isolated personal deletion.');
+}finally{await app?.close().catch(()=>{});await rm(profile,{recursive:true,force:true});}

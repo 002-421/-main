@@ -1,4 +1,5 @@
 export const TEMPLATE_VERSION_STORAGE_KEY = 'mri-alliance.template-versions.v1';
+export const TEMPLATE_SELECTION_STORAGE_KEY = 'mri-alliance.template-selections.v1';
 export const INITIAL_TEMPLATE_VERSION = '0.0.1';
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
@@ -32,5 +33,7 @@ export function writeTemplateVersion(storage: StorageLike, id: string, version: 
   const serialized = JSON.stringify(next);
   storage.setItem(TEMPLATE_VERSION_STORAGE_KEY, serialized);
   if (storage.getItem(TEMPLATE_VERSION_STORAGE_KEY) !== serialized) throw new Error('Не удалось проверить сохранение версии шаблона.');
+  let selections:Record<string,string>={};try{const parsed=JSON.parse(storage.getItem(TEMPLATE_SELECTION_STORAGE_KEY)??'{}');if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))selections=parsed;}catch{}
+  storage.setItem(TEMPLATE_SELECTION_STORAGE_KEY,JSON.stringify({...selections,[id]:'personal'}));
   return next;
 }

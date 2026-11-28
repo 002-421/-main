@@ -228,3 +228,31 @@ html:is([data-theme="dark"],[data-theme="amoled"]) :is(.save-menu-items,.ai-revi
 
 /* One adaptive command row; report tabs remain separate navigation. */
 .ribbon{position:relative;flex-wrap:nowrap;padding:6px;min-height:44px;gap:4px}.ribbon>.tool-group{flex-shrink:0}.compact-secondary{display:flex;gap:3px;flex-shrink:0}.compact-menu{position:relative;flex-shrink:0}.compact-menu>summary{cursor:pointer;white-space:nowrap;padding:7px;list-style:none;border:1px solid var(--border);border-radius:5px}.compact-menu-items{position:absolute;top:100%;right:0;z-index:60;min-width:190px;max-width:min(90vw,500px);padding:8px;background:var(--panel,#fff);border:1px solid var(--border);box-shadow:0 5px 16px #0004;display:flex;flex-wrap:wrap;gap:6px}.compact-menu-items>.tool-group{flex-wrap:wrap}.compact-menu-items>button{width:100%;text-align:left}.ribbon .zoom-control{flex-shrink:0;gap:3px}.ribbon .zoom-control>span{display:none}.ribbon #zoom{width:85px}.compact-save-state{font-size:11px}.report-tabs{display:flex!important;flex-shrink:0;overflow:auto;max-height:42px}html:is([data-theme="dark"],[data-theme="amoled"]) .compact-menu-items{background:#202b38}html[data-theme="amoled"] .compact-menu-items{background:#000}.settings-update-row,.settings-template-updates{font-size:14px;font-weight:400}.settings-update-row small,#template-catalog-status{font-size:12px!important;font-weight:400;line-height:1.4;margin:4px 0 8px}
+
+/* 0.4.90: direct responsive commands; only Copy remains a menu. */
+.ribbon{flex-wrap:wrap;align-content:center;gap:5px 7px;padding:7px 10px;min-height:50px;overflow:visible}
+.ribbon>.tool-group{flex-shrink:0;min-height:38px;padding-right:7px}
+.ribbon .tool-group button,.ribbon .btn,.ribbon .chip,.compact-menu>summary{min-height:36px;font-size:14px;padding:7px 9px;line-height:1.2}
+.ribbon .tool-group select{height:36px;font-size:14px;padding:5px 7px}
+.ribbon #font-family{width:125px}.ribbon #font-size{width:58px}
+.ribbon .tool-group input[type=color]{height:34px;width:31px}
+.toolbar-xrs .chip{color:inherit;border-color:var(--border)}
+.ribbon .toolbar-xrs button,.ribbon .toolbar-files .btn,.ribbon>.tool-group:nth-child(3) button{padding-inline:4px}
+.toolbar-copy,.toolbar-files,.toolbar-zoom{gap:5px}
+.toolbar-files .save-menu{position:relative}
+.ribbon .zoom-control{display:flex;align-items:center;min-height:36px;font-size:14px;gap:7px}
+.ribbon .zoom-control>span{display:none}.ribbon #zoom{width:100px}
+.compact-menu>summary::-webkit-details-marker{display:none}
+.compact-menu-items{top:calc(100% + 4px);left:0;right:auto;min-width:220px;display:grid;grid-template-columns:1fr;padding:7px}
+.compact-menu-items>button{min-height:38px;width:100%;text-align:left;font-size:14px}
+.visually-hidden-metadata,.page-meta{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important}
+.template-field-actions{display:flex;gap:8px;margin:10px 0}
+.template-field-action{background:#ffd83d!important;border-color:#c7a600!important;color:#352b00!important;font-weight:700!important;min-width:68px}
+.template-version-label{display:grid;grid-template-columns:minmax(0,1fr) 30px;gap:4px;padding:0 8px 8px;align-items:center}
+.template-version-label select{font-size:12px;width:100%;padding:6px}
+.template-personal-delete{width:28px;height:28px;border-radius:5px;color:#a83d4e;font-size:19px;line-height:1}
+.template-personal-delete:hover{background:#ffe8eb}
+html:is([data-theme="dark"],[data-theme="amoled"]) .template-field-action{background:#d9b900!important;border-color:#f0d245!important;color:#171200!important}
+@media(max-width:1150px){.ribbon{padding:6px 8px}.ribbon .tool-group button,.ribbon .btn,.ribbon .chip,.compact-menu>summary{padding-inline:7px}.ribbon #zoom{width:90px}}
+@media(max-width:760px){.ribbon{gap:4px}.ribbon>.tool-group{padding-right:4px}.ribbon .zoom-control>span{display:none}.toolbar-xrs{flex-wrap:wrap}.toolbar-files{order:20}.toolbar-zoom{order:21}}
+@media(max-width:760px){.ribbon>.tool-group{display:contents}.ribbon .toolbar-xrs,.ribbon .toolbar-files,.ribbon .toolbar-zoom{display:contents}}

@@ -21,7 +21,7 @@ export const fillToolbar = menu('fill', 'Цвет заливки', [...MANUAL_FI
 export const paragraphToolbar = [
   menu('align', 'Выравнивание', alignments),
   menu('indent', 'Отступ первой строки', FIRST_LINE_INDENTS.map((points,index)=>[String(points),['Без отступа','0,5 см','Стандартный (≈ 0,625 см)','0,75 см','1,0 см','1,25 см'][index]]), '', '_А'),
-  menu('rule', 'Толщина линии', ruleChoices, '<button id="insert-line" type="button" aria-label="Линия">― Линия</button>'),
+  menu('rule', 'Толщина линии', ruleChoices, '<button id="insert-line" type="button" aria-label="Линия" title="Линия">―</button>'),
   menu('list', 'Список', lists),
   '<button id="table-tools" title="Вставить или изменить таблицу" aria-label="Вставить или изменить таблицу"><svg viewBox="0 0 18 18" width="18" height="18" fill="none" stroke="currentColor" aria-hidden="true"><rect x="1.5" y="1.5" width="15" height="15"/><path d="M6.5 1.5v15m5-15v15M1.5 6.5h15m-15 5h15"/></svg></button>',
 ].join('');
@@ -92,7 +92,7 @@ export function bindFormatToolbar(editor: Editor, toolbar: HTMLElement) {
     const alignToggle = toggles.find(button => button.dataset.formatToggle === 'align')!;
     const alignment = alignments.find(([key]) => key === align)?.[1];
     alignToggle.title = align === 'mixed' ? 'Смешанное выравнивание' : alignment ?? 'Выравнивание';
-    alignToggle.textContent = align === 'mixed' ? 'Смешанное ▾' : `${alignment ?? 'Выравнивание'} ▾`;
+    alignToggle.textContent = align === 'mixed' ? '≋ ▾' : `${({left:'↤',center:'↔',right:'↦',justify:'☰'} as Record<string,string>)[String(align)] ?? '≡'} ▾`;
     fillButton.querySelector<HTMLElement>('.format-swatch')!.style.setProperty('--swatch', fill);
     const description = {none:'нет ручной заливки',current:'текущий цвет',other:'другой цвет',mixed:'смешанная заливка'}[state];
     fillButton.dataset.fillState = state;
