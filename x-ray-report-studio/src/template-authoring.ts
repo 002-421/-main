@@ -7,6 +7,9 @@ import {makeBuiltinTemplateDocument,makeTemplateDocument,networkTemplate,network
 import type {CatalogTemplate} from './template-update-types.ts';
 export function finalizeTemplate(input:RichNode):RichNode{
  const templateId=input.attrs?.templateId;let doc=sanitizeTemplateForExport(input);
+ // Privacy redaction can introduce legacy yellow on identity lines. Normalize
+ // that new markup at the template boundary, retaining existing prompt IDs.
+ if(doc.attrs)delete doc.attrs.editableHighlightsVersion;doc=initializeEditableHighlights(doc);
  // Tiptap appends an empty caret paragraph outside the four report sections.
  // It belongs to the editing surface, not the distributable medical template.
  if(doc.content?.some(n=>n.type==='reportSection')){
@@ -15,7 +18,13 @@ export function finalizeTemplate(input:RichNode):RichNode{
   doc.content=doc.content.slice(0,4);
  }
 if(doc.attrs)delete doc.attrs.templateSource;
- const rebase=(n:RichNode)=>{if(n.attrs?.editableHighlight)n.attrs.editableHighlight={...n.attrs.editableHighlight,original:textOf(n),edited:false};if(n.attrs?.templateOriginal!=null)n.attrs.templateOriginal=textOf(n);n.content?.forEach(rebase);};rebase(doc);
+ const rebase=(n:RichNode)=>{const prompt=n.attrs?.editableHighlight;if(prompt){
+ // Editing completes a paragraph on the authoring surface. The distributable
+ // template rearms that same paragraph identity, with matching child marks.
+ // Never leave edited:false without marks (the package validator rejects it).
+ if(prompt.edited){let marked=false;for(const child of n.content??[])if(child.type==='text'&&!child.marks?.some(m=>m.type==='templateField')){child.marks=[...(child.marks??[]).filter(m=>m.type!=='templateHighlight'),{type:'templateHighlight',attrs:{id:prompt.id}}];marked=true;}if(!marked)delete n.attrs!.editableHighlight;}
+ if(n.attrs?.editableHighlight)n.attrs.editableHighlight={...prompt,original:textOf(n),edited:false};
+ }if(n.attrs?.templateOriginal!=null)n.attrs.templateOriginal=textOf(n);n.content?.forEach(rebase);};rebase(doc);
  // The existing initializer only interprets newly introduced legacy yellow. It
  // preserves already structural identities and independent measurement marks.
  doc.attrs={...doc.attrs,editableHighlightsVersion:1};rebase(doc);const checked=validateTemplate(doc);if(typeof templateId==='string'&&/^[A-Za-z0-9_.:-]{1,120}$/.test(templateId))checked.attrs={...checked.attrs,templateId};return checked;

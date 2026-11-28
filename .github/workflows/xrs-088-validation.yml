@@ -28,7 +28,7 @@ jobs:
           New-Item -ItemType Directory -Force test-output/full-cycle | Out-Null
           npm test 2>&1 | Tee-Object test-output/full-cycle/windows-unit.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: One-PIN direct publication, real IPC, HTTPS and SHA256, two clients and local conflicts
+      - name: Synthetic GitHub publication with real IPC, HTTPS, SHA256, two clients and local conflicts
         run: node tests/template-publishing-electron.mjs
       - name: Legacy catalog compatibility, archived versions, fields and rollback in two Electron instances
         run: node tests/template-updates-electron.mjs
@@ -52,7 +52,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Offline AI Review regression in Electron
         run: node tests/ai-067-electron.mjs
-      - name: Two independent Windows desktop authorizations with real safeStorage, no CLI
+      - name: Synthetic OAuth responses with real Windows safeStorage on two desktop profiles
         run: node tests/github-auth-electron.mjs
       - name: Unified yellow lifecycle, dark-mode DOCX, safe reset and recovery
         run: node tests/recovery-highlight-electron.mjs
@@ -76,6 +76,7 @@ jobs:
             x-ray-report-studio/test-output/full-cycle/
             x-ray-report-studio/test-output/template-publishing/
             x-ray-report-studio/test-output/paste-fields/
+            x-ray-report-studio/test-output/template-admin/
             x-ray-report-studio/test-output/release-088/*.json
             x-ray-report-studio/test-output/recovery-088/
           if-no-files-found: ignore

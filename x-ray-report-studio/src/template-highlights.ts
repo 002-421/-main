@@ -21,7 +21,7 @@ export function initializeEditableHighlights(input: RichNode): RichNode {
       if (!children.some(child => child.type === 'text' && yellow(child) && !child.marks?.some(mark => mark.type === 'templateField'))) return;
       const original = textOf(node), key = fingerprint(original), occurrence = occurrences.get(key) ?? 0;
       occurrences.set(key, occurrence + 1);
-      const id = `editable.${key}.${occurrence}`;
+      const id = node.attrs?.editableHighlight?.id ?? `editable.${key}.${occurrence}`;
       node.attrs = {...node.attrs, editableHighlight: {id, original, edited: false}};
       const runs = children.map(child => ({child, from: 0, to: 0}));
       let offset = 0;
