@@ -16,7 +16,7 @@ const temp=await mkdtemp(path.join(os.tmpdir(),'xrs-template-electron-')),f=fixt
 const executable=process.env.ELECTRON_PATH||path.resolve('node_modules/electron/dist',process.platform==='win32'?'electron.exe':'electron');
 const openssl=process.platform==='win32'&&existsSync('C:/Program Files/Git/usr/bin/openssl.exe')?'C:/Program Files/Git/usr/bin/openssl.exe':'openssl';
 const documentSnapshot=page=>page.evaluate(()=>document.querySelector('.report-content').editor.getJSON());
-async function manager(page){await page.locator('#settings').click();await page.locator('[data-settings-section="medical-templates"] summary').click();await page.locator('#medical-template-settings').click();await page.locator('#template-catalog-check').waitFor();}
+async function manager(page){await page.locator('#settings').click();await page.locator('[data-settings-section="medical-templates"] summary').click();await page.locator('#medical-template-settings').click();await page.locator('#template-admin-source').waitFor();await page.locator('#template-catalog-check').evaluate(el=>el.closest('details').open=true);await page.locator('#template-catalog-check').waitFor();}
 try{
  await mkdir(output,{recursive:true});
  execFileSync(openssl,['req','-x509','-newkey','rsa:2048','-nodes','-keyout',path.join(temp,'tls.key'),'-out',path.join(temp,'tls.crt'),'-days','2','-subj','/CN=localhost','-addext','subjectAltName=IP:127.0.0.1','-addext','basicConstraints=critical,CA:TRUE'],{stdio:'ignore'});

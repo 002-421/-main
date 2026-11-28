@@ -1,3 +1,4 @@
+import {installToolbarDriver} from './helpers/toolbar-driver.mjs';
 import assert from 'node:assert/strict';
 import {existsSync} from 'node:fs';
 import {mkdtemp,rm,mkdir,writeFile} from 'node:fs/promises';
@@ -26,7 +27,7 @@ const cursor=async pos=>{
  await page.waitForFunction(pos=>{const e=document.querySelector('.report-content').editor;return e.view.hasFocus()&&e.state.selection.from===pos;},pos);
 };
 try{
- page=await app.firstWindow();await page.locator('.report-content').waitFor();
+ page=await app.firstWindow();installToolbarDriver(page);await page.locator('.report-content').waitFor();
  page.on('pageerror',e=>{errors.push(e.message);console.error('RENDERER',e.stack);});
  await page.locator('[data-tab="templates"]').click();await page.locator('#area-select').selectOption('spine');
  for(const id of ids){
@@ -114,7 +115,7 @@ try{
   reports.push({reportId,doc:await snapshot()});console.log(`PASS ${id}: text, sizes, middle replacement, plain/HTML clipboard paste, manual toggle, Undo/Redo, persistence`);
  }
  assert.deepEqual(errors,[]);
- await app.close();app=await _electron.launch(options);page=await app.firstWindow();await page.locator('.report-content').waitFor();
+ await app.close();app=await _electron.launch(options);page=await app.firstWindow();installToolbarDriver(page);await page.locator('.report-content').waitFor();
  for(const {reportId,doc}of reports){await page.locator(`[data-report-select="${reportId}"]`).click();assert.deepEqual(prepareInlineDocument(await snapshot()),prepareInlineDocument(doc),`${reportId}: Electron restart retains independent states`);}
  console.log('PASS: all eight Spine v8 reports, retained 40 field IDs and independent state after Electron restart.');
 }catch(error){

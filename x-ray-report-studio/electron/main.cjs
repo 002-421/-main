@@ -43,7 +43,7 @@ if (TEST_KIT_ROOT) {
   if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(TEST_KIT_ROOT, 'Profile'));
 } else if (!INVALID_TEST_KIT_LAUNCH) {
   if (!app.commandLine.hasSwitch('user-data-dir'))
-    app.setPath('userData', path.join(app.getPath('appData'), 'MRI Report Studio'));
+    app.setPath('userData', require('./profile-migration.cjs').migrateProfile(app.getPath('appData')).directory);
 }
 if (TEST_KIT_ROOT) app.setPath('sessionData', path.join(app.getPath('userData'), 'Session Data'));
 app.setName('X-ray Report Studio');
@@ -549,9 +549,8 @@ app.whenReady().then(async () => {
   const desktopGitHub=require('./github-desktop-auth.cjs').createDesktopAuth({directory:path.join(app.getPath('userData'),'github-authorization'),clientId:require('./github-oauth-config.cjs').clientId,safeStorage,openExternal:url=>shell.openExternal(url)});
   const templatePublisherBridge={async call(command,onProgress){await require('./template-publisher-bridge.cjs').verifyComponent();const runtime=require('./template-publisher-runtime.cjs');const result=await runtime.handleEnvelope({protocolVersion:2,operationId:crypto.randomUUID(),command,context:{appVersion:activeApplicationVersion}},new runtime.SimplePublisher({gh:desktopGitHub.transport,onProgress}));if(result.error)throw Object.assign(Error(result.error),{code:result.error,...result.diagnostic});return result.result;}};
   const templateAdmin=new (require('./template-admin.cjs').TemplateAdmin)({directory:path.join(app.getPath('userData'),'template-admin-v1'),baseline:require('./template-baseline.cjs').templates,authorize:()=>desktopGitHub.transport.authorize(),allowedImages:require('./template-baseline.cjs').allowedImages,audit:value=>void logStartup(value),loadSource:async(id,version,channel)=>{
-    const source=require('./template-source.cjs');
-    if(channel&&source.format==='https-sha256-v1'&&source.enabled&&source.publisher?.enabled){try{return (await templatePublisherBridge.call({operation:'source',id,version})).template;}catch(error){if(!['SECURE_OWNER_LOGIN_REQUIRED','SECURE_STORAGE_UNAVAILABLE','GITHUB_REQUEST_FAILED','GITHUB_FORBIDDEN','GITHUB_UNAUTHORIZED','ENVIRONMENT_CREDENTIAL_FORBIDDEN','WINDOWS_11_REQUIRED','WINDOWS_ADMIN_REQUIRED','GITHUB_LOGIN_REQUIRED','GITHUB_CLI_REQUIRED','GITHUB_UNAVAILABLE'].includes(error.code))throw error;}}
-    const row=await templateUpdates.revision(id,version);return row.builtin?require('./template-baseline.cjs').templates.find(t=>t.id===id):row.template;
+    const current=await templateUpdates.state();const active=current.activeTemplates?.find(t=>t.id===id);if(active&&(!version||version===active.templateVersion))return active;const baseline=require('./template-baseline.cjs').templates.find(t=>t.id===id);const row=await templateUpdates.revision(id,version??baseline?.templateVersion);if(!row.builtin)return row.template;
+    const loaded=await new (require('./template-publisher-runtime.cjs').SimplePublisher)({gh:{}}).loadSources();return loaded.sources.get(id);
   }});
   const templatePublication=require('./template-publication-service.cjs').createTemplatePublicationService({directory:path.join(app.getPath('userData'),'template-publications-v2'),admin:templateAdmin,source:require('./template-source.cjs'),bridge:templatePublisherBridge,progress:(owner,event)=>{const window=BrowserWindow.getAllWindows().find(w=>w.webContents.id===owner);if(window&&!window.isDestroyed())window.webContents.send('templates:publication-progress',event);},log:value=>void logStartup(value)});
   let adminInflight=0;const recovery=new (require('./template-recovery.cjs').TemplateRecovery)({directory:path.join(app.getPath('userData'),'reset-recovery-v1'),adminDirectory:templateAdmin.directory,standardIds:async()=>[...new Set([...templateAdmin.baseline.keys(),...((await templateUpdates.state()).templates??[]).map(t=>t.id)])],busy:()=>templatePublication.busy||adminInflight>0,pendingPublication:()=>fsSync.existsSync(path.join(app.getPath('userData'),'template-publications-v2/oauth-pending.json'))});await recovery.initialize();

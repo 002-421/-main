@@ -1,3 +1,4 @@
+import {installToolbarDriver} from './helpers/toolbar-driver.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {readFile,mkdir,writeFile} from 'node:fs/promises';

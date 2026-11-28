@@ -1,0 +1,86 @@
+name: XRS 0.4.89 template workflow validation
+on:
+  push:
+    branches: [codex/xrs-089-template-workflow]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-full-cycle:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: x-ray-report-studio
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: x-ray-report-studio/package-lock.json
+      - run: npm ci
+      - run: npm run desktop:install
+      - run: npm run build
+      - name: Full automated suite including real Windows file locks
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force test-output/full-cycle | Out-Null
+          npm test 2>&1 | Tee-Object test-output/full-cycle/windows-unit.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Offline GM local revision and unified workflow, toolbar and zoom
+        run: node tests/template-workflow-089-electron.mjs
+      - name: Legacy catalog compatibility, archived versions, fields and rollback in two Electron instances
+        run: node tests/template-updates-electron.mjs
+      - name: Windows DPAPI, complete profile migration and cold restart
+        run: node tests/profile-migration-electron.mjs
+      - name: Actual internal clipboard, editable fields, DOCX and Chromium PDF
+        run: node tests/paste-fields-electron.mjs
+      - name: External clipboard fixtures, 12 to 11 pt and first-line indent
+        run: node tests/paste-typography-electron.mjs
+      - name: All eight Spine templates, independent dimensions and forty native fields
+        run: npm run test:spine-review-v8
+      - name: Undo, Redo and persisted views
+        run: npm run test:history-browser
+      - name: Browser formatting and real DOCX/PDF export
+        run: |
+          node node_modules/playwright-core/cli.js install chromium
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/editor-format-browser.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/editable-highlight-export-browser.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Offline AI Review regression in Electron
+        run: node tests/ai-067-electron.mjs
+      - name: Synthetic OAuth responses with real Windows safeStorage on two desktop profiles
+        run: node tests/github-auth-electron.mjs
+      - name: Safe reset and recovery data preservation
+        run: node tests/recovery-highlight-electron.mjs
+      - name: Light Dark AMOLED, range 75 to 200 percent, long document and export invariance
+        run: node tests/ui-preferences-electron.mjs
+      - name: Build and verify exact final Windows installation package
+        shell: pwsh
+        run: |
+          python scripts/package_setup.py --candidate-output test-output/release-089
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify_setup_package.py --zip test-output/release-089/X-ray_Report_Studio_Windows_Setup.zip --source-electron electron --version 0.4.89
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hash = (Get-FileHash -Algorithm SHA256 test-output/release-089/X-ray_Report_Studio_Windows_Setup.zip).Hash.ToLowerInvariant()
+          Write-Output "::notice title=Final Windows ZIP SHA-256::$hash"
+          git diff --exit-code -- downloads/latest.json electron/update-channel.cjs
+      - name: Published 0.4.88 to exact 0.4.89 official updater acceptance
+        run: node tests/release-089-updater-electron.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: XRS-0.4.89-validation-diagnostics
+          path: |
+            x-ray-report-studio/test-output/full-cycle/
+            x-ray-report-studio/test-output/template-publishing/
+            x-ray-report-studio/test-output/paste-fields/
+            x-ray-report-studio/test-output/template-admin/
+            x-ray-report-studio/test-output/editable-highlights/
+            x-ray-report-studio/test-output/release-089/*.json
+            x-ray-report-studio/test-output/recovery-088/
+            x-ray-report-studio/test-output/ui-preferences/
+          if-no-files-found: ignore

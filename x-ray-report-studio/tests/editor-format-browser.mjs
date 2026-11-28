@@ -1,3 +1,4 @@
+import {installToolbarDriver} from './helpers/toolbar-driver.mjs';
 import { chooseExport, capturePrintLayout, renderCapturedPdf, removePrintCapture } from './print-export-helpers.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
@@ -32,7 +33,7 @@ let browser;
 try {
   browser = await chromium.launch({headless: true, args: ['--no-sandbox'],
     ...(process.env.CHROMIUM_PATH ? {executablePath: process.env.CHROMIUM_PATH} : {})});
-  const page = await browser.newPage({viewport: {width: 1500, height: 1000}, acceptDownloads: true});
+  const page = await browser.newPage({viewport: {width: 1500, height: 1000}, acceptDownloads: true});installToolbarDriver(page);
   await page.addInitScript(({doc, key}) => {
     if (sessionStorage.getItem('format-test-loaded')) return;
     sessionStorage.setItem('format-test-loaded', 'true');

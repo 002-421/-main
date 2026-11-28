@@ -1,3 +1,4 @@
+import {installToolbarDriver} from './helpers/toolbar-driver.mjs';
 import {chooseTheme} from './helpers/owner-runtime.mjs';
 import { chooseExport, assertNoPrintPreview } from './print-export-helpers.mjs';
 import assert from 'node:assert/strict';
