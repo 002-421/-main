@@ -1,3 +1,4 @@
+import {installToolbarDriver} from './helpers/toolbar-driver.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -11,7 +12,7 @@ let app,page;
 const rendererErrorNames=[];
 let diagnosticStage='startup';
 let expectedView=null;
-async function launch(){app=await _electron.launch(options);page=await app.firstWindow();page.on('pageerror',error=>rendererErrorNames.push(error.name||'RendererError'));await page.locator('.report-content').waitFor();return page;}
+async function launch(){app=await _electron.launch(options);page=await app.firstWindow();installToolbarDriver(page);page.on('pageerror',error=>rendererErrorNames.push(error.name||'RendererError'));await page.locator('.report-content').waitFor();return page;}
 async function save(page){await page.waitForFunction(()=>document.querySelector('#save-state')?.textContent?.includes('Сохранено'));}
 async function placeCaretInParagraph(page,paragraphIndex,offset=14){
  const paragraph=page.locator('.report-content p').nth(paragraphIndex);
