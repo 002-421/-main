@@ -4,7 +4,6 @@ import { initializeEditableHighlights } from './template-highlights.ts';
 import { normalizeDateInput } from './date-input.ts';
 import { reportHistoryKey } from './report-history.ts';
 import { Extension, Mark, mergeAttributes, type Editor } from '@tiptap/core';
-import { Mapping } from '@tiptap/pm/transform';
 import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import { Fragment, Slice } from '@tiptap/pm/model';
@@ -275,8 +274,6 @@ export const InlineFieldEditing = Extension.create({
         // History already includes every normalization step. Reapplying field
         // cleanup during replay can drop a highlight that Undo just restored.
         if (transactions.some(t => ['undo', 'redo'].includes(t.getMeta(reportHistoryKey)?.type))) return null;
-        const mapping = new Mapping();
-        for (const transaction of transactions) mapping.appendMapping(transaction.mapping);
         const replacesWholeDocument = transactions.some(transaction => transaction.steps.some(step =>
           'from' in step && 'to' in step && step.from === 0 && step.to === oldState.doc.content.size));
         let tr: Transaction | undefined;
@@ -303,7 +300,8 @@ export const InlineFieldEditing = Extension.create({
           const group=sizes.get(mark.attrs.id)??{text:'',nodes:[]};
           group.text+=node.text;group.nodes.push({pos,size:node.nodeSize,mark});sizes.set(mark.attrs.id,group);
         });
-        if (!replacesWholeDocument) for (const group of sizes.values()) if(group.text!==group.nodes[0].mark.attrs.original) {
+        const oldSizes=new Map<string,string>();oldState.doc.descendants(n=>{if(n.isText)for(const m of n.marks)if(m.type.name==='templateSize')oldSizes.set(m.attrs.id,(oldSizes.get(m.attrs.id)??'')+n.text);});
+        if (!replacesWholeDocument) for (const [id,group] of sizes) if(oldSizes.has(id)&&oldSizes.get(id)!==group.text) {
           tr??=state.tr;
           for(const n of group.nodes) tr.removeMark(n.pos,n.pos+n.size,n.mark).addMark(n.pos,n.pos+n.size,n.mark.type.create({...n.mark.attrs,filled:true}));
         }

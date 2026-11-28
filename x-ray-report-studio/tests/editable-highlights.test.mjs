@@ -129,3 +129,13 @@ test('rich copied pending prompts keep new IDs and clear even when pasted as inl
  assert.equal(countParagraphMarks(pasted.state),0);
  assert.equal(sizes(pasted.state).filter(s=>!s.filled).length,3);
 });
+
+test('loaded pending fields with old hints stay pending on unrelated text or formatting; only their own edits complete them',()=>{
+ const v=viewFor({type:'doc',content:[paragraph('0,00',[{type:'templateSize',attrs:{id:'measurement.loaded',original:'0,0',filled:false}}]),paragraph('PROMPT',[{type:'templateField',attrs:{id:'local.editable.loaded',hint:'OLD',original:'OLD',filled:false}}]),paragraph('UNRELATED',[])]});
+ insert(v,v.state.doc.content.size-2,'X');assert.equal(sizes(v.state)[0].filled,false);assert.equal(v.state.doc.child(1).firstChild.marks.find(m=>m.type.name==='templateField').attrs.filled,false);
+ v.dispatch(v.state.tr.addMark(1,3,schema.marks.bold.create()));assert.equal(sizes(v.state)[0].filled,false);insert(v,2,'5');assert.equal(sizes(v.state)[0].filled,true);
+});
+test('legacy manually yellow measurement split by bold formatting migrates as one independent numeric field',()=>{
+ const fill={type:'textStyle',attrs:{backgroundColor:'#ffff00'}},doc=prepareInlineDocument({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'0,',marks:[fill]},{type:'text',text:'00',marks:[fill,{type:'bold'}]},{type:'text',text:' см 0,0',marks:[fill]}]}]});
+ const structure=editableHighlightStructure(doc);assert.equal(structure.sizes.length,2);const v=viewFor(doc),range=sizes(v.state)[0];assert.equal(input(v,range.pos+1,'5'),true);assert.equal(v.state.doc.textContent,'5 см 0,0');assert.equal(sizes(v.state).filter(s=>!s.filled).length,1);
+});

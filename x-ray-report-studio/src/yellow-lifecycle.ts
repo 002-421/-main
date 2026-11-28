@@ -6,7 +6,16 @@ const plainMarks=(marks:NonNullable<RichNode['marks']>)=>marks.filter(m=>m.type!
 const hash=(text:string)=>{let n=2166136261;for(const c of text)n=Math.imul(n^c.charCodeAt(0),16777619);return(n>>>0).toString(16);};
 /** Migrate only formerly manual yellow. Never rearm an already typed filled field. */
 export function migrateManualYellow(doc:RichNode):RichNode{
- const walk=(node:RichNode,path:string)=>{if(!node.content)return;node.content=node.content.flatMap((n,i)=>{const marks=n.marks??[];if(n.type!=='text'||marks.some(m=>['templateField','templateSize','templateHighlight'].includes(m.type))||!marks.some(m=>m.type==='textStyle'&&manualFillColor(m.attrs?.backgroundColor)==='#ffff00')){walk(n,path+'.'+i);return[n];}const text=n.text??'',parts=[...text.matchAll(/0,0+|(?:(?!0,0+)[\s\S])+/g)];return parts.map((match,j)=>{const value=match[0],id=path+'.'+i+'.'+j+'.'+hash(value),numeric=/^0,0+$/.test(value);return {...n,text:value,marks:[...plainMarks(marks),{type:numeric?'templateSize':'templateField',attrs:numeric?{id:'measurement.manual.legacy.'+id,original:value,filled:false}:{id:'local.editable.legacy.'+id,hint:value,original:value,filled:false}}]};});});};walk(doc,'yellow');return doc;
+ const eligible=(n:RichNode)=>n.type==='text'&&!n.marks?.some(m=>['templateField','templateSize','templateHighlight'].includes(m.type))&&n.marks?.some(m=>m.type==='textStyle'&&manualFillColor(m.attrs?.backgroundColor)==='#ffff00');
+ const walk=(node:RichNode,path:string)=>{if(!node.content)return;const result:RichNode[]=[];
+  for(let i=0;i<node.content.length;){const n=node.content[i];if(!eligible(n)){walk(n,path+'.'+i);result.push(n);i++;continue;}
+   const start=i,run:RichNode[]=[];while(i<node.content.length&&eligible(node.content[i]))run.push(node.content[i++]);const text=run.map(n=>n.text??'').join('');
+   let offset=0;const spans=run.map(n=>{const from=offset;offset+=(n.text??'').length;return {node:n,from,to:offset};});
+   for(const [j,match]of [...text.matchAll(/0,0+|(?:(?!0,0+)[\s\S])+/g)].entries()){const value=match[0],from=match.index!,to=from+value.length,id=path+'.'+start+'.'+j+'.'+hash(value),numeric=/^0,0+$/.test(value);
+    for(const span of spans){const a=Math.max(from,span.from),b=Math.min(to,span.to);if(a>=b)continue;result.push({...span.node,text:text.slice(a,b),marks:[...plainMarks(span.node.marks??[]),{type:numeric?'templateSize':'templateField',attrs:numeric?{id:'measurement.manual.legacy.'+id,original:value,filled:false}:{id:'local.editable.legacy.'+id,hint:value,original:value,filled:false}}]});}
+   }
+  }node.content=result;
+ };walk(doc,'yellow');return doc;
 }
 export function markSelectionYellow(editor:Editor){
  try{return createEditableField(editor);}catch{/* Multi-paragraph/mixed native selections are split into independent typed ranges. */}
