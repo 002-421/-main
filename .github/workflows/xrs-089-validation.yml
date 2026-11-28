@@ -42,14 +42,12 @@ jobs:
         run: npm run test:spine-review-v8
       - name: Undo, Redo and persisted views
         run: npm run test:history-browser
+      - name: Install pinned Chromium for browser acceptance
+        run: node node_modules/playwright-core/cli.js install chromium
       - name: Browser formatting and real DOCX/PDF export
-        run: |
-          node node_modules/playwright-core/cli.js install chromium
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests/editor-format-browser.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests/editable-highlight-export-browser.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        run: node tests/editor-format-browser.mjs
+      - name: All eight Spine templates with actual browser DOCX and PDF export
+        run: node tests/editable-highlight-export-browser.mjs
       - name: Offline AI Review regression in Electron
         run: node tests/ai-067-electron.mjs
       - name: Synthetic OAuth responses with real Windows safeStorage on two desktop profiles

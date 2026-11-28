@@ -45,5 +45,5 @@ try{
   assert.deepEqual(await page.evaluate(()=>document.querySelector('.report-content').editor.getJSON()),snapshot,`${id}: exports do not mutate protocol state`);
   console.log(`PASS ${id}: DOCX state/IDs, footer, real Chromium PDF (${pdf.length} bytes), unchanged editor`);
  }
-}catch(error){await page.screenshot({path:'test-output/editable-highlights/export-failure.png'}).catch(()=>{});throw error;}
+}catch(error){const line=String(error.stack??'').match(/editable-highlight-export-browser\.mjs:(\d+):(\d+)/);console.error('::error title=XRS browser export::'+JSON.stringify({name:error.name,line:line?line[1]+':'+line[2]:'unknown',message:String(error.message).split('\n')[0].slice(0,180)}));await page.screenshot({path:'test-output/editable-highlights/export-failure.png'}).catch(()=>{});throw error;}
 finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

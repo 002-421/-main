@@ -299,6 +299,8 @@ try {
   assert.match(formattedPdf.toString('latin1'), /\/Type\s*\/Page\b/);
 
   console.log('PASS: four list markers and removal, four alignments, all line thicknesses, fill across themes, Undo/Redo, reload, real DOCX and Chromium PDF.');
+} catch(error) {
+  const line=String(error.stack??'').match(/editor-format-browser\.mjs:(\d+):(\d+)/);console.error('::error title=XRS browser formatting::'+JSON.stringify({name:error.name,line:line?line[1]+':'+line[2]:'unknown',message:String(error.message).split('\n')[0].slice(0,180)}));throw error;
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));
