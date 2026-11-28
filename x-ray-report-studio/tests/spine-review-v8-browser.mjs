@@ -86,14 +86,15 @@ try{
     const next=old+'.clipboard';copy.attrs.editableHighlight.id=next;
     for(const n of copy.content)for(const m of n.marks??[])if(['templateHighlight','templateSize'].includes(m.type))m.attrs.id=m.attrs.id.replace(old,next);
     e.commands.insertContentAt(e.state.doc.content.size,copy);
-    const html=[...e.view.dom.querySelectorAll('[data-template-highlight]')].find(el=>el.dataset.editableId===next).closest('p').outerHTML;
+    const element=[...e.view.dom.querySelectorAll('[data-template-highlight]')].find(el=>el.dataset.editableId===next).closest('p'),html=element.outerHTML,text=element.textContent;
     e.commands.insertContentAt(e.state.doc.content.size,{type:'paragraph'});
-    e.chain().focus().setTextSelection(e.state.doc.content.size-1).run();return html;
+    e.commands.setTextSelection(e.state.doc.content.size-1);e.view.focus();return {html,text};
   },synthetic);
   const existingBeforePaste=await state();
-  await app.evaluate(({clipboard,ClipboardItem},html)=>clipboard.write([new ClipboardItem({'text/html':html,'text/plain':'Синтетический размер 0,0 см, 0,00 см и 0,0 см.'})]),copiedHtml);
+  await cursor(await page.evaluate(()=>document.querySelector('.report-content').editor.state.doc.content.size-1));
+  await app.evaluate(({clipboard,ClipboardItem},{html,text})=>clipboard.write([new ClipboardItem({'text/html':html,'text/plain':text})]),copiedHtml);
   await page.keyboard.press('Control+v');
-  await page.waitForFunction(()=>document.querySelector('.report-content').editor.state.doc.lastChild?.textContent==='Синтетический размер 0,0 см, 0,00 см и 0,0 см.');
+  await page.waitForFunction(text=>document.querySelector('.report-content').editor.state.doc.lastChild?.textContent===text,copiedHtml.text);
   const copied=await page.evaluate(()=>{
     const e=document.querySelector('.report-content').editor;let result;
     e.state.doc.descendants((node,pos)=>{
