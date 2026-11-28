@@ -139,3 +139,8 @@ test('legacy manually yellow measurement split by bold formatting migrates as on
  const fill={type:'textStyle',attrs:{backgroundColor:'#ffff00'}},doc=prepareInlineDocument({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'0,',marks:[fill]},{type:'text',text:'00',marks:[fill,{type:'bold'}]},{type:'text',text:' см 0,0',marks:[fill]}]}]});
  const structure=editableHighlightStructure(doc);assert.equal(structure.sizes.length,2);const v=viewFor(doc),range=sizes(v.state)[0];assert.equal(input(v,range.pos+1,'5'),true);assert.equal(v.state.doc.textContent,'5 см 0,0');assert.equal(sizes(v.state).filter(s=>!s.filled).length,1);
 });
+
+test('long legacy manual yellow preserves Unicode and fits the existing field hint contract',()=>{
+ const text='А'.repeat(1999)+'😀'+'Б'.repeat(3000),raw={type:'doc',content:[paragraph(text,[{type:'textStyle',attrs:{backgroundColor:'#ffff00'}}])]};
+ const migrated=prepareInlineDocument(raw),checked=validateTemplate(migrated);assert.equal(textOf(checked),text);for(const field of editableHighlightStructure(checked).fields)assert.ok(field.hint.length<=2000);assert.deepEqual(prepareInlineDocument(migrated),migrated);
+});
