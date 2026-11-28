@@ -60,7 +60,7 @@ try {
       }
       throw new Error('Selection extends beyond the paragraph');
     };
-    const anchor=point(ps[first],a),head=point(ps[last],b),editor=ps[0].closest('[contenteditable]').editor;getSelection().setBaseAndExtent(...anchor,...head);return {from:Math.min(editor.view.posAtDOM(...anchor),editor.view.posAtDOM(...head)),to:Math.max(editor.view.posAtDOM(...anchor),editor.view.posAtDOM(...head))};
+    const anchor=point(ps[first],a),head=point(ps[last],b),editor=ps[0].closest('[contenteditable]').editor;getSelection().setBaseAndExtent(...anchor,...head);const from=Math.min(editor.view.posAtDOM(...anchor),editor.view.posAtDOM(...head)),to=Math.max(editor.view.posAtDOM(...anchor),editor.view.posAtDOM(...head));editor.commands.setTextSelection({from,to});editor.view.focus();return {from,to};
   }, {first, last, a, b});await page.waitForFunction(({from,to})=>{const selection=document.querySelector('#editor .report-content').editor.state.selection;return selection.from===from&&selection.to===to;},expected);};
   await select(2);
   await page.waitForFunction(key => JSON.parse(localStorage.getItem(key)).reports[0].doc.content[2].attrs.templateOriginal, key);
