@@ -18,7 +18,7 @@ try{
  const executablePath=path.join(runtime,process.platform==='win32'?'X-ray Report Studio.exe':'X-ray Report Studio');
  await rename(path.join(runtime,process.platform==='win32'?'electron.exe':'electron'),executablePath);
  app=await _electron.launch({executablePath,args:[`--user-data-dir=${path.join(temp,'Profile')}`,'--no-sandbox',...(process.platform==='linux'?['--ozone-platform=headless','--disable-gpu']:[])],cwd:runtime,env:{...process.env,MRI_REPORT_STUDIO_DICTIONARY_DIR:path.join(temp,'Dictionary')}});
- const page=await app.firstWindow(),errors=[],requests=[];page.on('request',r=>{if(/^https?:/i.test(r.url()))requests.push(new URL(r.url()).origin);});page.on('pageerror',e=>errors.push(e.message));await page.locator('.report-content').waitFor();
+ const page=await app.firstWindow(),errors=[],requests=[];installToolbarDriver(page);page.on('request',r=>{if(/^https?:/i.test(r.url()))requests.push(new URL(r.url()).origin);});page.on('pageerror',e=>errors.push(e.message));await page.locator('.report-content').waitFor();
  assert.equal(await app.evaluate(({app})=>app.isPackaged),true,'the scenario launches a packaged Electron app');
  assert.equal(await app.evaluate(({app})=>app.getVersion()),JSON.parse(await readFile('package.json','utf8')).version);
  await app.evaluate(({clipboard})=>clipboard.clear());

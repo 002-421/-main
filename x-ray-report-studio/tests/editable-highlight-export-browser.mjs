@@ -14,7 +14,7 @@ const reports=ids.map(id=>({id:`test-${id}`,templateId:id,doc:resetInlineTemplat
 const html=await readFile('dist/index.html'),server=createServer((_req,res)=>{res.setHeader('Content-Type','text/html; charset=utf-8');res.end(html);});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const browser=await chromium.launch({headless:true,args:['--no-sandbox'],...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{})});
-const page=await browser.newPage({viewport:{width:1500,height:1000},acceptDownloads:true});
+const page=await browser.newPage({viewport:{width:1500,height:1000},acceptDownloads:true});installToolbarDriver(page);
 try{
  await page.addInitScript(reports=>{
   localStorage.setItem('mri-report-studio.workspace.v1',JSON.stringify({activeId:reports[0].id,reports}));

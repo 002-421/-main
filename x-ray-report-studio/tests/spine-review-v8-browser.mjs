@@ -22,9 +22,10 @@ const state=()=>page.evaluate(()=>{
  });return {sizes,paragraphs};
 });
 const cursor=async pos=>{
+ await page.bringToFront();await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0]?.focus());
  await page.locator('.report-content').focus();
  await page.evaluate(pos=>{const e=document.querySelector('.report-content').editor;e.commands.setTextSelection(pos);e.view.focus();},pos);
- await page.waitForFunction(pos=>{const e=document.querySelector('.report-content').editor;return e.view.hasFocus()&&e.state.selection.from===pos;},pos);
+ try{await page.waitForFunction(pos=>{const e=document.querySelector('.report-content').editor;return e.view.hasFocus()&&e.state.selection.from===pos;},pos);}catch(error){const state=await page.evaluate(()=>{const e=document.querySelector('.report-content').editor;return {selection:e.state.selection.from,focused:e.view.hasFocus(),activeTag:document.activeElement?.tagName};});console.error('::error title=Spine cursor::'+JSON.stringify({pos,...state}));throw error;}
 };
 try{
  page=await app.firstWindow();installToolbarDriver(page);await page.locator('.report-content').waitFor();
