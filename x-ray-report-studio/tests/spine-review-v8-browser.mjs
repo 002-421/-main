@@ -66,6 +66,7 @@ try{
   await cursor(last.pos+1);
   await app.evaluate(({clipboard})=>clipboard.writeText('9,25'));
   await page.keyboard.press('Control+v');
+  await page.waitForFunction(id=>{let done=false;document.querySelector('.report-content').editor.state.doc.descendants(node=>{if(node.isText&&node.marks.some(mark=>mark.type.name==='templateSize'&&mark.attrs.id===id)&&node.text==='9,25')done=true;});return done;},last.id);
   current=await state();assert.equal(current.sizes.find(s=>s.id===last.id).text,'9,25');
   assert.equal(current.sizes.find(s=>s.id===last.id).filled,true);
   // In 0.4.88 the yellow toggle uses the same service lifecycle: explicit
@@ -92,6 +93,7 @@ try{
   const existingBeforePaste=await state();
   await app.evaluate(({clipboard,ClipboardItem},html)=>clipboard.write([new ClipboardItem({'text/html':html,'text/plain':'Синтетический размер 0,0 см, 0,00 см и 0,0 см.'})]),copiedHtml);
   await page.keyboard.press('Control+v');
+  await page.waitForFunction(()=>document.querySelector('.report-content').editor.state.doc.lastChild?.textContent==='Синтетический размер 0,0 см, 0,00 см и 0,0 см.');
   const copied=await page.evaluate(()=>{
     const e=document.querySelector('.report-content').editor;let result;
     e.state.doc.descendants((node,pos)=>{
