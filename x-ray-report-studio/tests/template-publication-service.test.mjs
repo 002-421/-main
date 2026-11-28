@@ -1,3 +1,4 @@
+import {assertHashedPin} from './helpers/assert-pin-store.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,rm,readFile} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import {spawnSync} from 'node:child_process';
 import {TemplateAdmin} from '../electron/template-admin.cjs';import {createTemplatePublicationService} from '../electron/template-publication-service.cjs';import {verifyComponent} from '../electron/template-publisher-bridge.cjs';import {fixture} from './helpers/template-fixture.mjs';
 test('one PIN check per publication, approved snapshots only, no Draft or report data, durable ambiguous retry',async t=>{
@@ -5,7 +6,7 @@ test('one PIN check per publication, approved snapshots only, no Draft or report
  const options={directory:path.join(directory,'operations'),admin,bridge,source:{format:'https-sha256-v1',enabled:true,publisher:{enabled:true}}},service=createTemplatePublicationService(options);
  await assert.rejects(()=>service.publish(1,session.token),/PIN_FORMAT/);await assert.rejects(()=>service.publish(1,'9999'),/PIN_INVALID/);assert.equal(publishCount,0);
  await assert.rejects(()=>service.publish(1,'2468'),/GITHUB_UNAVAILABLE/);assert.deepEqual(approved,[],'a medically checked Draft still is not an approved standard');
- const restarted=createTemplatePublicationService(options);assert.equal((await restarted.publish(1,'2468')).status,'PUBLISHED');assert.equal(publishCount,2);await admin.approve(session.token,1,draft.id);assert.equal((await admin.approved()).length,1);assert.ok(!(await readFile(path.join(directory,'admin/pin.json'),'utf8')).includes('2468'));
+ const restarted=createTemplatePublicationService(options);assert.equal((await restarted.publish(1,'2468')).status,'PUBLISHED');assert.equal(publishCount,2);await admin.approve(session.token,1,draft.id);assert.equal((await admin.approved()).length,1);assertHashedPin(await readFile(path.join(directory,'admin/pin.json'),'utf8'),'2468');
 });
 test('four-to-six-digit PIN policy preserves legacy editing and supports explicit migration',async t=>{
  const directory=await mkdtemp(path.join(os.tmpdir(),'xrs-simple-pin-'));t.after(()=>rm(directory,{recursive:true,force:true}));const admin=new TemplateAdmin({directory});for(const pin of ['123','1234567','abcdef'])await assert.rejects(()=>admin.setup(pin,pin),/PIN_FORMAT/);await admin.setup('123456','123456');const session=await admin.unlock('123456',1);await admin.changePin(session.token,1,'2468','2468');await assert.rejects(()=>admin.authorizePublication('123456'),/PIN_INVALID/);assert.equal(await admin.authorizePublication('2468'),true);assert.equal(await admin.authorizePublication('2468'),true,'a new independent invocation verifies PIN again');
